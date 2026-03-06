@@ -1,12 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import { schedulerTick } from "./services/scheduler";
 
-// We intentionally avoid importing your route modules statically,
-// because earlier you hit errors like:
-// - "registerAdminRoutes is not a function"
-// - plugin undefined
-// - file may/may not exist yet (dispatch/customers, etc)
-//
+// We intentionally avoid importing your route modules statically.
 // Instead, we dynamically import and register safely.
 
 type FastifyInstance = ReturnType<typeof Fastify>;
@@ -23,18 +19,25 @@ function envStr(name: string, fallback: string) {
   return raw && raw.trim().length ? raw.trim() : fallback;
 }
 
+function envBool(name: string, fallback: boolean) {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const v = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "y", "on"].includes(v)) return true;
+  if (["0", "false", "no", "n", "off"].includes(v)) return false;
+  return fallback;
+}
+
 async function registerRouteModule(app: any, modulePath: string, preferredExport?: string) {
   try {
     const mod: any = await import(modulePath);
 
-    // If a preferred named export is specified, try it first
     if (preferredExport && typeof mod?.[preferredExport] === "function") {
       await mod[preferredExport](app);
       app.log.info({ modulePath, export: preferredExport }, "Registered routes");
       return true;
     }
 
-    // Try common patterns
     const candidates = [
       mod?.registerAdminRoutes,
       mod?.registerEventsRoutes,
@@ -59,36 +62,69 @@ async function registerRouteModule(app: any, modulePath: string, preferredExport
   }
 }
 
+function startAutoScheduler(app: any) {
+  const enabled = envBool("SCHEDULER_ENABLED", true);
+  const intervalMs = envInt("SCHEDULER_INTERVAL_MS", 10_000);
+  const limit = envInt("SCHEDULER_LIMIT", 25);
+
+  if (!enabled) {
+    app.log.warn(
+      { enabled, intervalMs, limit },
+      "Auto-scheduler disabled (set SCHEDULER_ENABLED=true to enable)"
+    );
+    return { stop: () => {} };
+  }
+
+  let running = false;
+  let timer: NodeJS.Timeout | null = null;
+
+  const runOnce = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await schedulerTick(limit);
+    } catch (e: any) {
+      app.log.error({ err: String(e?.message || e) }, "Auto-scheduler tick failed");
+    } finally {
+      running = false;
+    }
+  };
+
+  timer = setInterval(() => {
+    runOnce().catch(() => {});
+  }, intervalMs);
+
+  // Kick once at startup (so “immediate” actions run right away)
+  runOnce().catch(() => {});
+
+  app.log.info({ intervalMs, limit }, "Auto-scheduler started");
+
+  return {
+    stop: () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    },
+  };
+}
+
 async function main() {
   const app = Fastify({
     logger: true,
   });
 
-  // CORS for local admin UI or future frontend
   await app.register(cors, { origin: true });
 
-  // Health check
   app.get("/health", async () => {
     return { ok: true, name: "contractor-autopilot-backend" };
   });
 
   // ---- ROUTES ----
-  // Admin (bootstrap, seed, timeline, workflows, etc.)
   await registerRouteModule(app, "./routes/admin", "registerAdminRoutes");
-
-  // Events ingestion (/events)
   await registerRouteModule(app, "./routes/events", "registerEventsRoutes");
-
-  // Dispatch routes (optional; if file missing, it won’t crash)
   await registerRouteModule(app, "./routes/dispatch", "registerDispatchRoutes");
-
-  // Customers panel routes (optional; if file missing, it won’t crash)
   await registerRouteModule(app, "./routes/customers", "registerCustomerRoutes");
 
-  // Useful route to view what is wired (optional)
   app.get("/admin/routes", async () => {
-    // Fastify exposes routes through printRoutes()
-    // This is safe and helps debug quickly.
     return { ok: true, routes: app.printRoutes() };
   });
 
@@ -99,10 +135,13 @@ async function main() {
 
   app.log.info(`Server listening at http://${host}:${port}`);
 
-  // Graceful shutdown
+  // START AUTO SCHEDULER (runs in-process)
+  const auto = startAutoScheduler(app);
+
   const shutdown = async (signal: string) => {
     try {
       app.log.info({ signal }, "Shutting down...");
+      auto.stop();
       await app.close();
       process.exit(0);
     } catch (e) {
@@ -116,8 +155,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // If startup fails, log and exit non-zero so you notice immediately
-  // (tsx watch will restart after you fix the cause)
   console.error(err);
   process.exit(1);
 });
