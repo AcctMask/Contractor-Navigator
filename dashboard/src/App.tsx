@@ -29,8 +29,7 @@ type JobDetail = {
   timeline: any[]
 }
 
-const API = "http://localhost:8787"
-const TENANT = "g2g-roofing"
+const API = "https://contractor-autopilot-backend.onrender.com"const TENANT = "g2g-roofing"
 
 const NAV_ITEMS = [
   "Dashboard",
