@@ -1,123 +1,103 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
-
-// We intentionally avoid importing your route modules statically,
-// because earlier you hit errors like:
-// - "registerAdminRoutes is not a function"
-// - plugin undefined
-// - file may/may not exist yet (dispatch/customers, etc)
-//
-// Instead, we dynamically import and register safely.
-
-type FastifyInstance = ReturnType<typeof Fastify>;
+import Fastify from "fastify"
+import cors from "@fastify/cors"
+import formbody from "@fastify/formbody"
 
 function envInt(name: string, fallback: number) {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : fallback
 }
 
 function envStr(name: string, fallback: string) {
-  const raw = process.env[name];
-  return raw && raw.trim().length ? raw.trim() : fallback;
+  const raw = process.env[name]
+  return raw && raw.trim().length ? raw.trim() : fallback
 }
 
 async function registerRouteModule(app: any, modulePath: string, preferredExport?: string) {
   try {
-    const mod: any = await import(modulePath);
+    const mod: any = await import(modulePath)
 
-    // If a preferred named export is specified, try it first
     if (preferredExport && typeof mod?.[preferredExport] === "function") {
-      await mod[preferredExport](app);
-      app.log.info({ modulePath, export: preferredExport }, "Registered routes");
-      return true;
+      await mod[preferredExport](app)
+      app.log.info({ modulePath, export: preferredExport }, "Registered routes")
+      return true
     }
 
-    // Try common patterns
     const candidates = [
       mod?.registerAdminRoutes,
       mod?.registerEventsRoutes,
+      mod?.registerLeadRoutes,
+      mod?.registerAiRoutes,
+      mod?.registerTwilioWebhook,
       mod?.registerDispatchRoutes,
       mod?.registerCustomerRoutes,
       mod?.registerCustomersRoutes,
-      mod?.registerLeadRoutes,
       mod?.default,
-    ];
+    ]
 
-    const fn = candidates.find((x) => typeof x === "function");
+    const fn = candidates.find((x: any) => typeof x === "function")
     if (!fn) {
-      app.log.warn({ modulePath, keys: Object.keys(mod || {}) }, "No valid route export found");
-      return false;
+      app.log.warn({ modulePath, keys: Object.keys(mod || {}) }, "No valid route export found")
+      return false
     }
 
-    await fn(app);
-    app.log.info({ modulePath, export: fn?.name || "anonymous/default" }, "Registered routes");
-    return true;
+    await fn(app)
+    app.log.info({ modulePath, export: fn?.name || "anonymous/default" }, "Registered routes")
+    return true
   } catch (err: any) {
-    app.log.warn({ modulePath, err: err?.message || String(err) }, "Route module not registered");
-    return false;
+    app.log.warn({ modulePath, err: err?.message || String(err) }, "Route module not registered")
+    return false
   }
 }
 
 async function main() {
   const app = Fastify({
     logger: true,
-  });
+  })
 
-  // CORS for local admin UI or future frontend
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: true })
+  await app.register(formbody)
 
-  // Health check
   app.get("/health", async () => {
-    return { ok: true, name: "contractor-autopilot-backend" };
-  });
+    return { ok: true, name: "contractor-autopilot-backend" }
+  })
 
-  // ---- ROUTES ----
-  // Admin (bootstrap, seed, timeline, workflows, etc.)
-  await registerRouteModule(app, "./routes/admin", "registerAdminRoutes");
+  await registerRouteModule(app, "./routes/admin", "registerAdminRoutes")
+  await registerRouteModule(app, "./routes/events", "registerEventsRoutes")
+  await registerRouteModule(app, "./routes/leads", "registerLeadRoutes")
+  await registerRouteModule(app, "./routes/ai", "registerAiRoutes")
+  await registerRouteModule(app, "./routes/twilioWebhook", "registerTwilioWebhook")
+  await registerRouteModule(app, "./routes/dispatch", "registerDispatchRoutes")
+  await registerRouteModule(app, "./routes/customers", "registerCustomerRoutes")
 
-  // Events ingestion (/events)
-  await registerRouteModule(app, "./routes/events", "registerEventsRoutes");
-
-  // Lead intake from estimator / website
-  await registerRouteModule(app, "./routes/leads", "registerLeadRoutes");
-
-  // Dispatch routes (optional; if file missing, it won’t crash)
-  await registerRouteModule(app, "./routes/dispatch", "registerDispatchRoutes");
-
-  // Customers panel routes (optional; if file missing, it won’t crash)
-  await registerRouteModule(app, "./routes/customers", "registerCustomerRoutes");
-
-  // Useful route to view what is wired (optional)
   app.get("/admin/routes", async () => {
-    return { ok: true, routes: app.printRoutes() };
-  });
+    return { ok: true, routes: app.printRoutes() }
+  })
 
-  const port = envInt("PORT", 8787);
-  const host = envStr("HOST", "0.0.0.0");
+  const port = envInt("PORT", 8787)
+  const host = envStr("HOST", "0.0.0.0")
 
-  await app.listen({ port, host });
+  await app.listen({ port, host })
 
-  app.log.info(`Server listening at http://${host}:${port}`);
+  app.log.info(`Server listening at http://${host}:${port}`)
 
-  // Graceful shutdown
   const shutdown = async (signal: string) => {
     try {
-      app.log.info({ signal }, "Shutting down...");
-      await app.close();
-      process.exit(0);
+      app.log.info({ signal }, "Shutting down...")
+      await app.close()
+      process.exit(0)
     } catch (e) {
-      app.log.error(e, "Shutdown error");
-      process.exit(1);
+      app.log.error(e, "Shutdown error")
+      process.exit(1)
     }
-  };
+  }
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"))
+  process.on("SIGTERM", () => shutdown("SIGTERM"))
 }
 
 main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+  console.error(err)
+  process.exit(1)
+})
