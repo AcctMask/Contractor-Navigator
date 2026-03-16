@@ -1,0 +1,19 @@
+# environment files
+.env
+backend/.env
+dashboard/.env
+
+# node
+node_modules/
+npm-debug.log
+
+# build output
+dist/
+build/
+
+# mac files
+.DS_Store
+
+# logs
+logs
+*.log
