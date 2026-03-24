@@ -1,0 +1,467 @@
+import { Link } from "react-router-dom"
+
+export default function DashboardPage() {
+  return (
+    <div style={pageWrap}>
+      <div style={layout}>
+        <aside style={sidebar}>
+          <div style={brandRow}>
+            <div style={brandBadge}>CP</div>
+            <div>
+              <div style={brandTitle}>Co-Pilot</div>
+              <div style={brandSub}>Contractor operating platform</div>
+            </div>
+          </div>
+
+          <div style={companyCard}>
+            <div style={companyLabel}>Live company</div>
+            <div style={companyName}>Good2Go Roofing</div>
+            <div style={companySub}>White-label ready tenant</div>
+          </div>
+
+          <div style={navSectionLabel}>WORKSPACE</div>
+
+          <div style={navList}>
+            <Link to="/" style={{ ...sideNavItem, ...sideNavItemActive }}>
+              Dashboard
+            </Link>
+            <Link to="/job-admin" style={sideNavItem}>
+              Jobs
+            </Link>
+            <Link to="/job-admin" style={sideNavItem}>
+              Customer Search
+            </Link>
+            <Link to="/document-pipeline" style={sideNavItem}>
+              Documents
+            </Link>
+            <Link to="/users" style={sideNavItem}>
+              Users
+            </Link>
+            <div style={sideNavItemMuted}>Message Center</div>
+            <div style={sideNavItemMuted}>Claims</div>
+            <div style={sideNavItemMuted}>Production</div>
+            <div style={sideNavItemMuted}>Reports</div>
+            <div style={sideNavItemMuted}>Settings</div>
+          </div>
+        </aside>
+
+        <main style={main}>
+          <section style={heroCard}>
+            <div style={heroEyebrow}>Welcome to Co-Pilot</div>
+            <h1 style={heroTitle}>
+              Customer contact, AI follow-up, and information-tracking operations platform.
+            </h1>
+            <p style={heroText}>
+              Built for contractor teams that need customer visibility, workflow control,
+              claims handling, and sales follow-up in one operating system.
+            </p>
+
+            <div style={heroActions}>
+              <Link to="/job-admin" style={primaryAction}>
+                Customer Search
+              </Link>
+              <div style={secondaryAction}>Message Center</div>
+              <div style={secondaryAction}>Send Estimate</div>
+              <Link to="/job-admin" style={primaryActionAlt}>
+                Add Manual Note
+              </Link>
+            </div>
+          </section>
+
+          <section style={statsGrid}>
+            <div style={statCard}>
+              <div style={statNumber}>0</div>
+              <div style={statLabel}>Active Jobs</div>
+              <div style={statSub}>Tracked in CRM</div>
+            </div>
+
+            <div style={statCard}>
+              <div style={statNumber}>0</div>
+              <div style={statLabel}>Bot Paused</div>
+              <div style={statSub}>Human takeover</div>
+            </div>
+
+            <div style={statCard}>
+              <div style={statNumber}>0</div>
+              <div style={statLabel}>Claim Jobs</div>
+              <div style={statSub}>Insurance-related</div>
+            </div>
+
+            <div style={statCard}>
+              <div style={statNumber}>0</div>
+              <div style={statLabel}>Google Leads</div>
+              <div style={statSub}>Current top source</div>
+            </div>
+          </section>
+
+          <section style={panelGrid}>
+            <div style={panelCardLarge}>
+              <div style={panelHeaderRow}>
+                <div>
+                  <h2 style={panelTitle}>Job Command Center</h2>
+                  <div style={panelSub}>
+                    Search and open jobs, then review the record from the job detail view.
+                  </div>
+                </div>
+
+                <Link to="/job-admin" style={panelSearchButton}>
+                  Open Search
+                </Link>
+              </div>
+
+              <div style={tableShell}>
+                <div style={tableHeader}>
+                  <div>CUSTOMER</div>
+                  <div>STAGE</div>
+                  <div>ZIP</div>
+                  <div>CARRIER</div>
+                  <div>CLAIM</div>
+                  <div>SOURCE</div>
+                  <div>BOT</div>
+                </div>
+
+                <div style={tableEmpty}>No jobs loaded here yet.</div>
+              </div>
+
+              <div style={{ marginTop: 18 }}>
+                <Link to="/job-admin" style={primaryAction}>
+                  Go to Command Center
+                </Link>
+              </div>
+            </div>
+
+            <div style={panelCardSide}>
+              <h2 style={panelTitle}>Selected Job</h2>
+              <div style={panelSub}>Live data from your backend opens from Job Admin.</div>
+
+              <div style={selectedEmpty}>
+                Select a job from Command Center to view notes, contacts, claim data, history, and stage controls.
+              </div>
+
+              <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+                <Link to="/job-admin" style={primaryAction}>
+                  Open Jobs
+                </Link>
+                <Link to="/users" style={secondaryActionLink}>
+                  Manage Users
+                </Link>
+                <Link to="/document-pipeline" style={secondaryActionLink}>
+                  Open Documents
+                </Link>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  )
+}
+
+const pageWrap: React.CSSProperties = {
+  maxWidth: "1200px",
+  margin: "0 auto",
+}
+
+const layout: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "230px 1fr",
+  gap: "22px",
+  alignItems: "start",
+}
+
+const sidebar: React.CSSProperties = {
+  background: "rgba(8, 22, 59, 0.7)",
+  border: "1px solid rgba(81, 133, 255, 0.18)",
+  borderRadius: "22px",
+  padding: "18px",
+  position: "sticky",
+  top: "16px",
+}
+
+const brandRow: React.CSSProperties = {
+  display: "flex",
+  gap: "12px",
+  alignItems: "center",
+  marginBottom: "18px",
+}
+
+const brandBadge: React.CSSProperties = {
+  width: "42px",
+  height: "42px",
+  borderRadius: "14px",
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontWeight: 800,
+  color: "#fff",
+}
+
+const brandTitle: React.CSSProperties = {
+  fontSize: "18px",
+  fontWeight: 800,
+}
+
+const brandSub: React.CSSProperties = {
+  fontSize: "12px",
+  opacity: 0.75,
+}
+
+const companyCard: React.CSSProperties = {
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "18px",
+  padding: "14px",
+  marginBottom: "18px",
+}
+
+const companyLabel: React.CSSProperties = {
+  fontSize: "12px",
+  opacity: 0.7,
+  marginBottom: "6px",
+}
+
+const companyName: React.CSSProperties = {
+  fontSize: "28px",
+  fontWeight: 800,
+  lineHeight: 1.05,
+}
+
+const companySub: React.CSSProperties = {
+  fontSize: "12px",
+  opacity: 0.72,
+  marginTop: "6px",
+}
+
+const navSectionLabel: React.CSSProperties = {
+  fontSize: "12px",
+  opacity: 0.65,
+  letterSpacing: "0.08em",
+  marginBottom: "10px",
+}
+
+const navList: React.CSSProperties = {
+  display: "grid",
+  gap: "8px",
+}
+
+const sideNavItem: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#e8eefc",
+  padding: "12px 14px",
+  borderRadius: "14px",
+  display: "block",
+  background: "transparent",
+}
+
+const sideNavItemActive: React.CSSProperties = {
+  background: "rgba(74,168,255,0.16)",
+  border: "1px solid rgba(74,168,255,0.24)",
+}
+
+const sideNavItemMuted: React.CSSProperties = {
+  color: "#e8eefc",
+  padding: "12px 14px",
+  borderRadius: "14px",
+  opacity: 0.75,
+}
+
+const main: React.CSSProperties = {
+  display: "grid",
+  gap: "22px",
+}
+
+const heroCard: React.CSSProperties = {
+  background: "linear-gradient(135deg, rgba(13,33,85,0.98) 0%, rgba(17,44,108,0.92) 100%)",
+  border: "1px solid rgba(81, 133, 255, 0.25)",
+  borderRadius: "26px",
+  padding: "24px",
+  boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
+}
+
+const heroEyebrow: React.CSSProperties = {
+  display: "inline-block",
+  fontSize: "12px",
+  padding: "8px 12px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.08)",
+  marginBottom: "12px",
+}
+
+const heroTitle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "36px",
+  lineHeight: 1.08,
+  maxWidth: "900px",
+}
+
+const heroText: React.CSSProperties = {
+  fontSize: "18px",
+  opacity: 0.86,
+  maxWidth: "860px",
+  marginTop: "14px",
+}
+
+const heroActions: React.CSSProperties = {
+  display: "flex",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginTop: "22px",
+}
+
+const primaryAction: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#fff",
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  fontWeight: 700,
+  display: "inline-block",
+}
+
+const primaryActionAlt: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#fff",
+  background: "linear-gradient(90deg, #2c6af5 0%, #5aaeff 100%)",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  fontWeight: 700,
+  display: "inline-block",
+}
+
+const secondaryAction: React.CSSProperties = {
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  fontWeight: 700,
+}
+
+const secondaryActionLink: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  fontWeight: 700,
+  display: "inline-block",
+}
+
+const statsGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, 1fr)",
+  gap: "18px",
+}
+
+const statCard: React.CSSProperties = {
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(81, 133, 255, 0.18)",
+  borderRadius: "22px",
+  padding: "22px",
+}
+
+const statNumber: React.CSSProperties = {
+  fontSize: "44px",
+  fontWeight: 800,
+  lineHeight: 1,
+  marginBottom: "10px",
+}
+
+const statLabel: React.CSSProperties = {
+  fontSize: "18px",
+  fontWeight: 700,
+}
+
+const statSub: React.CSSProperties = {
+  fontSize: "13px",
+  opacity: 0.72,
+  marginTop: "6px",
+}
+
+const panelGrid: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 0.9fr",
+  gap: "18px",
+}
+
+const panelCardLarge: React.CSSProperties = {
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(81, 133, 255, 0.18)",
+  borderRadius: "24px",
+  padding: "22px",
+}
+
+const panelCardSide: React.CSSProperties = {
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(81, 133, 255, 0.18)",
+  borderRadius: "24px",
+  padding: "22px",
+}
+
+const panelHeaderRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "16px",
+  alignItems: "center",
+  flexWrap: "wrap",
+}
+
+const panelTitle: React.CSSProperties = {
+  margin: 0,
+  fontSize: "22px",
+}
+
+const panelSub: React.CSSProperties = {
+  fontSize: "14px",
+  opacity: 0.75,
+  marginTop: "6px",
+}
+
+const panelSearchButton: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "12px 16px",
+  borderRadius: "14px",
+  fontWeight: 700,
+  display: "inline-block",
+}
+
+const tableShell: React.CSSProperties = {
+  marginTop: "18px",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "18px",
+  overflow: "hidden",
+  background: "rgba(255,255,255,0.03)",
+}
+
+const tableHeader: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
+  gap: "10px",
+  padding: "14px 16px",
+  fontSize: "12px",
+  fontWeight: 800,
+  letterSpacing: "0.04em",
+  opacity: 0.7,
+  borderBottom: "1px solid rgba(255,255,255,0.08)",
+}
+
+const tableEmpty: React.CSSProperties = {
+  padding: "28px 16px",
+  textAlign: "center",
+  opacity: 0.72,
+}
+
+const selectedEmpty: React.CSSProperties = {
+  marginTop: "18px",
+  lineHeight: 1.55,
+  opacity: 0.82,
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "16px",
+  padding: "16px",
+}

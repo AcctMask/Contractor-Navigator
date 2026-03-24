@@ -1,118 +1,129 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-
-const API = "http://localhost:8787"
-const TENANT = "g2g-roofing"
+import { login } from "../lib/auth"
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [status, setStatus] = useState("")
+  const [error, setError] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
-  async function handleLogin(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setStatus("Signing in...")
+    setSubmitting(true)
+    setError("")
+    setStatus("Logging in...")
 
-    const res = await fetch(`${API}/auth/${TENANT}/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    })
-
-    const data = await res.json()
-
-    if (!data.ok) {
-      setStatus(data.error || "Login failed")
-      return
+    try {
+      await login(email.trim(), password)
+      setStatus("Login successful")
+      navigate("/job-admin")
+    } catch (err: any) {
+      setError(err?.message || "Login failed")
+      setStatus("Login failed")
+    } finally {
+      setSubmitting(false)
     }
-
-    localStorage.setItem("copilot_token", data.token)
-    localStorage.setItem("copilot_user", JSON.stringify(data.user))
-    setStatus("Signed in")
-    navigate("/")
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background:
-          "radial-gradient(circle at top right, rgba(37,91,189,0.45), transparent 28%), linear-gradient(180deg, #031126 0%, #04142b 100%)",
-        color: "#eef4ff",
-        fontFamily: "Inter, system-ui, sans-serif",
-        padding: 24,
-      }}
-    >
-      <form
-        onSubmit={handleLogin}
-        style={{
-          width: 460,
-          maxWidth: "100%",
-          background: "linear-gradient(180deg, rgba(14,32,66,0.95), rgba(7,22,48,0.95))",
-          border: "1px solid rgba(110,150,255,0.12)",
-          borderRadius: 24,
-          padding: 28,
-        }}
-      >
-        <div style={{ fontSize: 30, fontWeight: 900, marginBottom: 8 }}>Co-Pilot Login</div>
-        <div style={{ color: "#9db2d9", marginBottom: 22 }}>Sign in to Good2Go Roofing</div>
-
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: 800 }}>Email</label>
-          <input
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
-              color: "#eef4ff",
-              boxSizing: "border-box",
-            }}
-          />
+    <div style={pageStyle}>
+      <div style={cardStyle}>
+        <div style={{ fontSize: "15px", opacity: 0.8, marginBottom: "8px" }}>
+          Contractor Autopilot
         </div>
+        <h1 style={{ marginTop: 0, fontSize: "42px", lineHeight: 1.1 }}>Login</h1>
+        <p style={{ marginTop: "12px", fontSize: "18px", opacity: 0.88 }}>
+          Sign in to manage invitations, jobs, and staff controls.
+        </p>
 
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: 800 }}>Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: 12,
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.04)",
-              color: "#eef4ff",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+          <div>
+            <label style={labelStyle}>Email</label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="michelle@g2groofing.com"
+              style={inputStyle}
+            />
+          </div>
 
-        <button
-          type="submit"
-          style={{
-            width: "100%",
-            padding: "14px 18px",
-            borderRadius: 14,
-            border: "1px solid rgba(78,146,255,0.9)",
-            background: "linear-gradient(135deg, #2d6cff, #44b7ff)",
-            color: "#fff",
-            fontWeight: 800,
-            cursor: "pointer",
-          }}
-        >
-          Sign In
-        </button>
+          <div>
+            <label style={labelStyle}>Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              style={inputStyle}
+            />
+          </div>
 
-        <div style={{ marginTop: 16, color: "#b8c9ea", fontWeight: 700 }}>{status}</div>
-      </form>
+          <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+            <button type="submit" disabled={submitting} style={buttonStyle}>
+              {submitting ? "Signing In..." : "Login"}
+            </button>
+            <span style={{ opacity: 0.85 }}>{status}</span>
+          </div>
+
+          {error ? <div style={errorStyle}>{error}</div> : null}
+        </form>
+      </div>
     </div>
   )
+}
+
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background:
+    "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
+  color: "#e8eefc",
+  padding: "28px",
+}
+
+const cardStyle: React.CSSProperties = {
+  maxWidth: "720px",
+  margin: "80px auto 0",
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(81, 133, 255, 0.25)",
+  borderRadius: "24px",
+  padding: "24px",
+}
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  marginBottom: "8px",
+  fontWeight: 700,
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  background: "rgba(255,255,255,0.06)",
+  color: "#e8eefc",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  fontSize: "16px",
+  outline: "none",
+}
+
+const buttonStyle: React.CSSProperties = {
+  color: "#fff",
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+  border: "none",
+  padding: "12px 18px",
+  borderRadius: "14px",
+  cursor: "pointer",
+  fontWeight: 700,
+}
+
+const errorStyle: React.CSSProperties = {
+  background: "rgba(150, 30, 30, 0.22)",
+  border: "1px solid rgba(255, 120, 120, 0.35)",
+  color: "#ffd1d1",
+  borderRadius: "14px",
+  padding: "12px 14px",
 }

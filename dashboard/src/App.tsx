@@ -1,77 +1,75 @@
-import type { CSSProperties } from "react"
-import { Navigate, Route, Routes } from "react-router-dom"
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import UsersPage from "./pages/Users"
+import JobAdminPage from "./pages/JobAdmin"
+import JobDetailPage from "./pages/JobDetail"
+import DashboardPage from "./pages/Dashboard"
+import LoginPage from "./pages/Login"
+import AcceptInvitePage from "./pages/AcceptInvite"
+import DocumentPipelinePage from "./pages/DocumentPipeline"
+import ProtectedRoute from "./components/ProtectedRoute"
+import { clearToken, isLoggedIn } from "./lib/auth"
 
-function HomePage() {
+function HeaderBar() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const authed = isLoggedIn()
+
+  function handleLogout() {
+    clearToken()
+    navigate("/login")
+  }
+
   return (
     <div
       style={{
-        minHeight: "100vh",
-        background:
-          "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
-        color: "#e8eefc",
-        padding: "28px",
+        maxWidth: "1200px",
+        margin: "0 auto 24px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        gap: "12px",
+        flexWrap: "wrap",
       }}
     >
-      <div
-        style={{
-          maxWidth: "1100px",
-          margin: "0 auto",
-          background: "rgba(8, 22, 59, 0.92)",
-          border: "1px solid rgba(81, 133, 255, 0.25)",
-          borderRadius: "24px",
-          padding: "24px",
-        }}
-      >
-        <div style={{ fontSize: "15px", opacity: 0.8, marginBottom: "8px" }}>
-          Co-Pilot
-        </div>
-        <h1 style={{ margin: 0, fontSize: "44px", lineHeight: 1.08 }}>
-          Dashboard
-        </h1>
-        <p style={{ fontSize: "18px", opacity: 0.88 }}>
-          Main dashboard route is alive. Users & Invitations page is wired below.
-        </p>
+      <div style={{ fontSize: "14px", opacity: 0.85 }}>Contractor Autopilot</div>
 
-        <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginTop: "18px" }}>
-          <a href="/users" style={linkStyle}>
-            Open Users
-          </a>
-          <a href="/accept-invite/test" style={linkStyleMuted}>
-            Accept Invite Test Route
-          </a>
-        </div>
-      </div>
-    </div>
-  )
-}
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        {authed ? (
+          <>
+            <Link to="/" style={location.pathname === "/" ? activeLinkStyle : mutedLinkStyle}>
+              Command Center
+            </Link>
 
-function AcceptInvitePlaceholder() {
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background:
-          "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
-        color: "#e8eefc",
-        padding: "28px",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: "720px",
-          margin: "80px auto 0",
-          background: "rgba(8, 22, 59, 0.92)",
-          border: "1px solid rgba(81, 133, 255, 0.25)",
-          borderRadius: "24px",
-          padding: "24px",
-        }}
-      >
-        <h1 style={{ marginTop: 0 }}>Accept Invitation</h1>
-        <p>This route exists. We can wire the full accept-invite UI next.</p>
-        <a href="/" style={linkStyle}>
-          Back to Dashboard
-        </a>
+            <Link
+              to="/job-admin"
+              style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Jobs
+            </Link>
+
+            <Link
+              to="/document-pipeline"
+              style={location.pathname === "/document-pipeline" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Documents
+            </Link>
+
+            <Link
+              to="/users"
+              style={location.pathname === "/users" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Users
+            </Link>
+
+            <button onClick={handleLogout} style={logoutButtonStyle}>
+              Logout
+            </button>
+          </>
+        ) : (
+          <Link to="/login" style={activeLinkStyle}>
+            Login
+          </Link>
+        )}
       </div>
     </div>
   )
@@ -80,24 +78,93 @@ function AcceptInvitePlaceholder() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/users" element={<UsersPage />} />
-      <Route path="/accept-invite/:token" element={<AcceptInvitePlaceholder />} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <DashboardPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <UsersPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/job-admin"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <JobAdminPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/job/:id"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <JobDetailPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/document-pipeline"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <DocumentPipelinePage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
 
-const linkStyle: CSSProperties = {
+const pageStyle: React.CSSProperties = {
+  minHeight: "100vh",
+  background:
+    "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
+  color: "#e8eefc",
+  padding: "28px",
+}
+
+const activeLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
   padding: "10px 16px",
   borderRadius: "14px",
   display: "inline-block",
+  border: "none",
 }
 
-const linkStyleMuted: CSSProperties = {
+const mutedLinkStyle: React.CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "rgba(255,255,255,0.08)",
@@ -105,4 +172,13 @@ const linkStyleMuted: CSSProperties = {
   padding: "10px 16px",
   borderRadius: "14px",
   display: "inline-block",
+}
+
+const logoutButtonStyle: React.CSSProperties = {
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "10px 16px",
+  borderRadius: "14px",
+  cursor: "pointer",
 }

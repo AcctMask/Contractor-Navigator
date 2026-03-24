@@ -39,6 +39,13 @@ function getInvitationKey(invite: InvitationRow, index: number) {
   return String(invite.id ?? invite.invite_token ?? invite.email ?? `invite-${index}`)
 }
 
+function getAppOrigin() {
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin
+  }
+  return "http://localhost:5173"
+}
+
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [invitations, setInvitations] = useState<InvitationRow[]>([])
@@ -49,11 +56,12 @@ export default function UsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState("Loading users and invitations...")
   const [error, setError] = useState("")
+  const [copied, setCopied] = useState(false)
 
   const invitePreviewUrl = useMemo(() => {
     const latest = invitations.find((item) => !item.accepted_at && item.invite_token)
     if (!latest?.invite_token) return ""
-    return `http://localhost:5173/accept-invite/${latest.invite_token}`
+    return `${getAppOrigin()}/accept-invite/${latest.invite_token}`
   }, [invitations])
 
   async function loadAll() {
@@ -92,6 +100,7 @@ export default function UsersPage() {
 
     setSubmitting(true)
     setError("")
+    setCopied(false)
     setStatus("Creating invitation...")
 
     try {
@@ -124,6 +133,19 @@ export default function UsersPage() {
       setStatus("Invite failed")
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!invitePreviewUrl) return
+
+    try {
+      await navigator.clipboard.writeText(invitePreviewUrl)
+      setCopied(true)
+      setStatus("Invite URL copied")
+    } catch (err: any) {
+      console.error(err)
+      setError(err?.message || "Could not copy invite URL")
     }
   }
 
@@ -296,6 +318,25 @@ export default function UsersPage() {
               >
                 <strong>Latest invite URL:</strong>
                 <div style={{ marginTop: "8px", opacity: 0.92 }}>{invitePreviewUrl}</div>
+
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "12px" }}>
+                  <button
+                    type="button"
+                    onClick={handleCopyInvite}
+                    style={secondaryButtonStyle}
+                  >
+                    {copied ? "Copied" : "Copy Invite URL"}
+                  </button>
+
+                  <a
+                    href={invitePreviewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={secondaryLinkStyle}
+                  >
+                    Open Invite
+                  </a>
+                </div>
               </div>
             ) : null}
           </form>
@@ -341,6 +382,7 @@ export default function UsersPage() {
                     <div style={{ opacity: 0.75 }}>Role: {invite.role}</div>
                     <div style={{ opacity: 0.65 }}>Created: {formatDate(invite.created_at)}</div>
                     <div style={{ opacity: 0.65 }}>Accepted: {formatDate(invite.accepted_at)}</div>
+                    <div style={{ opacity: 0.65 }}>Expires: {formatDate(invite.expires_at)}</div>
                   </div>
                 ))}
               </div>
@@ -379,4 +421,26 @@ const rowStyle: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "16px",
   padding: "14px 16px",
+}
+
+const secondaryButtonStyle: React.CSSProperties = {
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "10px 14px",
+  borderRadius: "12px",
+  cursor: "pointer",
+  fontWeight: 700,
+}
+
+const secondaryLinkStyle: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  padding: "10px 14px",
+  borderRadius: "12px",
+  fontWeight: 700,
+  display: "inline-flex",
+  alignItems: "center",
 }

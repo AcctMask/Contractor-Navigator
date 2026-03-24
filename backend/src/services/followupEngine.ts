@@ -2,6 +2,7 @@ import { pool } from "../db/db"
 import { sendSMS } from "./twilioService"
 import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
+import { isPhoneDnc } from "./dncService"
 
 type JobRow = {
   id: number
@@ -50,30 +51,17 @@ const BUYING_SIGNAL_PATTERNS = [
   "when can you start",
   "what is the next step",
   "next step",
-  "can you do it for",
-  "do you offer veteran discounts",
-  "do you use peel and stick",
-  "do you have a backlog",
-  "how soon can you schedule",
-  "what is your availability",
-  "when are you available",
-  "want to move forward",
   "how do i sign",
-  "how do we sign",
-  "can we get started",
-  "lets do it",
-  "let's do it",
-  "i'm ready",
-  "im ready",
-  "we are ready",
-  "i want to proceed",
-  "can you send it again",
   "where do i sign",
   "please call me",
   "call me",
-  "need more information",
   "can someone call me",
-  "can you tell me more",
+  "i'm ready",
+  "im ready",
+  "we are ready",
+  "can we get started",
+  "let's do it",
+  "lets do it",
 ]
 
 function normalizePhone(phone: string | null | undefined) {
@@ -94,10 +82,8 @@ function buildAddressLine(job: JobRow) {
   const city = cleanPart(job.city)
   const state = cleanPart(job.state)
   const zip = cleanPart(job.zip || "")
-
   const cityState = [city, state].filter(Boolean).join(", ")
   const secondLine = [cityState, zip].filter(Boolean).join(" ")
-
   return [address1, secondLine].filter(Boolean).join(" | ") || "Address not yet available"
 }
 
@@ -107,10 +93,7 @@ function fillTemplate(message: string, customerName: string | null) {
 }
 
 export async function getTenantIdBySlug(slug: string): Promise<number> {
-  const result = await pool.query(
-    `select id from tenants where slug = $1 limit 1`,
-    [slug]
-  )
+  const result = await pool.query(`select id from tenants where slug = $1 limit 1`, [slug])
 
   if (!result.rowCount) {
     throw new Error(`Tenant not found: ${slug}`)
@@ -264,33 +247,28 @@ function classifyInboundMessage(message: string): InboundClassification {
   const text = message.toLowerCase()
 
   const estimateRequestPatterns = [
-    "i'd like an estimate",
-    "id like an estimate",
+    "estimate",
+    "roof estimate",
+    "replace my roof",
+    "roof replacement",
+    "need a roof estimate",
     "need an estimate",
     "want an estimate",
-    "can i get an estimate",
-    "can you give me an estimate",
     "quote my roof",
-    "replace my roof",
-    "roof replacement estimate",
-    "need a roof replacement",
   ]
 
   const inspectionRequestPatterns = [
-    "need an inspection",
-    "want an inspection",
-    "can you inspect",
-    "roof inspection",
-    "come inspect",
+    "inspection",
+    "inspect",
     "check my roof",
-    "can someone inspect",
+    "roof inspection",
+    "schedule an inspection",
   ]
 
   const callbackPatterns = [
     "call me",
     "please call me",
     "can you call me",
-    "give me a call",
     "have someone call",
     "callback",
     "call back",
@@ -301,36 +279,29 @@ function classifyInboundMessage(message: string): InboundClassification {
     "send me the contract",
     "where do i sign",
     "how do i sign",
-    "how do we sign",
-    "send paperwork",
-    "send the paperwork",
     "contract",
+    "paperwork",
   ]
 
   const pricingObjectionPatterns = [
-    "can you do it for less",
-    "little less",
     "better price",
     "lower price",
     "discount",
     "too expensive",
     "price is high",
     "price seems high",
-    "veteran discount",
   ]
 
   const questionPatterns = [
-    "what can you do",
-    "do you offer",
+    "what is",
+    "what's",
     "how soon",
     "when can",
     "can you help",
-    "how does",
-    "what is",
-    "what's",
-    "do you use",
     "can you tell me",
     "need more information",
+    "existing job",
+    "question",
   ]
 
   if (containsAny(text, estimateRequestPatterns)) return "estimate_request"
@@ -411,6 +382,45 @@ async function updateJobRoutingForClassification(
   return { crm_substatus: crmSubstatus, crm_flow_key: crmFlowKey }
 }
 
+function buildDispatcherSummary(
+  label: string,
+  job: JobRow,
+  body: {
+    classification?: string
+    message?: string
+    callbackNumber?: string | null
+    nextAction?: string
+    channel?: string
+  }
+) {
+  const customer = job.customer_name || "Inbound Caller"
+  const address = buildAddressLine(job)
+
+  const sms =
+    `${label}\n` +
+    `Customer: ${customer}\n` +
+    `Job ID: ${job.id}\n` +
+    `${body.classification ? `Need: ${body.classification}\n` : ""}` +
+    `${body.callbackNumber ? `Phone: ${body.callbackNumber}\n` : ""}` +
+    `Address: ${address}\n` +
+    `${body.message ? `Message: ${body.message}\n` : ""}` +
+    `${body.nextAction ? `Next: ${body.nextAction}` : ""}`
+
+  const email =
+    `${label}\n\n` +
+    `Customer: ${customer}\n` +
+    `Job ID: ${job.id}\n` +
+    `Stage: ${job.stage || "unknown"}\n` +
+    `Address: ${address}\n` +
+    `${body.callbackNumber ? `Callback Number: ${body.callbackNumber}\n` : ""}` +
+    `${body.channel ? `Channel: ${body.channel}\n` : ""}` +
+    `${body.classification ? `Classification: ${body.classification}\n` : ""}` +
+    `${body.message ? `Customer Message: ${body.message}\n` : ""}` +
+    `${body.nextAction ? `Recommended Next Action: ${body.nextAction}\n` : ""}`
+
+  return { sms, email }
+}
+
 async function sendAutoClassificationReply(
   tenantId: number,
   jobId: number,
@@ -432,10 +442,25 @@ async function sendAutoClassificationReply(
       }
     )
 
-    return {
-      sent: false,
-      reason: "missing_phone",
-    }
+    return { sent: false, reason: "missing_phone" }
+  }
+
+  const dnc = await isPhoneDnc(tenantId, phone)
+  if (dnc) {
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "ai_message_skipped",
+      "Auto-response skipped because phone is marked DNC",
+      {
+        stage: job.stage,
+        classification,
+        channel: "sms",
+        to: phone,
+      }
+    )
+
+    return { sent: false, reason: "dnc" }
   }
 
   const replyMessage = buildClassificationReply(classification, job.customer_name, settings)
@@ -471,11 +496,7 @@ async function sendAutoClassificationReply(
       }
     )
 
-    return {
-      sent: true,
-      to: phone,
-      twilio_sid: sms.sid,
-    }
+    return { sent: true, to: phone, twilio_sid: sms.sid }
   } catch (err: any) {
     await addTimelineEvent(
       tenantId,
@@ -490,10 +511,7 @@ async function sendAutoClassificationReply(
       }
     )
 
-    return {
-      sent: false,
-      error: err?.message || String(err),
-    }
+    return { sent: false, error: err?.message || String(err) }
   }
 }
 
@@ -501,39 +519,31 @@ async function sendBuyingSignalAlerts(
   job: JobRow,
   inboundMessage: string,
   matchedSignals: string[],
-  settings: DevSettings
+  settings: DevSettings,
+  callbackNumber: string | null
 ) {
-  const customerName = job.customer_name || `Job #${job.id}`
-  const addressLine = buildAddressLine(job)
-  const stageLine = job.stage || "unknown"
-
-  const smsBody =
-    `Buying signal: ${customerName}\n` +
-    `${addressLine}\n` +
-    `Stage: ${stageLine}\n` +
-    `Signals: ${matchedSignals.join(", ")}`
-
-  const subject = `Buying signal detected: ${customerName}`
-  const alertBody =
-    `Customer: ${customerName}\n` +
-    `Job ID: ${job.id}\n` +
-    `Address: ${addressLine}\n` +
-    `Stage: ${stageLine}\n` +
-    `Source: ${job.lead_source || "—"}\n` +
-    `Matched Signals: ${matchedSignals.join(", ")}\n\n` +
-    `Customer Message:\n${inboundMessage}`
+  const summary = buildDispatcherSummary("BUYING SIGNAL DISPATCH SUMMARY", job, {
+    callbackNumber,
+    message: inboundMessage,
+    nextAction: `Call customer promptly. Signals: ${matchedSignals.join(", ")}`,
+    channel: "sms",
+  })
 
   let smsResult: any = null
   let emailResult: any = null
 
   try {
-    smsResult = await sendSMS(settings.alert_sms_to, smsBody)
+    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
   } catch (err: any) {
     smsResult = { error: err?.message || String(err) }
   }
 
   try {
-    emailResult = await sendAlertEmail(settings.alert_email_to, subject, alertBody)
+    emailResult = await sendAlertEmail(
+      settings.alert_email_to,
+      `Buying signal: ${job.customer_name || `Job #${job.id}`}`,
+      summary.email
+    )
   } catch (err: any) {
     emailResult = { error: err?.message || String(err) }
   }
@@ -541,7 +551,7 @@ async function sendBuyingSignalAlerts(
   return {
     sms: smsResult,
     email: emailResult,
-    sms_preview: smsBody,
+    sms_preview: summary.sms,
   }
 }
 
@@ -549,37 +559,44 @@ async function sendActionAlert(
   job: JobRow,
   classification: InboundClassification,
   inboundMessage: string,
-  settings: DevSettings
+  settings: DevSettings,
+  callbackNumber: string | null,
+  channel: "sms" | "voice"
 ) {
-  const customerName = job.customer_name || `Job #${job.id}`
-  const addressLine = buildAddressLine(job)
+  const nextActionMap: Record<string, string> = {
+    estimate_request: "Call customer and schedule estimate / inspection.",
+    inspection_request: "Call customer and confirm inspection timing.",
+    callback_request: "Return call as soon as possible.",
+    contract_request: "Send contract / paperwork and confirm next step.",
+    pricing_objection: "Call customer and address pricing concerns.",
+    general_question: "Call or text customer with answers.",
+    buying_signal_only: "Call customer promptly; strong buying intent.",
+    unknown: "Review message and decide next action.",
+  }
 
-  const smsBody =
-    `Action needed: ${classification}\n` +
-    `${customerName}\n` +
-    `${addressLine}\n` +
-    `Message: ${inboundMessage}`
-
-  const subject = `Action needed: ${classification} - ${customerName}`
-  const emailBody =
-    `Classification: ${classification}\n` +
-    `Customer: ${customerName}\n` +
-    `Job ID: ${job.id}\n` +
-    `Address: ${addressLine}\n` +
-    `Stage: ${job.stage || "unknown"}\n\n` +
-    `Customer Message:\n${inboundMessage}`
+  const summary = buildDispatcherSummary("ACTION NEEDED DISPATCH SUMMARY", job, {
+    classification,
+    message: inboundMessage,
+    callbackNumber,
+    nextAction: nextActionMap[classification] || "Review and follow up.",
+    channel,
+  })
 
   let smsResult: any = null
   let emailResult: any = null
 
   try {
-    smsResult = await sendSMS(settings.alert_sms_to, smsBody)
+    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
   } catch (err: any) {
     smsResult = { error: err?.message || String(err) }
   }
 
   try {
-    emailResult = await sendAlertEmail(settings.alert_email_to, subject, emailBody)
+    emailResult = await sendAlertEmail(
+      settings.alert_email_to,
+      `Action needed: ${classification} - ${job.customer_name || `Job #${job.id}`}`,
+      summary.email
+    )
   } catch (err: any) {
     emailResult = { error: err?.message || String(err) }
   }
@@ -587,37 +604,32 @@ async function sendActionAlert(
   return {
     sms: smsResult,
     email: emailResult,
-    sms_preview: smsBody,
+    sms_preview: summary.sms,
   }
 }
 
-async function sendNewLeadAlert(job: JobRow, settings: DevSettings) {
-  const customerName = job.customer_name || `Job #${job.id}`
-  const addressLine = buildAddressLine(job)
-
-  const smsBody =
-    `New Lead: ${customerName}\n` +
-    `${addressLine}\n` +
-    `Source: ${job.lead_source || "Unknown"}`
-
-  const subject = `New Lead: ${customerName}`
-  const emailBody =
-    `Customer: ${customerName}\n` +
-    `Job ID: ${job.id}\n` +
-    `Address: ${addressLine}\n` +
-    `Source: ${job.lead_source || "Unknown"}`
+async function sendNewLeadAlert(job: JobRow, settings: DevSettings, callbackNumber: string | null) {
+  const summary = buildDispatcherSummary("NEW LEAD DISPATCH SUMMARY", job, {
+    callbackNumber,
+    nextAction: "Review lead and call customer.",
+    channel: "voice",
+  })
 
   let smsResult: any = null
   let emailResult: any = null
 
   try {
-    smsResult = await sendSMS(settings.alert_sms_to, smsBody)
+    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
   } catch (err: any) {
     smsResult = { error: err?.message || String(err) }
   }
 
   try {
-    emailResult = await sendAlertEmail(settings.alert_email_to, subject, emailBody)
+    emailResult = await sendAlertEmail(
+      settings.alert_email_to,
+      `New lead: ${job.customer_name || `Job #${job.id}`}`,
+      summary.email
+    )
   } catch (err: any) {
     emailResult = { error: err?.message || String(err) }
   }
@@ -625,37 +637,32 @@ async function sendNewLeadAlert(job: JobRow, settings: DevSettings) {
   return {
     sms: smsResult,
     email: emailResult,
-    sms_preview: smsBody,
+    sms_preview: summary.sms,
   }
 }
 
-async function sendNewEstimateAlert(job: JobRow, settings: DevSettings) {
-  const customerName = job.customer_name || `Job #${job.id}`
-  const addressLine = buildAddressLine(job)
-
-  const smsBody =
-    `New Estimate: ${customerName}\n` +
-    `${addressLine}\n` +
-    `Stage: ${job.stage || "estimate_sent"}`
-
-  const subject = `New Estimate: ${customerName}`
-  const emailBody =
-    `Customer: ${customerName}\n` +
-    `Job ID: ${job.id}\n` +
-    `Address: ${addressLine}\n` +
-    `Stage: ${job.stage || "estimate_sent"}`
+async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callbackNumber: string | null) {
+  const summary = buildDispatcherSummary("NEW ESTIMATE DISPATCH SUMMARY", job, {
+    callbackNumber,
+    nextAction: "Review estimate and follow up.",
+    channel: "sms",
+  })
 
   let smsResult: any = null
   let emailResult: any = null
 
   try {
-    smsResult = await sendSMS(settings.alert_sms_to, smsBody)
+    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
   } catch (err: any) {
     smsResult = { error: err?.message || String(err) }
   }
 
   try {
-    emailResult = await sendAlertEmail(settings.alert_email_to, subject, emailBody)
+    emailResult = await sendAlertEmail(
+      settings.alert_email_to,
+      `New estimate: ${job.customer_name || `Job #${job.id}`}`,
+      summary.email
+    )
   } catch (err: any) {
     emailResult = { error: err?.message || String(err) }
   }
@@ -663,7 +670,7 @@ async function sendNewEstimateAlert(job: JobRow, settings: DevSettings) {
   return {
     sms: smsResult,
     email: emailResult,
-    sms_preview: smsBody,
+    sms_preview: summary.sms,
   }
 }
 
@@ -681,17 +688,16 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       { stage: job.stage, reason: "bot_paused" }
     )
 
-    return {
-      ok: true,
-      skipped: true,
-      reason: "bot_paused",
-    }
+    return { ok: true, skipped: true, reason: "bot_paused" }
   }
+
+  const callbackNumber = await getCustomerPhone(tenantId, job.customer_id)
+  const customerIsDnc = await isPhoneDnc(tenantId, callbackNumber)
 
   const timelineBefore = await getTimeline(tenantId, jobId)
 
   if (job.stage === "lead" && !hasTimelineKind(timelineBefore, "new_lead_alert_routed")) {
-    const alertResults = await sendNewLeadAlert(job, settings)
+    const alertResults = await sendNewLeadAlert(job, settings, callbackNumber)
 
     await addTimelineEvent(
       tenantId,
@@ -709,7 +715,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
   }
 
   if (job.stage === "estimate_sent" && !hasTimelineKind(timelineBefore, "new_estimate_alert_routed")) {
-    const alertResults = await sendNewEstimateAlert(job, settings)
+    const alertResults = await sendNewEstimateAlert(job, settings, callbackNumber)
 
     await addTimelineEvent(
       tenantId,
@@ -738,11 +744,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       { stage: job.stage }
     )
 
-    return {
-      ok: true,
-      skipped: true,
-      reason: "stage_not_supported",
-    }
+    return { ok: true, skipped: true, reason: "stage_not_supported" }
   }
 
   await addTimelineEvent(
@@ -757,9 +759,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     }
   )
 
-  const phone = await getCustomerPhone(tenantId, job.customer_id)
-
-  if (!phone) {
+  if (!callbackNumber) {
     await addTimelineEvent(
       tenantId,
       jobId,
@@ -784,8 +784,31 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     }
   }
 
+  if (customerIsDnc) {
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "ai_message_skipped",
+      "AI message skipped because phone is marked DNC",
+      {
+        stage: aiMessage.stage,
+        order: aiMessage.order,
+        to: callbackNumber,
+      }
+    )
+
+    return {
+      ok: true,
+      skipped: true,
+      reason: "dnc",
+      tenant_id: tenantId,
+      job_id: jobId,
+      to: callbackNumber,
+    }
+  }
+
   try {
-    const sms = await sendSMS(phone, aiMessage.message)
+    const sms = await sendSMS(callbackNumber, aiMessage.message)
 
     await addTimelineEvent(
       tenantId,
@@ -797,7 +820,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
         order: aiMessage.order,
         sender: "Good2Go Roofing Team",
         channel: "sms",
-        to: phone,
+        to: callbackNumber,
         twilio_sid: sms.sid,
         twilio_status: sms.status,
       }
@@ -812,7 +835,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       order: aiMessage.order,
       message: aiMessage.message,
       sent: true,
-      to: phone,
+      to: callbackNumber,
       twilio_sid: sms.sid,
     }
   } catch (err: any) {
@@ -824,7 +847,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       {
         stage: aiMessage.stage,
         order: aiMessage.order,
-        to: phone,
+        to: callbackNumber,
       }
     )
 
@@ -837,7 +860,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       order: aiMessage.order,
       message: aiMessage.message,
       sent: false,
-      to: phone,
+      to: callbackNumber,
       error: err?.message || String(err),
     }
   }
@@ -847,13 +870,13 @@ export async function handleInboundMessageByTenantSlug(
   tenantSlug: string,
   jobId: number,
   inboundMessage: string,
-  from: string | null,
-  channel: "sms" | "voice" = "sms"
+  from: string | null
 ) {
   const tenantId = await getTenantIdBySlug(tenantSlug)
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const job = await getJob(tenantId, jobId)
   const trimmed = inboundMessage.trim()
+  const callbackNumber = await getCustomerPhone(tenantId, job.customer_id)
 
   await addTimelineEvent(
     tenantId,
@@ -862,8 +885,7 @@ export async function handleInboundMessageByTenantSlug(
     trimmed,
     {
       from,
-      channel,
-      ...(channel === "voice" ? { input: "speech" } : {}),
+      channel: "sms",
     }
   )
 
@@ -880,12 +902,11 @@ export async function handleInboundMessageByTenantSlug(
       crm_substatus: routing.crm_substatus,
       crm_flow_key: routing.crm_flow_key,
       from,
-      channel,
+      channel: "sms",
     }
   )
 
   const matchedSignals = detectBuyingSignals(trimmed)
-  let autoReplyMessage: string | null = null
 
   if (classification !== "unknown") {
     await addTimelineEvent(
@@ -894,14 +915,20 @@ export async function handleInboundMessageByTenantSlug(
       "next_action_routed",
       `Next action routed for ${classification}`,
       {
-        channel,
         classification,
         crm_substatus: routing.crm_substatus,
         crm_flow_key: routing.crm_flow_key,
       }
     )
 
-    const actionAlertResults = await sendActionAlert(job, classification, trimmed, settings)
+    const actionAlertResults = await sendActionAlert(
+      job,
+      classification,
+      trimmed,
+      settings,
+      callbackNumber,
+      "sms"
+    )
 
     await addTimelineEvent(
       tenantId,
@@ -909,7 +936,6 @@ export async function handleInboundMessageByTenantSlug(
       "action_alert_routed",
       `Action alert sent for ${classification}`,
       {
-        channel,
         classification,
         alert_sms_to: settings.alert_sms_to,
         alert_email_to: settings.alert_email_to,
@@ -919,11 +945,7 @@ export async function handleInboundMessageByTenantSlug(
       }
     )
 
-    autoReplyMessage = buildClassificationReply(classification, job.customer_name, settings)
-
-    if (channel === "sms") {
-      await sendAutoClassificationReply(tenantId, jobId, job, classification, settings)
-    }
+    await sendAutoClassificationReply(tenantId, jobId, job, classification, settings)
   }
 
   if (matchedSignals.length) {
@@ -939,7 +961,13 @@ export async function handleInboundMessageByTenantSlug(
       }
     )
 
-    const alertResults = await sendBuyingSignalAlerts(job, trimmed, matchedSignals, settings)
+    const alertResults = await sendBuyingSignalAlerts(
+      job,
+      trimmed,
+      matchedSignals,
+      settings,
+      callbackNumber
+    )
 
     await addTimelineEvent(
       tenantId,
@@ -967,7 +995,6 @@ export async function handleInboundMessageByTenantSlug(
     matched_signals: matchedSignals,
     alert_sms_to: matchedSignals.length || classification !== "unknown" ? settings.alert_sms_to : null,
     alert_email_to: matchedSignals.length || classification !== "unknown" ? settings.alert_email_to : null,
-    auto_reply_message: autoReplyMessage,
   }
 }
 
@@ -981,6 +1008,7 @@ export async function getAiConversationByTenantSlug(tenantSlug: string, jobId: n
         "ai_message_generated",
         "ai_message_sent",
         "ai_message_send_failed",
+        "ai_message_skipped",
         "customer_reply",
         "buying_signal_detected",
         "alert_routed",
@@ -994,7 +1022,16 @@ export async function getAiConversationByTenantSlug(tenantSlug: string, jobId: n
         "voice_call_received",
         "voice_ai_summary_created",
         "lead_created_from_call",
+        "voice_reason_captured",
+        "voice_name_captured",
+        "voice_address_captured",
+        "voice_callback_number_captured",
+        "voice_callback_time_captured",
+        "voice_emergency_tarp_detected",
+        "voice_intake_alert_routed",
         "voice_ai_response_spoken",
+        "dnc_marked",
+        "dnc_cleared",
       ].includes(t.kind.toLowerCase())
     )
     .map((t) => ({
@@ -1081,12 +1118,7 @@ export async function createLeadFromInboundCallByTenantSlug(
       )
     returning id
     `,
-    [
-      tenantId,
-      customerId,
-      `voice-${Date.now()}`,
-      source,
-    ]
+    [tenantId, customerId, `voice-${Date.now()}`, source]
   )
 
   const jobId = Number(jobResult.rows[0].id)
