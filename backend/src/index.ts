@@ -1,6 +1,7 @@
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import formbody from "@fastify/formbody"
+import multipart from "@fastify/multipart"
 import dotenv from "dotenv"
 
 import { registerAdminRoutes } from "./routes/admin"
@@ -13,6 +14,7 @@ import { registerDevSettingsRoutes } from "./routes/devSettings"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
+import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { startFollowupScheduler } from "./services/followupScheduler"
 
 dotenv.config()
@@ -21,6 +23,12 @@ const app = Fastify({ logger: true })
 
 await app.register(cors, { origin: true })
 await app.register(formbody)
+await app.register(multipart, {
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+    files: 10,
+  },
+})
 
 await registerAdminRoutes(app)
 await registerEventsRoutes(app)
@@ -32,6 +40,7 @@ await registerDevSettingsRoutes(app)
 await registerAuthRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
+await registerJobAssetsRoutes(app)
 
 const port = Number(process.env.PORT || 8787)
 
