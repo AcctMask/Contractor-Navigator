@@ -1,6 +1,84 @@
 import { Link } from "react-router-dom"
+import { useEffect, useMemo, useState } from "react"
+
+const API_BASE = "http://localhost:8787"
+const TENANT_SLUG = "g2g-roofing"
+
+type DashboardJob = {
+  id: number
+  external_job_id?: string | null
+  stage?: string | null
+  crm_flow_key?: string | null
+  crm_substatus?: string | null
+  bot_paused?: boolean | null
+  manual_owner?: string | null
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+  carrier?: string | null
+  claim_number?: string | null
+  wa_status?: string | null
+  estimate_status?: string | null
+  contract_status?: string | null
+  lead_source?: string | null
+  lead_source_detail?: string | null
+  marketing_campaign?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  customer_name?: string | null
+}
 
 export default function DashboardPage() {
+  const [jobs, setJobs] = useState<DashboardJob[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    void loadDashboard()
+  }, [])
+
+  async function loadDashboard() {
+    try {
+      setLoading(true)
+      setError("")
+
+      const res = await fetch(`${API_BASE}/admin/jobs/${TENANT_SLUG}?limit=250`)
+      const data = await res.json()
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Dashboard load failed")
+      }
+
+      setJobs(Array.isArray(data.jobs) ? data.jobs : [])
+    } catch (err: any) {
+      setError(err?.message || "Dashboard load failed")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const sortedJobs = useMemo(() => {
+    return [...jobs].sort((a, b) => {
+      const aTime = new Date(a.updated_at || a.created_at || 0).getTime()
+      const bTime = new Date(b.updated_at || b.created_at || 0).getTime()
+      return bTime - aTime
+    })
+  }, [jobs])
+
+  const activeJobsCount = sortedJobs.length
+  const botPausedCount = sortedJobs.filter((j) => Boolean(j.bot_paused)).length
+  const claimJobsCount = sortedJobs.filter(
+    (j) => Boolean(j.claim_number) || Boolean(j.carrier)
+  ).length
+  const googleLeadsCount = sortedJobs.filter((j) => {
+    const source = String(j.lead_source || "").toLowerCase()
+    const detail = String(j.lead_source_detail || "").toLowerCase()
+    return source.includes("google") || detail.includes("google")
+  }).length
+
+  const newestJobs = sortedJobs.slice(0, 10)
+
   return (
     <div style={pageWrap}>
       <div style={layout}>
@@ -60,8 +138,15 @@ export default function DashboardPage() {
               <Link to="/job-admin" style={primaryAction}>
                 Customer Search
               </Link>
-              <div style={secondaryAction}>Message Center</div>
-              <div style={secondaryAction}>Send Estimate</div>
+
+              <Link to="/job-admin" style={secondaryActionLink}>
+                Message Center
+              </Link>
+
+              <Link to="/job-admin" style={secondaryActionLink}>
+                Send Estimate
+              </Link>
+
               <Link to="/job-admin" style={primaryActionAlt}>
                 Add Manual Note
               </Link>
@@ -69,29 +154,37 @@ export default function DashboardPage() {
           </section>
 
           <section style={statsGrid}>
-            <div style={statCard}>
-              <div style={statNumber}>0</div>
-              <div style={statLabel}>Active Jobs</div>
-              <div style={statSub}>Tracked in CRM</div>
-            </div>
+            <Link to="/job-admin" style={statCardLink}>
+              <div style={statCard}>
+                <div style={statNumber}>{loading ? "…" : activeJobsCount}</div>
+                <div style={statLabel}>Active Jobs</div>
+                <div style={statSub}>Tracked in CRM</div>
+              </div>
+            </Link>
 
-            <div style={statCard}>
-              <div style={statNumber}>0</div>
-              <div style={statLabel}>Bot Paused</div>
-              <div style={statSub}>Human takeover</div>
-            </div>
+            <Link to="/job-admin" style={statCardLink}>
+              <div style={statCard}>
+                <div style={statNumber}>{loading ? "…" : botPausedCount}</div>
+                <div style={statLabel}>Bot Paused</div>
+                <div style={statSub}>Human takeover</div>
+              </div>
+            </Link>
 
-            <div style={statCard}>
-              <div style={statNumber}>0</div>
-              <div style={statLabel}>Claim Jobs</div>
-              <div style={statSub}>Insurance-related</div>
-            </div>
+            <Link to="/job-admin" style={statCardLink}>
+              <div style={statCard}>
+                <div style={statNumber}>{loading ? "…" : claimJobsCount}</div>
+                <div style={statLabel}>Claim Jobs</div>
+                <div style={statSub}>Insurance-related</div>
+              </div>
+            </Link>
 
-            <div style={statCard}>
-              <div style={statNumber}>0</div>
-              <div style={statLabel}>Google Leads</div>
-              <div style={statSub}>Current top source</div>
-            </div>
+            <Link to="/job-admin" style={statCardLink}>
+              <div style={statCard}>
+                <div style={statNumber}>{loading ? "…" : googleLeadsCount}</div>
+                <div style={statLabel}>Google Leads</div>
+                <div style={statSub}>Current top source</div>
+              </div>
+            </Link>
           </section>
 
           <section style={panelGrid}>
@@ -109,19 +202,41 @@ export default function DashboardPage() {
                 </Link>
               </div>
 
-              <div style={tableShell}>
-                <div style={tableHeader}>
-                  <div>CUSTOMER</div>
-                  <div>STAGE</div>
-                  <div>ZIP</div>
-                  <div>CARRIER</div>
-                  <div>CLAIM</div>
-                  <div>SOURCE</div>
-                  <div>BOT</div>
-                </div>
+              {error ? (
+                <div style={errorBox}>{error}</div>
+              ) : (
+                <div style={tableShell}>
+                  <div style={tableHeader}>
+                    <div>CUSTOMER</div>
+                    <div>STAGE</div>
+                    <div>ZIP</div>
+                    <div>CARRIER</div>
+                    <div>CLAIM</div>
+                    <div>SOURCE</div>
+                    <div>BOT</div>
+                  </div>
 
-                <div style={tableEmpty}>No jobs loaded here yet.</div>
-              </div>
+                  {loading ? (
+                    <div style={tableEmpty}>Loading jobs...</div>
+                  ) : newestJobs.length === 0 ? (
+                    <div style={tableEmpty}>No jobs loaded here yet.</div>
+                  ) : (
+                    newestJobs.map((job) => (
+                      <Link key={job.id} to={`/job/${job.id}`} style={tableRowLink}>
+                        <div style={tableRow}>
+                          <div>{job.customer_name || "Unknown"}</div>
+                          <div>{job.stage || "-"}</div>
+                          <div>{job.zip || "-"}</div>
+                          <div>{job.carrier || "-"}</div>
+                          <div>{job.claim_number || "-"}</div>
+                          <div>{job.lead_source || job.lead_source_detail || "-"}</div>
+                          <div>{job.bot_paused ? "Paused" : "On"}</div>
+                        </div>
+                      </Link>
+                    ))
+                  )}
+                </div>
+              )}
 
               <div style={{ marginTop: 18 }}>
                 <Link to="/job-admin" style={primaryAction}>
@@ -329,15 +444,6 @@ const primaryActionAlt: React.CSSProperties = {
   display: "inline-block",
 }
 
-const secondaryAction: React.CSSProperties = {
-  color: "#fff",
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  padding: "12px 18px",
-  borderRadius: "14px",
-  fontWeight: 700,
-}
-
 const secondaryActionLink: React.CSSProperties = {
   textDecoration: "none",
   color: "#fff",
@@ -353,6 +459,11 @@ const statsGrid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, 1fr)",
   gap: "18px",
+}
+
+const statCardLink: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#e8eefc",
 }
 
 const statCard: React.CSSProperties = {
@@ -450,6 +561,20 @@ const tableHeader: React.CSSProperties = {
   borderBottom: "1px solid rgba(255,255,255,0.08)",
 }
 
+const tableRowLink: React.CSSProperties = {
+  textDecoration: "none",
+  color: "#e8eefc",
+}
+
+const tableRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
+  gap: "10px",
+  padding: "14px 16px",
+  borderBottom: "1px solid rgba(255,255,255,0.06)",
+  alignItems: "center",
+}
+
 const tableEmpty: React.CSSProperties = {
   padding: "28px 16px",
   textAlign: "center",
@@ -464,4 +589,13 @@ const selectedEmpty: React.CSSProperties = {
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "16px",
   padding: "16px",
+}
+
+const errorBox: React.CSSProperties = {
+  marginTop: "18px",
+  background: "rgba(255, 90, 90, 0.12)",
+  border: "1px solid rgba(255, 90, 90, 0.3)",
+  borderRadius: "14px",
+  padding: "14px 16px",
+  color: "#ffd7d7",
 }

@@ -3,11 +3,13 @@ import UsersPage from "./pages/Users"
 import JobAdminPage from "./pages/JobAdmin"
 import JobDetailPage from "./pages/JobDetail"
 import DashboardPage from "./pages/Dashboard"
+import DeveloperSettingsPage from "./pages/DeveloperSettings"
 import LoginPage from "./pages/Login"
 import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
+import SignDocument from "./pages/SignDocument"
 
 function HeaderBar() {
   const location = useLocation()
@@ -45,6 +47,13 @@ function HeaderBar() {
               style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}
             >
               Jobs
+            </Link>
+
+            <Link
+              to="/developer-settings"
+              style={location.pathname === "/developer-settings" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Developer Settings
             </Link>
 
             <Link
@@ -130,6 +139,18 @@ export default function App() {
       />
 
       <Route
+        path="/developer-settings"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <DeveloperSettingsPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/document-pipeline"
         element={
           <ProtectedRoute>
@@ -141,6 +162,7 @@ export default function App() {
         }
       />
 
+      <Route path="/sign/:id" element={<SignDocument />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
