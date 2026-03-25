@@ -5,7 +5,7 @@ import dotenv from "dotenv"
 
 import { registerAdminRoutes } from "./routes/admin"
 import { registerEventsRoutes } from "./routes/events"
-import { registerLeadRoutes } from "./routes/leads"
+import registerLeadRoutes from "./routes/leads"
 import { registerAiRoutes } from "./routes/ai"
 import { registerTwilioWebhook } from "./routes/twilioWebhook"
 import { registerCustomerRoutes } from "./routes/customers"
@@ -13,7 +13,6 @@ import { registerDevSettingsRoutes } from "./routes/devSettings"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
-import { registerJobControlsRoutes } from "./routes/jobControls"
 import { startFollowupScheduler } from "./services/followupScheduler"
 
 dotenv.config()
@@ -33,7 +32,6 @@ await registerDevSettingsRoutes(app)
 await registerAuthRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
-await registerJobControlsRoutes(app)
 
 const port = Number(process.env.PORT || 8787)
 

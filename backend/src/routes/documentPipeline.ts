@@ -1,9 +1,12 @@
 import type { FastifyInstance } from "fastify"
 import {
   createDocumentPackageByTenantSlug,
+  getDocumentPackageById,
   getEstimateDetailsByTenantSlug,
   getJobSummaryByTenantSlug,
   listDocumentPackagesByTenantSlug,
+  sendDocumentPackage,
+  signDocumentPackage,
   upsertEstimateDetailsByTenantSlug,
 } from "../services/documentPipelineService"
 
@@ -87,6 +90,59 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
       return {
         ok: true,
         document_package: documentPackage,
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.post("/pipeline/:tenantSlug/job/:jobId/send-package", async (request: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = request.params
+      const numericJobId = Number(jobId)
+      const { package_id } = request.body || {}
+
+      const result = await sendDocumentPackage(
+        tenantSlug,
+        numericJobId,
+        Number(package_id)
+      )
+
+      return result
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.get("/sign/:id", async (request: any, reply) => {
+    try {
+      const { id } = request.params
+      const document = await getDocumentPackageById(Number(id))
+
+      if (!document) {
+        reply.code(404)
+        return { ok: false, error: "Document not found" }
+      }
+
+      return { ok: true, document }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.post("/sign/:id", async (request: any, reply) => {
+    try {
+      const { id } = request.params
+      const { signer_name } = request.body || {}
+
+      const result = await signDocumentPackage(Number(id), signer_name)
+
+      return {
+        ok: true,
+        document: result,
       }
     } catch (err: any) {
       reply.code(400)

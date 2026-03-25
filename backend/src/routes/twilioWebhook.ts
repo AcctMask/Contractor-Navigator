@@ -20,6 +20,9 @@ import {
   startVoiceIntakeLead,
 } from "../services/voiceIntakeService"
 
+const VOICE_NAME = "Polly.Joanna"
+const VOICE_LANGUAGE = "en-US"
+
 function normalizePhone(phone: string | null | undefined) {
   if (!phone) return null
   const digits = phone.replace(/\D/g, "")
@@ -46,7 +49,7 @@ ${inner}
 }
 
 function getSpeech(body: any) {
-  return String(body?.SpeechResult || "").trim()
+  return String(body?.SpeechResult || body?.UnstableSpeechResult || "").trim()
 }
 
 function getDigits(body: any) {
@@ -75,62 +78,114 @@ function replyXml(reply: any, xml: string) {
   return reply.send(xml)
 }
 
+function speechify(text: string) {
+  return `<prosody rate="92%" pitch="-2%">${xmlEscape(text)}</prosody>`
+}
+
+function sayBlock(text: string) {
+  return `<Say voice="${VOICE_NAME}" language="${VOICE_LANGUAGE}">${speechify(text)}</Say>`
+}
+
 function gatherSpeechXml(prompt: string, actionUrl: string) {
   return twimlResponse(`
-  <Gather input="speech" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="en-US">
-    <Say voice="alice">${xmlEscape(prompt)}</Say>
+  <Gather input="speech" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="${VOICE_LANGUAGE}">
+    ${sayBlock(prompt)}
   </Gather>
-  <Say voice="alice">We did not receive a response. A member of our team will follow up shortly. Goodbye.</Say>
+  ${sayBlock("I didn’t catch that. Someone from our team will follow up shortly. Goodbye.")}
   <Hangup/>`)
 }
 
 function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
   return twimlResponse(`
-  <Gather input="speech dtmf" numDigits="1" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="en-US">
-    <Say voice="alice">${xmlEscape(prompt)}</Say>
+  <Gather input="speech dtmf" numDigits="1" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="${VOICE_LANGUAGE}">
+    ${sayBlock(prompt)}
   </Gather>
-  <Say voice="alice">We did not receive a response. A member of our team will follow up shortly. Goodbye.</Say>
+  ${sayBlock("I didn’t catch that. Someone from our team will follow up shortly. Goodbye.")}
   <Hangup/>`)
 }
 
 function firstPrompt() {
   return (
     "Thanks for calling Good2Go Roofing. " +
-    "If you need emergency tarping right now, press 1 at any time. " +
-    "Otherwise, please briefly tell me if you need an estimate, an inspection, or help with an existing project."
+    "If this is an emergency tarp request, press 1 now. " +
+    "Otherwise, in a few words, tell me whether you need an estimate, an inspection, or help with an existing project."
   )
 }
 
 function namePrompt() {
-  return "Thanks. Let’s get a few quick details so the right person can call you back. Please say your full name."
+  return "Got it. Let me grab a few quick details so the right person can call you back. First, please say your full name."
 }
 
 function addressPrompt() {
-  return "Please say the property address. If you do not want to say the full address right now, you can just say the zip code."
+  return "Thanks. Now please say the property address. If you’d rather not say the full address right now, just say the zip code."
 }
 
 function callbackNumberPrompt(from: string | null) {
   if (!from) {
-    return "Please say the best callback number for our team to reach you."
+    return "What’s the best callback number for our team to reach you?"
   }
 
-  const spoken = normalizePhone(from)?.replace(/\D/g, "").split("").join(" ") || "your caller ID number"
-
   return (
-    `I have your caller ID as ${spoken}. ` +
-    "If that is the best callback number, say yes. Otherwise, say the best callback number now."
+    "I can use the number you’re calling from as your callback number. " +
+    "If that works, just say yes. Otherwise, say the best callback number now."
   )
 }
 
 function callbackTimePrompt() {
-  return "What is the best time for our team to call you back?"
+  return "And what’s the best time for our team to call you back?"
 }
 
 function emergencyTarpSpokenResponse() {
   return (
-    "Thanks. We’ve marked this as an urgent emergency tarp request. " +
+    "Okay. I’ve marked this as an urgent emergency tarp request. " +
     "Please stay available for a callback from our team."
   )
+}
+
+function isAffirmative(value: string | null | undefined) {
+  const v = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]/g, "")
+
+  return ["yes", "yeah", "yep", "correct", "that works", "use that", "use that number"].includes(v)
+}
+
+async function getTenantIdBySlug(slug: string) {
+  const result = await pool.query(
+    `select id from tenants where slug = $1 limit 1`,
+    [slug]
+  )
+
+  if (!result.rowCount) {
+    throw new Error(`Tenant not found for slug: ${slug}`)
+  }
+
+  return Number(result.rows[0].id)
+}
+
+async function getJobByCallSid(callSid: string | null | undefined) {
+  if (!callSid) return null
+
+  const result = await pool.query(
+    `
+    select
+      tenant_id,
+      job_id
+    from timeline_events
+    where kind = 'voice_call_received'
+      and meta->>'call_sid' = $1
+    order by id desc
+    limit 1
+    `,
+    [callSid]
+  )
+
+  if (!result.rowCount) return null
+  return {
+    tenant_id: Number(result.rows[0].tenant_id),
+    job_id: Number(result.rows[0].job_id),
+  }
 }
 
 async function addTimelineEvent(
@@ -149,6 +204,59 @@ async function addTimelineEvent(
     `,
     [tenantId, jobId, kind, message, JSON.stringify(meta)]
   )
+}
+
+async function addVoiceCallReceivedOnce(
+  tenantId: number,
+  jobId: number,
+  callSid: string | null,
+  from: string | null
+) {
+  if (!callSid) return
+
+  const existing = await pool.query(
+    `
+    select id
+    from timeline_events
+    where kind = 'voice_call_received'
+      and tenant_id = $1
+      and job_id = $2
+      and meta->>'call_sid' = $3
+    limit 1
+    `,
+    [tenantId, jobId, callSid]
+  )
+
+  if (existing.rowCount) return
+
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "voice_call_received",
+    "Inbound call received on Twilio number",
+    {
+      call_sid: callSid,
+      from,
+      channel: "voice",
+    }
+  )
+}
+
+async function hasFollowupSmsForCall(callSid: string | null | undefined) {
+  if (!callSid) return false
+
+  const result = await pool.query(
+    `
+    select id
+    from timeline_events
+    where kind = 'voice_followup_sms_sent'
+      and meta->>'call_sid' = $1
+    limit 1
+    `,
+    [callSid]
+  )
+
+  return Boolean(result.rowCount)
 }
 
 async function getLatestJobByPhone(phone: string | null) {
@@ -176,6 +284,58 @@ async function getLatestJobByPhone(phone: string | null) {
 
   if (!result.rowCount) return null
   return result.rows[0]
+}
+
+async function getOrCreateVoiceJob(tenantSlug: string, from: string | null, callSid: string | null) {
+  const existing = await getJobByCallSid(callSid)
+  if (existing) {
+    return {
+      tenant_id: existing.tenant_id,
+      job_id: existing.job_id,
+      reused: true,
+    }
+  }
+
+  const created = await startVoiceIntakeLead(tenantSlug, from)
+  const tenantId = await getTenantIdBySlug(tenantSlug)
+
+  await addVoiceCallReceivedOnce(tenantId, Number(created.job_id), callSid, from)
+
+  return {
+    tenant_id: tenantId,
+    job_id: Number(created.job_id),
+    reused: false,
+  }
+}
+
+async function sendPostCallFollowupText(
+  tenantId: number,
+  jobId: number,
+  callSid: string | null,
+  callbackNumber: string | null,
+  finalMessage: string
+) {
+  if (!callbackNumber) return
+  if (await hasFollowupSmsForCall(callSid)) return
+
+  const dnc = await isPhoneDnc(tenantId, callbackNumber)
+  if (dnc) return
+
+  const smsText = `${finalMessage} You can reply here with any updates or questions.`
+
+  await sendSMS(callbackNumber, smsText)
+
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "voice_followup_sms_sent",
+    smsText,
+    {
+      channel: "sms",
+      call_sid: callSid,
+      to: callbackNumber,
+    }
+  )
 }
 
 async function registerTwilioWebhook(app: FastifyInstance) {
@@ -303,13 +463,15 @@ async function registerTwilioWebhook(app: FastifyInstance) {
   app.post("/twilio/inbound-call", async (req, reply) => {
     const body = (req as any).body || {}
     const from = normalizePhone(body.From ? String(body.From) : null)
+    const callSid = String(body.CallSid || "").trim() || null
     const tenantSlug = "g2g-roofing"
 
-    const created = await startVoiceIntakeLead(tenantSlug, from)
+    const voiceJob = await getOrCreateVoiceJob(tenantSlug, from, callSid)
 
     const actionUrl = buildActionUrl("/twilio/voice/reason", {
       tenantSlug,
-      jobId: created.job_id,
+      jobId: voiceJob.job_id,
+      callSid: callSid || "",
     })
 
     return replyXml(reply, gatherSpeechOrDigitsXml(firstPrompt(), actionUrl))
@@ -317,120 +479,163 @@ async function registerTwilioWebhook(app: FastifyInstance) {
 
   app.post("/twilio/voice/reason", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId } = (req as any).query || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
     const from = normalizePhone(body.From ? String(body.From) : null)
     const reason = getSpeech(body)
     const digits = getDigits(body)
 
     if (!tenantSlug || !jobId) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture your request. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("We couldn’t capture your request. Please try again later.")}
+  <Hangup/>`)
+      )
     }
 
     if (digits === "1") {
       await saveVoiceReason(String(tenantSlug), Number(jobId), from, "Emergency tarp request")
-      const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId })
-      return replyXml(reply, gatherSpeechXml(`${emergencyTarpSpokenResponse()} Please say your full name.`, actionUrl))
+      const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId, callSid: String(callSid || "") })
+      return replyXml(
+        reply,
+        gatherSpeechXml(`${emergencyTarpSpokenResponse()} Please say your full name.`, actionUrl)
+      )
     }
 
     if (!reason) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture the reason for your call. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I didn’t catch what you need help with. Please call back and try again.")}
+  <Hangup/>`)
+      )
     }
 
     await saveVoiceReason(String(tenantSlug), Number(jobId), from, reason)
 
-    const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId })
+    const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId, callSid: String(callSid || "") })
     return replyXml(reply, gatherSpeechXml(namePrompt(), actionUrl))
   })
 
   app.post("/twilio/voice/name", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId } = (req as any).query || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
     const name = getSpeech(body)
 
     if (!tenantSlug || !jobId || !name) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture your name. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I couldn’t catch your name. Please call back and try again.")}
+  <Hangup/>`)
+      )
     }
 
     await saveVoiceName(String(tenantSlug), Number(jobId), name)
 
-    const actionUrl = buildActionUrl("/twilio/voice/address", { tenantSlug, jobId })
+    const actionUrl = buildActionUrl("/twilio/voice/address", { tenantSlug, jobId, callSid: String(callSid || "") })
     return replyXml(reply, gatherSpeechXml(addressPrompt(), actionUrl))
   })
 
   app.post("/twilio/voice/address", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId } = (req as any).query || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
     const address = getSpeech(body)
     const from = normalizePhone(body.From ? String(body.From) : null)
 
     if (!tenantSlug || !jobId || !address) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture the property address. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I couldn’t catch the property address. Please call back and try again.")}
+  <Hangup/>`)
+      )
     }
 
     await saveVoiceAddress(String(tenantSlug), Number(jobId), address)
 
-    const actionUrl = buildActionUrl("/twilio/voice/callback-number", { tenantSlug, jobId })
+    const actionUrl = buildActionUrl("/twilio/voice/callback-number", { tenantSlug, jobId, callSid: String(callSid || "") })
     return replyXml(reply, gatherSpeechXml(callbackNumberPrompt(from), actionUrl))
   })
 
   app.post("/twilio/voice/callback-number", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId } = (req as any).query || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
     const spokenValue = getSpeech(body)
     const from = normalizePhone(body.From ? String(body.From) : null)
 
     if (!tenantSlug || !jobId) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture the callback number. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I couldn’t capture the callback number. Please call back and try again.")}
+  <Hangup/>`)
+      )
     }
 
-    await saveVoiceCallbackNumber(String(tenantSlug), Number(jobId), from, spokenValue || "yes")
+    let callbackValue = spokenValue || ""
 
-    const actionUrl = buildActionUrl("/twilio/voice/callback-time", { tenantSlug, jobId })
+    if (isAffirmative(spokenValue) && from) {
+      callbackValue = from
+    } else if (!callbackValue && from) {
+      callbackValue = from
+    }
+
+    await saveVoiceCallbackNumber(String(tenantSlug), Number(jobId), from, callbackValue)
+
+    const actionUrl = buildActionUrl("/twilio/voice/callback-time", { tenantSlug, jobId, callSid: String(callSid || "") })
     return replyXml(reply, gatherSpeechXml(callbackTimePrompt(), actionUrl))
   })
 
   app.post("/twilio/voice/callback-time", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId } = (req as any).query || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
     const callbackTime = getSpeech(body)
+    const from = normalizePhone(body.From ? String(body.From) : null)
 
     if (!tenantSlug || !jobId || !callbackTime) {
-      return replyXml(reply, twimlResponse(`
-  <Say voice="alice">We could not capture the callback time. Please try again later.</Say>
-  <Hangup/>`))
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I couldn’t catch the best callback time. Please call back and try again.")}
+  <Hangup/>`)
+      )
     }
 
     await saveVoiceCallbackTime(String(tenantSlug), Number(jobId), callbackTime)
     await sendVoiceIntakeAlert(String(tenantSlug), Number(jobId))
 
     const finalMessage = await getVoiceFinalConfirmation(String(tenantSlug), Number(jobId))
+    const tenantId = await getTenantIdBySlug(String(tenantSlug))
 
     await addTimelineEvent(
-      Number((await getLatestJobByPhone(normalizePhone(body.From ? String(body.From) : null)))?.tenant_id || 1),
+      tenantId,
       Number(jobId),
       "voice_ai_response_spoken",
       finalMessage,
       {
         sender: "Good2Go Roofing Team",
         channel: "voice",
+        call_sid: String(callSid || ""),
       }
     )
 
-    return replyXml(reply, twimlResponse(`
-  <Say voice="alice">${xmlEscape(finalMessage)}</Say>
+    await sendPostCallFollowupText(
+      tenantId,
+      Number(jobId),
+      String(callSid || ""),
+      from,
+      finalMessage
+    )
+
+    return replyXml(
+      reply,
+      twimlResponse(`
+  ${sayBlock(finalMessage)}
   <Pause length="1"/>
-  <Say voice="alice">If you need anything else before we call, feel free to text this number.</Say>
-  <Hangup/>`))
+  ${sayBlock("If you need anything else before we call, you can text this number.")}
+  <Hangup/>`)
+    )
   })
 
   app.post("/twilio/voice/status", async (req, reply) => {

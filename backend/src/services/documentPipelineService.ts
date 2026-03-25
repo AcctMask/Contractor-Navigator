@@ -1,4 +1,6 @@
 import { pool } from "../db/db"
+import { sendAlertEmail } from "./emailService"
+import { sendSMS } from "./twilioService"
 
 export type PackageType =
   | "retail_estimate"
@@ -59,6 +61,10 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   }
 
   return Number(result.rows[0].id)
+}
+
+function cleanAddress(job: any) {
+  return [job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ")
 }
 
 export async function getJobSummaryByTenantSlug(tenantSlug: string, jobId: number) {
@@ -212,10 +218,6 @@ export async function upsertEstimateDetailsByTenantSlug(
   return getEstimateDetailsByTenantSlug(tenantSlug, jobId)
 }
 
-function cleanAddress(job: any) {
-  return [job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ")
-}
-
 export async function listDocumentPackagesByTenantSlug(tenantSlug: string, jobId: number) {
   await ensureDocumentTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -243,6 +245,35 @@ export async function listDocumentPackagesByTenantSlug(tenantSlug: string, jobId
   )
 
   return result.rows
+}
+
+export async function getDocumentPackageById(packageId: number) {
+  await ensureDocumentTables()
+
+  const result = await pool.query(
+    `
+    select
+      id,
+      tenant_id,
+      job_id,
+      package_type,
+      document_title,
+      template_source,
+      status,
+      payload,
+      sent_at,
+      signed_at,
+      signed_file_path,
+      created_at,
+      updated_at
+    from job_document_packages
+    where id = $1
+    limit 1
+    `,
+    [packageId]
+  )
+
+  return result.rowCount ? result.rows[0] : null
 }
 
 export async function createDocumentPackageByTenantSlug(
@@ -348,6 +379,171 @@ export async function createDocumentPackageByTenantSlug(
       documentTitle,
       templateSource,
       JSON.stringify(payload),
+    ]
+  )
+
+  return result.rows[0]
+}
+
+export async function sendDocumentPackage(
+  tenantSlug: string,
+  jobId: number,
+  packageId: number
+) {
+  await ensureDocumentTables()
+  const tenantId = await getTenantIdBySlug(tenantSlug)
+
+  const packageResult = await pool.query(
+    `
+    select *
+    from job_document_packages
+    where tenant_id = $1
+      and job_id = $2
+      and id = $3
+    limit 1
+    `,
+    [tenantId, jobId, packageId]
+  )
+
+  if (!packageResult.rowCount) {
+    throw new Error("Document package not found")
+  }
+
+  const documentPackage = packageResult.rows[0]
+  const job = await getJobSummaryByTenantSlug(tenantSlug, jobId)
+
+  const signBaseUrl =
+    process.env.PUBLIC_SIGN_BASE_URL ||
+    process.env.PUBLIC_BASE_URL ||
+    "http://localhost:5173"
+
+  const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
+  const message = `Good2Go Roofing: Please review and sign your document here: ${signUrl}`
+
+  let smsResult: any = null
+  let emailResult: any = null
+
+  if (job.customer_phone) {
+    smsResult = await sendSMS(job.customer_phone, message)
+  }
+
+  if (job.customer_email) {
+    emailResult = await sendAlertEmail(
+      job.customer_email,
+      documentPackage.document_title,
+      message
+    )
+  }
+
+  await pool.query(
+    `
+    update job_document_packages
+    set
+      status = 'sent',
+      sent_at = now(),
+      updated_at = now()
+    where tenant_id = $1
+      and job_id = $2
+      and id = $3
+    `,
+    [tenantId, jobId, packageId]
+  )
+
+  await pool.query(
+    `
+    insert into timeline_events
+      (tenant_id, job_id, kind, message, meta, created_at)
+    values
+      ($1, $2, 'document_package_sent', $3, $4::jsonb, now())
+    `,
+    [
+      tenantId,
+      jobId,
+      `Document sent: ${documentPackage.document_title}`,
+      JSON.stringify({
+        package_id: packageId,
+        package_type: documentPackage.package_type,
+        sign_url: signUrl,
+        sms: smsResult,
+        email: emailResult,
+      }),
+    ]
+  )
+
+  return {
+    ok: true,
+    package_id: packageId,
+    sign_url: signUrl,
+    sms: smsResult,
+    email: emailResult,
+  }
+}
+
+export async function signDocumentPackage(
+  packageId: number,
+  signerName: string
+) {
+  await ensureDocumentTables()
+
+  const doc = await getDocumentPackageById(packageId)
+
+  if (!doc) {
+    throw new Error("Document package not found")
+  }
+
+  const updatedPayload = {
+    ...(doc.payload || {}),
+    signed_by: signerName,
+    signed_at: new Date().toISOString(),
+  }
+
+  const result = await pool.query(
+    `
+    update job_document_packages
+    set
+      status = 'signed',
+      signed_at = now(),
+      payload = $2::jsonb,
+      updated_at = now()
+    where id = $1
+    returning *
+    `,
+    [packageId, JSON.stringify(updatedPayload)]
+  )
+
+  const alertMsg = `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
+
+  try {
+    if (process.env.ALERT_SMS_TO) {
+      await sendSMS(process.env.ALERT_SMS_TO, alertMsg)
+    }
+
+    if (process.env.ALERT_EMAIL_TO) {
+      await sendAlertEmail(
+        process.env.ALERT_EMAIL_TO,
+        "Document Signed",
+        alertMsg
+      )
+    }
+  } catch (err) {
+    console.error("Notification failed:", err)
+  }
+
+  await pool.query(
+    `
+    insert into timeline_events
+      (tenant_id, job_id, kind, message, meta, created_at)
+    values
+      ($1, $2, 'document_package_signed', $3, $4::jsonb, now())
+    `,
+    [
+      Number(doc.tenant_id),
+      Number(doc.job_id),
+      `Document signed: ${doc.document_title}`,
+      JSON.stringify({
+        package_id: packageId,
+        signer_name: signerName,
+      }),
     ]
   )
 
