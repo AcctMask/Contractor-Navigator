@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import type { CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 
-const API_BASE = "http://localhost:8787"
+const API_BASE = import.meta.env.VITE_API_BASE 
 const TENANT = "g2g-roofing"
 
 type Job = {

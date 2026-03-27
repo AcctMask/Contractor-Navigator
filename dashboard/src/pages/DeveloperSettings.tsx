@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 
-const API = "http://localhost:8787"
+const API = import.meta.env.VITE_API_BASE 
 const TENANT = "g2g-roofing"
 
 type DevSettings = {
