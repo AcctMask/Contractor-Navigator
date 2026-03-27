@@ -1,8 +1,49 @@
 import type { FastifyInstance } from "fastify"
+import fs from "node:fs/promises"
+import path from "node:path"
 import {
   listJobAssetsByTenantSlug,
   saveJobAssetByTenantSlug,
 } from "../services/jobAssetsService"
+
+function getUploadRoot() {
+  return (
+    process.env.UPLOAD_ROOT ||
+    "/Users/stephenpashoian/Desktop/contractor-autopilot-storage"
+  )
+}
+
+function getMimeType(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase()
+
+  switch (ext) {
+    case ".png":
+      return "image/png"
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg"
+    case ".pdf":
+      return "application/pdf"
+    case ".gif":
+      return "image/gif"
+    case ".webp":
+      return "image/webp"
+    case ".txt":
+      return "text/plain; charset=utf-8"
+    case ".zip":
+      return "application/zip"
+    case ".doc":
+      return "application/msword"
+    case ".docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    case ".xls":
+      return "application/vnd.ms-excel"
+    case ".xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    default:
+      return "application/octet-stream"
+  }
+}
 
 export async function registerJobAssetsRoutes(app: FastifyInstance) {
   app.get("/assets/:tenantSlug/job/:jobId", async (request: any, reply) => {
@@ -71,6 +112,39 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.get("/files/*", async (request: any, reply) => {
+    try {
+      const wildcard = String(request.params["*"] || "")
+      const uploadRoot = getUploadRoot()
+
+      if (!wildcard) {
+        reply.code(400)
+        return { ok: false, error: "Missing file path" }
+      }
+
+      const normalizedRelative = wildcard.replace(/^\/+/, "")
+      const absolutePath = path.resolve(uploadRoot, normalizedRelative)
+      const resolvedRoot = path.resolve(uploadRoot)
+
+      if (!absolutePath.startsWith(resolvedRoot)) {
+        reply.code(403)
+        return { ok: false, error: "Forbidden path" }
+      }
+
+      await fs.access(absolutePath)
+
+      const fileBuffer = await fs.readFile(absolutePath)
+      const mimeType = getMimeType(absolutePath)
+
+      reply.header("Content-Type", mimeType)
+      reply.header("Cache-Control", "no-store")
+      return reply.send(fileBuffer)
+    } catch (err: any) {
+      reply.code(404)
+      return { ok: false, error: err?.message || "File not found" }
     }
   })
 }
