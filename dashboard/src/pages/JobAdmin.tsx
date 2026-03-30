@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import type { CSSProperties } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
-const API_BASE = import.meta.env.VITE_API_BASE 
+const API_BASE = import.meta.env.VITE_API_BASE
 const TENANT_SLUG = "g2g-roofing"
 
 type SearchRow = {
@@ -51,6 +51,18 @@ export default function JobAdminPage() {
   const [jobError, setJobError] = useState("")
   const [results, setResults] = useState<SearchRow[]>([])
   const [job, setJob] = useState<JobRow | null>(null)
+
+  const [createName, setCreateName] = useState("")
+  const [createPhone, setCreatePhone] = useState("")
+  const [createEmail, setCreateEmail] = useState("")
+  const [createAddress1, setCreateAddress1] = useState("")
+  const [createCity, setCreateCity] = useState("")
+  const [createState, setCreateState] = useState("FL")
+  const [createZip, setCreateZip] = useState("")
+  const [createStage, setCreateStage] = useState("lead")
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState("")
+  const [createSuccess, setCreateSuccess] = useState("")
 
   const summaryTitle = useMemo(() => {
     if (!job) return "No job loaded"
@@ -117,12 +129,68 @@ export default function JobAdminPage() {
 
       setJob(json.job)
       setJobId(String(numericId))
-
       navigate(`/job/${numericId}`)
     } catch (err: any) {
       setJobError(err?.message || "Load failed")
     } finally {
       setLoadingJob(false)
+    }
+  }
+
+  async function handleCreateJob() {
+    setCreating(true)
+    setCreateError("")
+    setCreateSuccess("")
+
+    try {
+      if (!createName.trim()) {
+        throw new Error("Customer name is required")
+      }
+
+      const res = await fetch(`${API_BASE}/admin/create-job/${TENANT_SLUG}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          customer_name: createName.trim(),
+          customer_phone: createPhone.trim(),
+          customer_email: createEmail.trim(),
+          address1: createAddress1.trim(),
+          city: createCity.trim(),
+          state: createState.trim(),
+          zip: createZip.trim(),
+          stage: createStage.trim() || "lead",
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Create failed")
+      }
+
+      const newId = json?.job?.id
+      if (!newId) {
+        throw new Error("Job created but no ID returned")
+      }
+
+      setCreateSuccess(`Job ${newId} created`)
+      setCreateName("")
+      setCreatePhone("")
+      setCreateEmail("")
+      setCreateAddress1("")
+      setCreateCity("")
+      setCreateState("FL")
+      setCreateZip("")
+      setCreateStage("lead")
+
+      setJobId(String(newId))
+      await loadJobById(newId)
+    } catch (err: any) {
+      setCreateError(err?.message || "Create failed")
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -144,6 +212,100 @@ export default function JobAdminPage() {
             </Link>
           </div>
         </div>
+
+        <section style={cardStyle}>
+          <h2 style={sectionTitleStyle}>Add Job</h2>
+
+          <div style={formGridStyle}>
+            <div>
+              <label style={labelStyle}>Customer Name</label>
+              <input
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="John Smith"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Phone</label>
+              <input
+                value={createPhone}
+                onChange={(e) => setCreatePhone(e.target.value)}
+                placeholder="7275551212"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Email</label>
+              <input
+                value={createEmail}
+                onChange={(e) => setCreateEmail(e.target.value)}
+                placeholder="john@example.com"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Stage</label>
+              <input
+                value={createStage}
+                onChange={(e) => setCreateStage(e.target.value)}
+                placeholder="lead"
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Address</label>
+              <input
+                value={createAddress1}
+                onChange={(e) => setCreateAddress1(e.target.value)}
+                placeholder="123 Main St"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>City</label>
+              <input
+                value={createCity}
+                onChange={(e) => setCreateCity(e.target.value)}
+                placeholder="Largo"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>State</label>
+              <input
+                value={createState}
+                onChange={(e) => setCreateState(e.target.value)}
+                placeholder="FL"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>ZIP</label>
+              <input
+                value={createZip}
+                onChange={(e) => setCreateZip(e.target.value)}
+                placeholder="33770"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+            <button onClick={handleCreateJob} style={buttonStyle} disabled={creating}>
+              {creating ? "Creating..." : "Create Job"}
+            </button>
+            {createError ? <span style={errorTextStyle}>{createError}</span> : null}
+            {createSuccess ? <span style={successTextStyle}>{createSuccess}</span> : null}
+          </div>
+        </section>
 
         <section style={cardStyle}>
           <h2 style={sectionTitleStyle}>Search Jobs</h2>
@@ -394,9 +556,20 @@ const errorTextStyle: CSSProperties = {
   fontWeight: 700,
 }
 
+const successTextStyle: CSSProperties = {
+  color: "#9ff3b0",
+  fontWeight: 700,
+}
+
 const mutedStyle: CSSProperties = {
   color: "rgba(255,255,255,0.82)",
   fontSize: 16,
+}
+
+const formGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 14,
 }
 
 const resultRowStyle: CSSProperties = {

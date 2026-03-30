@@ -24,6 +24,128 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, ticked: true, limit });
   });
 
+  app.post("/admin/create-job/:tenant_slug", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const body: any = (req as any).body || {};
+
+      const customer_name = asNullableString(body.customer_name);
+      const customer_phone = asNullableString(body.customer_phone);
+      const customer_email = asNullableString(body.customer_email);
+      const address1 = asNullableString(body.address1);
+      const city = asNullableString(body.city);
+      const state = asNullableString(body.state);
+      const zip = asNullableString(body.zip);
+      const stage = asNullableString(body.stage) || "lead";
+
+      if (!customer_name) {
+        return reply.code(400).send({ ok: false, error: "customer_name required" });
+      }
+
+      const customerRes = await pool.query(
+        `
+        insert into customers
+          (tenant_id, full_name, phone, email, created_at, updated_at)
+        values
+          ($1, $2, $3, $4, now(), now())
+        returning id, tenant_id, full_name, phone, email, created_at, updated_at
+        `,
+        [tenantId, customer_name, customer_phone, customer_email]
+      );
+
+      const customer = customerRes.rows[0];
+
+      const jobRes = await pool.query(
+        `
+        insert into jobs
+          (
+            tenant_id,
+            customer_id,
+            external_crm,
+            external_job_id,
+            external_customer_id,
+            external_customer_name,
+            customer_phone,
+            customer_email,
+            stage,
+            job_type,
+            address1,
+            city,
+            state,
+            zip,
+            lead_source,
+            lead_source_detail,
+            created_at,
+            updated_at
+          )
+        values
+          (
+            $1,
+            $2,
+            'manual',
+            null,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            'inspection',
+            $8,
+            $9,
+            $10,
+            $11,
+            'manual',
+            'admin_create_job',
+            now(),
+            now()
+          )
+        returning *
+        `,
+        [
+          tenantId,
+          customer.id,
+          String(customer.id),
+          customer_name,
+          customer_phone,
+          customer_email,
+          stage,
+          address1,
+          city,
+          state,
+          zip,
+        ]
+      );
+
+      const job = jobRes.rows[0];
+
+      await pool.query(
+        `
+        insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
+        values ($1, $2, 'manual_job_created', 'Job manually created from Job Admin', $3::jsonb, now())
+        `,
+        [
+          tenantId,
+          job.id,
+          JSON.stringify({
+            customer_name,
+            customer_phone,
+            customer_email,
+            address1,
+            city,
+            state,
+            zip,
+            stage,
+          }),
+        ]
+      );
+
+      return reply.send({ ok: true, tenant_id: tenantId, customer, job });
+    } catch (err: any) {
+      return reply.code(500).send({ ok: false, error: err?.message || "Create job failed" });
+    }
+  });
+
   // Timeline with optional custom date range
   app.get("/admin/timeline/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
