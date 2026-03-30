@@ -1,14 +1,23 @@
-import nodemailer from "nodemailer"
+import nodemailer from "nodemailer";
+
+function required(name: string): string {
+  const v = process.env[name];
+  if (!v) {
+    console.error(`❌ MISSING ENV: ${name}`);
+    throw new Error(`${name} is required`);
+  }
+  return v;
+}
 
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: false, // TLS
+  host: required("SMTP_HOST"),
+  port: Number(required("SMTP_PORT")),
+  secure: false,
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: required("SMTP_USER"),
+    pass: required("SMTP_PASS"),
   },
-})
+});
 
 export async function sendAlertEmail(
   to: string,
@@ -16,23 +25,27 @@ export async function sendAlertEmail(
   text: string
 ) {
   try {
-    const info = await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    console.log("📧 EMAIL ATTEMPT");
+    console.log("TO:", to);
+    console.log("SUBJECT:", subject);
+
+    const from = required("SMTP_FROM") || required("SMTP_USER");
+
+    const result = await transporter.sendMail({
       to,
+      from,
       subject,
       text,
-    })
+    });
 
-    return {
-      messageId: info.messageId,
-      accepted: info.accepted,
-      rejected: info.rejected,
-    }
+    console.log("✅ EMAIL SENT SUCCESS");
+    console.log(result);
+
+    return { ok: true, result };
   } catch (err: any) {
-    console.error("Email send error:", err)
+    console.error("❌ EMAIL FAILED");
+    console.error(err);
 
-    return {
-      error: err?.message || String(err),
-    }
+    return { ok: false, error: err?.message || err };
   }
 }
