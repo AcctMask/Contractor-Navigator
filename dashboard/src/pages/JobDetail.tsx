@@ -158,7 +158,7 @@ export default function JobDetail() {
     damage_location: "",
     damage_summary: "",
     last_human_note: "",
-uploadSelectedFile  })
+  })
 
   const [noteForm, setNoteForm] = useState({
     note: "",
@@ -182,7 +182,8 @@ uploadSelectedFile  })
       setSuccess("")
 
       const res = await fetch(
-        `${API_BASE}/admin/job/${TENANT_SLUG}/job/${jobId}/upload`      )
+        `${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}`
+      )
       const data = await res.json()
 
       if (!res.ok || !data?.ok) {
@@ -315,7 +316,7 @@ uploadSelectedFile  })
       fd.append("note", uploadNote)
 
       const res = await fetch(
-        `${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}/upload`,
+        `${API_BASE}/assets/${TENANT_SLUG}/job/${jobId}/upload`,
         {
           method: "POST",
           body: fd,
@@ -419,7 +420,12 @@ uploadSelectedFile  })
               gap: 18,
             }}
           >
-            <div><strong>Address:</strong> {[job?.address, job?.city, job?.state, job?.zip].filter(Boolean).join(", ") || "—"}</div>
+            <div>
+              <strong>Address:</strong>{" "}
+              {[job?.address, job?.city, job?.state, job?.zip]
+                .filter(Boolean)
+                .join(", ") || "—"}
+            </div>
             <div><strong>Stage:</strong> {job?.stage || "—"}</div>
             <div><strong>CRM Substatus:</strong> {job?.crm_substatus || "—"}</div>
             <div><strong>Phone:</strong> {job?.customer_phone || "—"}</div>
@@ -747,6 +753,7 @@ uploadSelectedFile  })
                   <option value="document">document</option>
                   <option value="contract">contract</option>
                   <option value="inspection">inspection</option>
+                  <option value="estimate">estimate</option>
                   <option value="other">other</option>
                 </select>
               </div>
