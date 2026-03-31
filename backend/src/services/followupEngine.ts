@@ -35,6 +35,11 @@ type TimelineRow = {
   created_at: string
 }
 
+type AlertTargets = {
+  alert_sms_to: string | null
+  alert_email_to: string | null
+}
+
 type InboundClassification =
   | "estimate_request"
   | "inspection_request"
@@ -73,8 +78,46 @@ function normalizePhone(phone: string | null | undefined) {
   return digits ? `+${digits}` : null
 }
 
+function normalizeEmail(email: string | null | undefined) {
+  if (!email) return null
+  const cleaned = email.trim().toLowerCase()
+  return cleaned || null
+}
+
 function cleanPart(value: string | null | undefined) {
   return value && value.trim() ? value.trim() : ""
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim()
+    }
+  }
+  return null
+}
+
+function resolveAlertTargets(settings: Partial<DevSettings> | null | undefined): AlertTargets {
+  const alert_sms_to = normalizePhone(
+    firstNonEmpty(
+      settings?.alert_sms_to,
+      process.env.ALERT_SMS_TO,
+      process.env.ESCALATION_SMS_TO,
+      process.env.TWILIO_ALERT_TO
+    )
+  )
+
+  const alert_email_to = normalizeEmail(
+    firstNonEmpty(
+      settings?.alert_email_to,
+      process.env.ALERT_EMAIL_TO,
+      process.env.ESCALATION_EMAIL_TO,
+      process.env.SMTP_FROM,
+      process.env.SMTP_USER
+    )
+  )
+
+  return { alert_sms_to, alert_email_to }
 }
 
 function buildAddressLine(job: JobRow) {
@@ -90,6 +133,23 @@ function buildAddressLine(job: JobRow) {
 function fillTemplate(message: string, customerName: string | null) {
   const name = customerName && customerName.trim() ? customerName.trim() : "there"
   return message.replace(/\{\{\s*name\s*\}\}/gi, name)
+}
+
+function buildAlertMeta(
+  channelLabel: string,
+  alertTargets: AlertTargets,
+  smsResult: any,
+  emailResult: any,
+  smsPreview: string
+) {
+  return {
+    channel: channelLabel,
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
+    sms_result: smsResult,
+    email_result: emailResult,
+    sms_preview: smsPreview,
+  }
 }
 
 export async function getTenantIdBySlug(slug: string): Promise<number> {
@@ -522,6 +582,8 @@ async function sendBuyingSignalAlerts(
   settings: DevSettings,
   callbackNumber: string | null
 ) {
+  const alertTargets = resolveAlertTargets(settings)
+
   const summary = buildDispatcherSummary("BUYING SIGNAL DISPATCH SUMMARY", job, {
     callbackNumber,
     message: inboundMessage,
@@ -532,26 +594,42 @@ async function sendBuyingSignalAlerts(
   let smsResult: any = null
   let emailResult: any = null
 
-  try {
-    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
-  } catch (err: any) {
-    smsResult = { error: err?.message || String(err) }
+  console.log("📣 BUYING SIGNAL ALERT TARGETS", {
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
+    matchedSignals,
+    jobId: job.id,
+  })
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
+    } catch (err: any) {
+      smsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    smsResult = { skipped: true, reason: "missing_alert_sms_to" }
   }
 
-  try {
-    emailResult = await sendAlertEmail(
-      settings.alert_email_to,
-      `Buying signal: ${job.customer_name || `Job #${job.id}`}`,
-      summary.email
-    )
-  } catch (err: any) {
-    emailResult = { error: err?.message || String(err) }
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `Buying signal: ${job.customer_name || `Job #${job.id}`}`,
+        summary.email
+      )
+    } catch (err: any) {
+      emailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    emailResult = { skipped: true, reason: "missing_alert_email_to" }
   }
 
   return {
     sms: smsResult,
     email: emailResult,
     sms_preview: summary.sms,
+    alertTargets,
   }
 }
 
@@ -563,6 +641,8 @@ async function sendActionAlert(
   callbackNumber: string | null,
   channel: "sms" | "voice"
 ) {
+  const alertTargets = resolveAlertTargets(settings)
+
   const nextActionMap: Record<string, string> = {
     estimate_request: "Call customer and schedule estimate / inspection.",
     inspection_request: "Call customer and confirm inspection timing.",
@@ -585,30 +665,49 @@ async function sendActionAlert(
   let smsResult: any = null
   let emailResult: any = null
 
-  try {
-    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
-  } catch (err: any) {
-    smsResult = { error: err?.message || String(err) }
+  console.log("📣 ACTION ALERT TARGETS", {
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
+    classification,
+    jobId: job.id,
+    channel,
+  })
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
+    } catch (err: any) {
+      smsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    smsResult = { skipped: true, reason: "missing_alert_sms_to" }
   }
 
-  try {
-    emailResult = await sendAlertEmail(
-      settings.alert_email_to,
-      `Action needed: ${classification} - ${job.customer_name || `Job #${job.id}`}`,
-      summary.email
-    )
-  } catch (err: any) {
-    emailResult = { error: err?.message || String(err) }
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `Action needed: ${classification} - ${job.customer_name || `Job #${job.id}`}`,
+        summary.email
+      )
+    } catch (err: any) {
+      emailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    emailResult = { skipped: true, reason: "missing_alert_email_to" }
   }
 
   return {
     sms: smsResult,
     email: emailResult,
     sms_preview: summary.sms,
+    alertTargets,
   }
 }
 
 async function sendNewLeadAlert(job: JobRow, settings: DevSettings, callbackNumber: string | null) {
+  const alertTargets = resolveAlertTargets(settings)
+
   const summary = buildDispatcherSummary("NEW LEAD DISPATCH SUMMARY", job, {
     callbackNumber,
     nextAction: "Review lead and call customer.",
@@ -618,30 +717,47 @@ async function sendNewLeadAlert(job: JobRow, settings: DevSettings, callbackNumb
   let smsResult: any = null
   let emailResult: any = null
 
-  try {
-    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
-  } catch (err: any) {
-    smsResult = { error: err?.message || String(err) }
+  console.log("📣 NEW LEAD ALERT TARGETS", {
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
+    jobId: job.id,
+  })
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
+    } catch (err: any) {
+      smsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    smsResult = { skipped: true, reason: "missing_alert_sms_to" }
   }
 
-  try {
-    emailResult = await sendAlertEmail(
-      settings.alert_email_to,
-      `New lead: ${job.customer_name || `Job #${job.id}`}`,
-      summary.email
-    )
-  } catch (err: any) {
-    emailResult = { error: err?.message || String(err) }
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `New lead: ${job.customer_name || `Job #${job.id}`}`,
+        summary.email
+      )
+    } catch (err: any) {
+      emailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    emailResult = { skipped: true, reason: "missing_alert_email_to" }
   }
 
   return {
     sms: smsResult,
     email: emailResult,
     sms_preview: summary.sms,
+    alertTargets,
   }
 }
 
 async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callbackNumber: string | null) {
+  const alertTargets = resolveAlertTargets(settings)
+
   const summary = buildDispatcherSummary("NEW ESTIMATE DISPATCH SUMMARY", job, {
     callbackNumber,
     nextAction: "Review estimate and follow up.",
@@ -651,32 +767,48 @@ async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callback
   let smsResult: any = null
   let emailResult: any = null
 
-  try {
-    smsResult = await sendSMS(settings.alert_sms_to, summary.sms)
-  } catch (err: any) {
-    smsResult = { error: err?.message || String(err) }
+  console.log("📣 NEW ESTIMATE ALERT TARGETS", {
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
+    jobId: job.id,
+  })
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
+    } catch (err: any) {
+      smsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    smsResult = { skipped: true, reason: "missing_alert_sms_to" }
   }
 
-  try {
-    emailResult = await sendAlertEmail(
-      settings.alert_email_to,
-      `New estimate: ${job.customer_name || `Job #${job.id}`}`,
-      summary.email
-    )
-  } catch (err: any) {
-    emailResult = { error: err?.message || String(err) }
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `New estimate: ${job.customer_name || `Job #${job.id}`}`,
+        summary.email
+      )
+    } catch (err: any) {
+      emailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    emailResult = { skipped: true, reason: "missing_alert_email_to" }
   }
 
   return {
     sms: smsResult,
     email: emailResult,
     sms_preview: summary.sms,
+    alertTargets,
   }
 }
 
 export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: number) {
   const tenantId = await getTenantIdBySlug(tenantSlug)
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
+  const alertTargets = resolveAlertTargets(settings)
   const job = await getJob(tenantId, jobId)
 
   if (job.bot_paused) {
@@ -703,14 +835,14 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       tenantId,
       jobId,
       "new_lead_alert_routed",
-      `New lead alert sent to ${settings.alert_sms_to} and ${settings.alert_email_to}`,
-      {
-        alert_sms_to: settings.alert_sms_to,
-        alert_email_to: settings.alert_email_to,
-        sms_result: alertResults.sms,
-        email_result: alertResults.email,
-        sms_preview: alertResults.sms_preview,
-      }
+      `New lead alert processed for ${alertTargets.alert_sms_to || "no-sms-target"} and ${alertTargets.alert_email_to || "no-email-target"}`,
+      buildAlertMeta(
+        "lead",
+        alertResults.alertTargets,
+        alertResults.sms,
+        alertResults.email,
+        alertResults.sms_preview
+      )
     )
   }
 
@@ -721,14 +853,14 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       tenantId,
       jobId,
       "new_estimate_alert_routed",
-      `New estimate alert sent to ${settings.alert_sms_to} and ${settings.alert_email_to}`,
-      {
-        alert_sms_to: settings.alert_sms_to,
-        alert_email_to: settings.alert_email_to,
-        sms_result: alertResults.sms,
-        email_result: alertResults.email,
-        sms_preview: alertResults.sms_preview,
-      }
+      `New estimate alert processed for ${alertTargets.alert_sms_to || "no-sms-target"} and ${alertTargets.alert_email_to || "no-email-target"}`,
+      buildAlertMeta(
+        "estimate",
+        alertResults.alertTargets,
+        alertResults.sms,
+        alertResults.email,
+        alertResults.sms_preview
+      )
     )
   }
 
@@ -874,6 +1006,7 @@ export async function handleInboundMessageByTenantSlug(
 ) {
   const tenantId = await getTenantIdBySlug(tenantSlug)
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
+  const alertTargets = resolveAlertTargets(settings)
   const job = await getJob(tenantId, jobId)
   const trimmed = inboundMessage.trim()
   const callbackNumber = await getCustomerPhone(tenantId, job.customer_id)
@@ -934,15 +1067,14 @@ export async function handleInboundMessageByTenantSlug(
       tenantId,
       jobId,
       "action_alert_routed",
-      `Action alert sent for ${classification}`,
-      {
-        classification,
-        alert_sms_to: settings.alert_sms_to,
-        alert_email_to: settings.alert_email_to,
-        sms_result: actionAlertResults.sms,
-        email_result: actionAlertResults.email,
-        sms_preview: actionAlertResults.sms_preview,
-      }
+      `Action alert processed for ${classification}`,
+      buildAlertMeta(
+        "sms_reply_action",
+        actionAlertResults.alertTargets,
+        actionAlertResults.sms,
+        actionAlertResults.email,
+        actionAlertResults.sms_preview
+      )
     )
 
     await sendAutoClassificationReply(tenantId, jobId, job, classification, settings)
@@ -956,8 +1088,8 @@ export async function handleInboundMessageByTenantSlug(
       "Buying signal detected from customer reply",
       {
         matched_signals: matchedSignals,
-        alert_sms_to: settings.alert_sms_to,
-        alert_email_to: settings.alert_email_to,
+        alert_sms_to: alertTargets.alert_sms_to,
+        alert_email_to: alertTargets.alert_email_to,
       }
     )
 
@@ -973,15 +1105,14 @@ export async function handleInboundMessageByTenantSlug(
       tenantId,
       jobId,
       "alert_routed",
-      `Buying signal alert sent to ${settings.alert_sms_to} and ${settings.alert_email_to}`,
-      {
-        matched_signals: matchedSignals,
-        alert_sms_to: settings.alert_sms_to,
-        alert_email_to: settings.alert_email_to,
-        sms_result: alertResults.sms,
-        email_result: alertResults.email,
-        sms_preview: alertResults.sms_preview,
-      }
+      "Buying signal alert processed",
+      buildAlertMeta(
+        "buying_signal",
+        alertResults.alertTargets,
+        alertResults.sms,
+        alertResults.email,
+        alertResults.sms_preview
+      )
     )
   }
 
@@ -993,8 +1124,10 @@ export async function handleInboundMessageByTenantSlug(
     crm_substatus: routing.crm_substatus,
     crm_flow_key: routing.crm_flow_key,
     matched_signals: matchedSignals,
-    alert_sms_to: matchedSignals.length || classification !== "unknown" ? settings.alert_sms_to : null,
-    alert_email_to: matchedSignals.length || classification !== "unknown" ? settings.alert_email_to : null,
+    alert_sms_to:
+      matchedSignals.length || classification !== "unknown" ? alertTargets.alert_sms_to : null,
+    alert_email_to:
+      matchedSignals.length || classification !== "unknown" ? alertTargets.alert_email_to : null,
   }
 }
 
@@ -1060,6 +1193,7 @@ export async function createLeadFromInboundCallByTenantSlug(
   }
 ) {
   const tenantId = await getTenantIdBySlug(tenantSlug)
+  const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const phone = normalizePhone(payload.callerPhone)
   const fullName = payload.callerName?.trim() || "Inbound Caller"
   const source = payload.source?.trim() || "Phone Call"
@@ -1155,6 +1289,28 @@ export async function createLeadFromInboundCallByTenantSlug(
       source,
     }
   )
+
+  if (!hasTimelineKind(await getTimeline(tenantId, jobId), "new_lead_alert_routed")) {
+    const alertResults = await sendNewLeadAlert(
+      await getJob(tenantId, jobId),
+      settings,
+      phone
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "new_lead_alert_routed",
+      "New voice lead alert processed",
+      buildAlertMeta(
+        "voice_lead",
+        alertResults.alertTargets,
+        alertResults.sms,
+        alertResults.email,
+        alertResults.sms_preview
+      )
+    )
+  }
 
   return {
     ok: true,
