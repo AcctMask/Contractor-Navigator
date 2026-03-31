@@ -158,7 +158,7 @@ export default function JobDetail() {
     damage_location: "",
     damage_summary: "",
     last_human_note: "",
-  })
+uploadSelectedFile  })
 
   const [noteForm, setNoteForm] = useState({
     note: "",
@@ -182,8 +182,7 @@ export default function JobDetail() {
       setSuccess("")
 
       const res = await fetch(
-        `${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}`
-      )
+        `${API_BASE}/admin/job/${TENANT_SLUG}/job/${jobId}/upload`      )
       const data = await res.json()
 
       if (!res.ok || !data?.ok) {
