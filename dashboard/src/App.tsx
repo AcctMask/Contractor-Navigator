@@ -1,4 +1,5 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
+import type { CSSProperties } from "react"
 import UsersPage from "./pages/Users"
 import JobAdminPage from "./pages/JobAdmin"
 import JobDetailPage from "./pages/JobDetail"
@@ -7,6 +8,7 @@ import DeveloperSettingsPage from "./pages/DeveloperSettings"
 import LoginPage from "./pages/Login"
 import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
+import CalendarPage from "./pages/Calendar"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
 import SignDocument from "./pages/SignDocument"
@@ -47,6 +49,13 @@ function HeaderBar() {
               style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}
             >
               Jobs
+            </Link>
+
+            <Link
+              to="/calendar"
+              style={location.pathname === "/calendar" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Calendar
             </Link>
 
             <Link
@@ -139,6 +148,18 @@ export default function App() {
       />
 
       <Route
+        path="/calendar"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <CalendarPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/developer-settings"
         element={
           <ProtectedRoute>
@@ -168,7 +189,7 @@ export default function App() {
   )
 }
 
-const pageStyle: React.CSSProperties = {
+const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background:
     "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
@@ -176,7 +197,7 @@ const pageStyle: React.CSSProperties = {
   padding: "28px",
 }
 
-const activeLinkStyle: React.CSSProperties = {
+const activeLinkStyle: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
@@ -186,7 +207,7 @@ const activeLinkStyle: React.CSSProperties = {
   border: "none",
 }
 
-const mutedLinkStyle: React.CSSProperties = {
+const mutedLinkStyle: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "rgba(255,255,255,0.08)",
@@ -196,7 +217,7 @@ const mutedLinkStyle: React.CSSProperties = {
   display: "inline-block",
 }
 
-const logoutButtonStyle: React.CSSProperties = {
+const logoutButtonStyle: CSSProperties = {
   color: "#fff",
   background: "rgba(255,255,255,0.08)",
   border: "1px solid rgba(255,255,255,0.12)",

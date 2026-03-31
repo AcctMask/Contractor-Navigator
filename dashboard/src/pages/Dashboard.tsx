@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
+import type { CSSProperties } from "react"
 
-const API_BASE = import.meta.env.VITE_API_BASE 
+const API_BASE = import.meta.env.VITE_API_BASE
 const TENANT_SLUG = "g2g-roofing"
 
 type DashboardJob = {
@@ -29,8 +30,28 @@ type DashboardJob = {
   customer_name?: string | null
 }
 
+type CalendarEventSummary = {
+  id: number
+  title?: string | null
+  event_type?: string | null
+  start_at?: string | null
+  end_at?: string | null
+  status?: string | null
+  assigned_to?: string | null
+  customer_name?: string | null
+  job_id?: number | null
+}
+
+function fmtDate(value?: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString()
+}
+
 export default function DashboardPage() {
   const [jobs, setJobs] = useState<DashboardJob[]>([])
+  const [events, setEvents] = useState<CalendarEventSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -43,14 +64,20 @@ export default function DashboardPage() {
       setLoading(true)
       setError("")
 
-      const res = await fetch(`${API_BASE}/admin/jobs/${TENANT_SLUG}?limit=250`)
-      const data = await res.json()
+      const [jobsRes, eventsRes] = await Promise.all([
+        fetch(`${API_BASE}/admin/jobs/${TENANT_SLUG}?limit=250`),
+        fetch(`${API_BASE}/admin/calendar/${TENANT_SLUG}?limit=20`)
+      ])
 
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.error || "Dashboard load failed")
+      const jobsData = await jobsRes.json()
+      const eventsData = await eventsRes.json()
+
+      if (!jobsRes.ok || !jobsData?.ok) {
+        throw new Error(jobsData?.error || "Dashboard load failed")
       }
 
-      setJobs(Array.isArray(data.jobs) ? data.jobs : [])
+      setJobs(Array.isArray(jobsData.jobs) ? jobsData.jobs : [])
+      setEvents(Array.isArray(eventsData?.events) ? eventsData.events : [])
     } catch (err: any) {
       setError(err?.message || "Dashboard load failed")
     } finally {
@@ -78,6 +105,13 @@ export default function DashboardPage() {
   }).length
 
   const newestJobs = sortedJobs.slice(0, 10)
+  const upcomingEvents = [...events]
+    .sort((a, b) => {
+      const aTime = new Date(a.start_at || 0).getTime()
+      const bTime = new Date(b.start_at || 0).getTime()
+      return aTime - bTime
+    })
+    .slice(0, 6)
 
   return (
     <div style={pageWrap}>
@@ -109,6 +143,9 @@ export default function DashboardPage() {
             <Link to="/job-admin" style={sideNavItem}>
               Customer Search
             </Link>
+            <Link to="/calendar" style={sideNavItem}>
+              Calendar
+            </Link>
             <Link to="/document-pipeline" style={sideNavItem}>
               Documents
             </Link>
@@ -139,12 +176,12 @@ export default function DashboardPage() {
                 Customer Search
               </Link>
 
-              <Link to="/job-admin" style={secondaryActionLink}>
-                Message Center
+              <Link to="/calendar" style={secondaryActionLink}>
+                Calendar
               </Link>
 
-              <Link to="/job-admin" style={secondaryActionLink}>
-                Send Estimate
+              <Link to="/document-pipeline" style={secondaryActionLink}>
+                Documents
               </Link>
 
               <Link to="/job-admin" style={primaryActionAlt}>
@@ -246,16 +283,41 @@ export default function DashboardPage() {
             </div>
 
             <div style={panelCardSide}>
-              <h2 style={panelTitle}>Selected Job</h2>
-              <div style={panelSub}>Live data from your backend opens from Job Admin.</div>
+              <h2 style={panelTitle}>Upcoming Calendar</h2>
+              <div style={panelSub}>Scheduled projects, inspections, and appointments.</div>
 
-              <div style={selectedEmpty}>
-                Select a job from Command Center to view notes, contacts, claim data, history, and stage controls.
+              <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+                {loading ? (
+                  <div style={selectedEmpty}>Loading calendar…</div>
+                ) : upcomingEvents.length === 0 ? (
+                  <div style={selectedEmpty}>
+                    No calendar events yet. Add one from the Calendar page.
+                  </div>
+                ) : (
+                  upcomingEvents.map((event) => (
+                    <div key={event.id} style={selectedEmpty}>
+                      <div style={{ fontWeight: 800, marginBottom: 6 }}>
+                        {event.title || "Untitled Event"}
+                      </div>
+                      <div>{fmtDate(event.start_at)}</div>
+                      <div>Status: {event.status || "scheduled"}</div>
+                      <div>Type: {event.event_type || "appointment"}</div>
+                      <div>Customer: {event.customer_name || "—"}</div>
+                      {event.job_id ? (
+                        <div style={{ marginTop: 8 }}>
+                          <Link to={`/job/${event.job_id}`} style={{ color: "#a9cbff", fontWeight: 700 }}>
+                            Open linked job
+                          </Link>
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                )}
               </div>
 
               <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
-                <Link to="/job-admin" style={primaryAction}>
-                  Open Jobs
+                <Link to="/calendar" style={primaryAction}>
+                  Open Calendar
                 </Link>
                 <Link to="/users" style={secondaryActionLink}>
                   Manage Users
@@ -272,19 +334,19 @@ export default function DashboardPage() {
   )
 }
 
-const pageWrap: React.CSSProperties = {
+const pageWrap: CSSProperties = {
   maxWidth: "1200px",
   margin: "0 auto",
 }
 
-const layout: React.CSSProperties = {
+const layout: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "230px 1fr",
   gap: "22px",
   alignItems: "start",
 }
 
-const sidebar: React.CSSProperties = {
+const sidebar: CSSProperties = {
   background: "rgba(8, 22, 59, 0.7)",
   border: "1px solid rgba(81, 133, 255, 0.18)",
   borderRadius: "22px",
@@ -293,14 +355,14 @@ const sidebar: React.CSSProperties = {
   top: "16px",
 }
 
-const brandRow: React.CSSProperties = {
+const brandRow: CSSProperties = {
   display: "flex",
   gap: "12px",
   alignItems: "center",
   marginBottom: "18px",
 }
 
-const brandBadge: React.CSSProperties = {
+const brandBadge: CSSProperties = {
   width: "42px",
   height: "42px",
   borderRadius: "14px",
@@ -312,17 +374,17 @@ const brandBadge: React.CSSProperties = {
   color: "#fff",
 }
 
-const brandTitle: React.CSSProperties = {
+const brandTitle: CSSProperties = {
   fontSize: "18px",
   fontWeight: 800,
 }
 
-const brandSub: React.CSSProperties = {
+const brandSub: CSSProperties = {
   fontSize: "12px",
   opacity: 0.75,
 }
 
-const companyCard: React.CSSProperties = {
+const companyCard: CSSProperties = {
   background: "rgba(255,255,255,0.05)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "18px",
@@ -330,37 +392,37 @@ const companyCard: React.CSSProperties = {
   marginBottom: "18px",
 }
 
-const companyLabel: React.CSSProperties = {
+const companyLabel: CSSProperties = {
   fontSize: "12px",
   opacity: 0.7,
   marginBottom: "6px",
 }
 
-const companyName: React.CSSProperties = {
+const companyName: CSSProperties = {
   fontSize: "28px",
   fontWeight: 800,
   lineHeight: 1.05,
 }
 
-const companySub: React.CSSProperties = {
+const companySub: CSSProperties = {
   fontSize: "12px",
   opacity: 0.72,
   marginTop: "6px",
 }
 
-const navSectionLabel: React.CSSProperties = {
+const navSectionLabel: CSSProperties = {
   fontSize: "12px",
   opacity: 0.65,
   letterSpacing: "0.08em",
   marginBottom: "10px",
 }
 
-const navList: React.CSSProperties = {
+const navList: CSSProperties = {
   display: "grid",
   gap: "8px",
 }
 
-const sideNavItem: React.CSSProperties = {
+const sideNavItem: CSSProperties = {
   textDecoration: "none",
   color: "#e8eefc",
   padding: "12px 14px",
@@ -369,24 +431,24 @@ const sideNavItem: React.CSSProperties = {
   background: "transparent",
 }
 
-const sideNavItemActive: React.CSSProperties = {
+const sideNavItemActive: CSSProperties = {
   background: "rgba(74,168,255,0.16)",
   border: "1px solid rgba(74,168,255,0.24)",
 }
 
-const sideNavItemMuted: React.CSSProperties = {
+const sideNavItemMuted: CSSProperties = {
   color: "#e8eefc",
   padding: "12px 14px",
   borderRadius: "14px",
   opacity: 0.75,
 }
 
-const main: React.CSSProperties = {
+const main: CSSProperties = {
   display: "grid",
   gap: "22px",
 }
 
-const heroCard: React.CSSProperties = {
+const heroCard: CSSProperties = {
   background: "linear-gradient(135deg, rgba(13,33,85,0.98) 0%, rgba(17,44,108,0.92) 100%)",
   border: "1px solid rgba(81, 133, 255, 0.25)",
   borderRadius: "26px",
@@ -394,7 +456,7 @@ const heroCard: React.CSSProperties = {
   boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
 }
 
-const heroEyebrow: React.CSSProperties = {
+const heroEyebrow: CSSProperties = {
   display: "inline-block",
   fontSize: "12px",
   padding: "8px 12px",
@@ -403,28 +465,28 @@ const heroEyebrow: React.CSSProperties = {
   marginBottom: "12px",
 }
 
-const heroTitle: React.CSSProperties = {
+const heroTitle: CSSProperties = {
   margin: 0,
   fontSize: "36px",
   lineHeight: 1.08,
   maxWidth: "900px",
 }
 
-const heroText: React.CSSProperties = {
+const heroText: CSSProperties = {
   fontSize: "18px",
   opacity: 0.86,
   maxWidth: "860px",
   marginTop: "14px",
 }
 
-const heroActions: React.CSSProperties = {
+const heroActions: CSSProperties = {
   display: "flex",
   gap: "12px",
   flexWrap: "wrap",
   marginTop: "22px",
 }
 
-const primaryAction: React.CSSProperties = {
+const primaryAction: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
@@ -434,7 +496,7 @@ const primaryAction: React.CSSProperties = {
   display: "inline-block",
 }
 
-const primaryActionAlt: React.CSSProperties = {
+const primaryActionAlt: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "linear-gradient(90deg, #2c6af5 0%, #5aaeff 100%)",
@@ -444,7 +506,7 @@ const primaryActionAlt: React.CSSProperties = {
   display: "inline-block",
 }
 
-const secondaryActionLink: React.CSSProperties = {
+const secondaryActionLink: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "rgba(255,255,255,0.08)",
@@ -455,63 +517,63 @@ const secondaryActionLink: React.CSSProperties = {
   display: "inline-block",
 }
 
-const statsGrid: React.CSSProperties = {
+const statsGrid: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(4, 1fr)",
   gap: "18px",
 }
 
-const statCardLink: React.CSSProperties = {
+const statCardLink: CSSProperties = {
   textDecoration: "none",
   color: "#e8eefc",
 }
 
-const statCard: React.CSSProperties = {
+const statCard: CSSProperties = {
   background: "rgba(8, 22, 59, 0.92)",
   border: "1px solid rgba(81, 133, 255, 0.18)",
   borderRadius: "22px",
   padding: "22px",
 }
 
-const statNumber: React.CSSProperties = {
+const statNumber: CSSProperties = {
   fontSize: "44px",
   fontWeight: 800,
   lineHeight: 1,
   marginBottom: "10px",
 }
 
-const statLabel: React.CSSProperties = {
+const statLabel: CSSProperties = {
   fontSize: "18px",
   fontWeight: 700,
 }
 
-const statSub: React.CSSProperties = {
+const statSub: CSSProperties = {
   fontSize: "13px",
   opacity: 0.72,
   marginTop: "6px",
 }
 
-const panelGrid: React.CSSProperties = {
+const panelGrid: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1.2fr 0.9fr",
   gap: "18px",
 }
 
-const panelCardLarge: React.CSSProperties = {
+const panelCardLarge: CSSProperties = {
   background: "rgba(8, 22, 59, 0.92)",
   border: "1px solid rgba(81, 133, 255, 0.18)",
   borderRadius: "24px",
   padding: "22px",
 }
 
-const panelCardSide: React.CSSProperties = {
+const panelCardSide: CSSProperties = {
   background: "rgba(8, 22, 59, 0.92)",
   border: "1px solid rgba(81, 133, 255, 0.18)",
   borderRadius: "24px",
   padding: "22px",
 }
 
-const panelHeaderRow: React.CSSProperties = {
+const panelHeaderRow: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   gap: "16px",
@@ -519,18 +581,18 @@ const panelHeaderRow: React.CSSProperties = {
   flexWrap: "wrap",
 }
 
-const panelTitle: React.CSSProperties = {
+const panelTitle: CSSProperties = {
   margin: 0,
   fontSize: "22px",
 }
 
-const panelSub: React.CSSProperties = {
+const panelSub: CSSProperties = {
   fontSize: "14px",
   opacity: 0.75,
   marginTop: "6px",
 }
 
-const panelSearchButton: React.CSSProperties = {
+const panelSearchButton: CSSProperties = {
   textDecoration: "none",
   color: "#fff",
   background: "rgba(255,255,255,0.08)",
@@ -541,7 +603,7 @@ const panelSearchButton: React.CSSProperties = {
   display: "inline-block",
 }
 
-const tableShell: React.CSSProperties = {
+const tableShell: CSSProperties = {
   marginTop: "18px",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "18px",
@@ -549,7 +611,7 @@ const tableShell: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
 }
 
-const tableHeader: React.CSSProperties = {
+const tableHeader: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
   gap: "10px",
@@ -561,12 +623,12 @@ const tableHeader: React.CSSProperties = {
   borderBottom: "1px solid rgba(255,255,255,0.08)",
 }
 
-const tableRowLink: React.CSSProperties = {
+const tableRowLink: CSSProperties = {
   textDecoration: "none",
   color: "#e8eefc",
 }
 
-const tableRow: React.CSSProperties = {
+const tableRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
   gap: "10px",
@@ -575,13 +637,13 @@ const tableRow: React.CSSProperties = {
   alignItems: "center",
 }
 
-const tableEmpty: React.CSSProperties = {
+const tableEmpty: CSSProperties = {
   padding: "28px 16px",
   textAlign: "center",
   opacity: 0.72,
 }
 
-const selectedEmpty: React.CSSProperties = {
+const selectedEmpty: CSSProperties = {
   marginTop: "18px",
   lineHeight: 1.55,
   opacity: 0.82,
@@ -591,7 +653,7 @@ const selectedEmpty: React.CSSProperties = {
   padding: "16px",
 }
 
-const errorBox: React.CSSProperties = {
+const errorBox: CSSProperties = {
   marginTop: "18px",
   background: "rgba(255, 90, 90, 0.12)",
   border: "1px solid rgba(255, 90, 90, 0.3)",

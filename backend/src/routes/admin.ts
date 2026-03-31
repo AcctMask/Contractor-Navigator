@@ -14,6 +14,12 @@ function asNullableString(v: any): string | null {
   return s.length ? s : null;
 }
 
+function asNullableNumber(v: any): number | null {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function registerAdminRoutes(app: FastifyInstance) {
   app.post("/admin/scheduler/tick", async (req, reply) => {
     const body: any = (req as any).body || {};
@@ -146,7 +152,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     }
   });
 
-  // Timeline with optional custom date range
   app.get("/admin/timeline/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
@@ -317,7 +322,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, tenant_id: tenantId, bootstrapped: true });
   });
 
-  // Jobs list with optional custom date range
   app.get("/admin/jobs/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
@@ -607,6 +611,282 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
 
     return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, contact_saved: true });
+  });
+
+  app.get("/admin/calendar/:tenant_slug", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const q: any = (req.query as any) || {};
+
+      const from = asNullableString(q.from);
+      const to = asNullableString(q.to);
+      const status = asNullableString(q.status);
+      const jobId = asNullableNumber(q.job_id);
+      const limit = Number(q.limit || 250);
+
+      const result = await pool.query(
+        `
+        select
+          ce.*,
+          c.full_name as customer_name,
+          j.stage as job_stage,
+          concat_ws(', ', nullif(j.address1,''), nullif(j.city,''), nullif(j.state,''), nullif(j.zip,'')) as job_address
+        from calendar_events ce
+        left join jobs j
+          on j.id = ce.job_id
+         and j.tenant_id = ce.tenant_id
+        left join customers c
+          on c.id = j.customer_id
+         and c.tenant_id = j.tenant_id
+        where ce.tenant_id = $1
+          and ($2::timestamptz is null or ce.start_at >= $2::timestamptz)
+          and ($3::timestamptz is null or ce.start_at <= $3::timestamptz)
+          and ($4::text is null or ce.status = $4::text)
+          and ($5::bigint is null or ce.job_id = $5::bigint)
+        order by ce.start_at asc, ce.id asc
+        limit $6
+        `,
+        [tenantId, from, to, status, jobId, limit]
+      );
+
+      return reply.send({
+        ok: true,
+        tenant_id: tenantId,
+        filters: { from, to, status, job_id: jobId, limit },
+        events: result.rows
+      });
+    } catch (err: any) {
+      return reply.code(500).send({ ok: false, error: err?.message || "Calendar load failed" });
+    }
+  });
+
+  app.post("/admin/calendar/:tenant_slug/create", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const body: any = (req as any).body || {};
+
+      const title = asNullableString(body.title);
+      const event_type = asNullableString(body.event_type) || "appointment";
+      const start_at = asNullableString(body.start_at);
+      const end_at = asNullableString(body.end_at);
+      const location = asNullableString(body.location);
+      const notes = asNullableString(body.notes);
+      const status = asNullableString(body.status) || "scheduled";
+      const assigned_to = asNullableString(body.assigned_to);
+      const created_by = asNullableString(body.created_by);
+      const job_id = asNullableNumber(body.job_id);
+
+      if (!title) {
+        return reply.code(400).send({ ok: false, error: "title required" });
+      }
+      if (!start_at) {
+        return reply.code(400).send({ ok: false, error: "start_at required" });
+      }
+      if (!end_at) {
+        return reply.code(400).send({ ok: false, error: "end_at required" });
+      }
+
+      const inserted = await pool.query(
+        `
+        insert into calendar_events
+          (
+            tenant_id,
+            job_id,
+            title,
+            event_type,
+            start_at,
+            end_at,
+            location,
+            notes,
+            status,
+            assigned_to,
+            created_by,
+            created_at,
+            updated_at
+          )
+        values
+          ($1,$2,$3,$4,$5::timestamptz,$6::timestamptz,$7,$8,$9,$10,$11,now(),now())
+        returning *
+        `,
+        [
+          tenantId,
+          job_id,
+          title,
+          event_type,
+          start_at,
+          end_at,
+          location,
+          notes,
+          status,
+          assigned_to,
+          created_by
+        ]
+      );
+
+      const event = inserted.rows[0];
+
+      await pool.query(
+        `
+        insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
+        values ($1, $2, 'calendar_event_created', $3, $4::jsonb, now())
+        `,
+        [
+          tenantId,
+          job_id,
+          `Calendar event scheduled: ${title}`,
+          JSON.stringify({
+            event_id: event.id,
+            title,
+            event_type,
+            start_at,
+            end_at,
+            location,
+            status,
+            assigned_to,
+            created_by
+          })
+        ]
+      );
+
+      return reply.send({ ok: true, tenant_id: tenantId, event });
+    } catch (err: any) {
+      return reply.code(500).send({ ok: false, error: err?.message || "Calendar create failed" });
+    }
+  });
+
+  app.post("/admin/calendar/:tenant_slug/:event_id/update", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const eventId = Number((req.params as any).event_id);
+      const body: any = (req as any).body || {};
+
+      const before = await pool.query(
+        `
+        select *
+        from calendar_events
+        where tenant_id = $1 and id = $2
+        limit 1
+        `,
+        [tenantId, eventId]
+      );
+
+      if (!before.rowCount) {
+        return reply.code(404).send({ ok: false, error: "calendar event not found" });
+      }
+
+      const existing = before.rows[0];
+
+      const updated = await pool.query(
+        `
+        update calendar_events
+           set job_id = coalesce($1, job_id),
+               title = coalesce($2, title),
+               event_type = coalesce($3, event_type),
+               start_at = coalesce($4::timestamptz, start_at),
+               end_at = coalesce($5::timestamptz, end_at),
+               location = coalesce($6, location),
+               notes = coalesce($7, notes),
+               status = coalesce($8, status),
+               assigned_to = coalesce($9, assigned_to),
+               updated_at = now()
+         where tenant_id = $10
+           and id = $11
+        returning *
+        `,
+        [
+          asNullableNumber(body.job_id),
+          asNullableString(body.title),
+          asNullableString(body.event_type),
+          asNullableString(body.start_at),
+          asNullableString(body.end_at),
+          asNullableString(body.location),
+          asNullableString(body.notes),
+          asNullableString(body.status),
+          asNullableString(body.assigned_to),
+          tenantId,
+          eventId
+        ]
+      );
+
+      const event = updated.rows[0];
+
+      await pool.query(
+        `
+        insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
+        values ($1, $2, 'calendar_event_updated', $3, $4::jsonb, now())
+        `,
+        [
+          tenantId,
+          event.job_id || existing.job_id || null,
+          `Calendar event updated: ${event.title || existing.title}`,
+          JSON.stringify({
+            event_id: eventId,
+            changes: body
+          })
+        ]
+      );
+
+      return reply.send({ ok: true, tenant_id: tenantId, event });
+    } catch (err: any) {
+      return reply.code(500).send({ ok: false, error: err?.message || "Calendar update failed" });
+    }
+  });
+
+  app.post("/admin/calendar/:tenant_slug/:event_id/delete", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const eventId = Number((req.params as any).event_id);
+
+      const before = await pool.query(
+        `
+        select *
+        from calendar_events
+        where tenant_id = $1 and id = $2
+        limit 1
+        `,
+        [tenantId, eventId]
+      );
+
+      if (!before.rowCount) {
+        return reply.code(404).send({ ok: false, error: "calendar event not found" });
+      }
+
+      const existing = before.rows[0];
+
+      await pool.query(
+        `
+        delete from calendar_events
+        where tenant_id = $1 and id = $2
+        `,
+        [tenantId, eventId]
+      );
+
+      await pool.query(
+        `
+        insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
+        values ($1, $2, 'calendar_event_deleted', $3, $4::jsonb, now())
+        `,
+        [
+          tenantId,
+          existing.job_id || null,
+          `Calendar event deleted: ${existing.title}`,
+          JSON.stringify({
+            event_id: eventId,
+            title: existing.title,
+            start_at: existing.start_at,
+            end_at: existing.end_at
+          })
+        ]
+      );
+
+      return reply.send({ ok: true, tenant_id: tenantId, event_id: eventId, deleted: true });
+    } catch (err: any) {
+      return reply.code(500).send({ ok: false, error: err?.message || "Calendar delete failed" });
+    }
   });
 }
 
