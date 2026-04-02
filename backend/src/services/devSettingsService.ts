@@ -22,8 +22,8 @@ export type DevSettings = {
 }
 
 const DEFAULT_SETTINGS: DevSettings = {
-  alert_sms_to: "+17272154507",
-  alert_email_to: "sales@g2groofing.com",
+  alert_sms_to: "+18557663246",
+  alert_email_to: "info@g2groofing.com",
   lead_timings_minutes: [0, 30, 240, 1440],
   estimate_timings_minutes: [0, 120, 1440, 4320],
   contract_timings_minutes: [0, 1440, 4320, 7200, 10080],
@@ -90,55 +90,94 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-function sanitizeSettings(input: any): DevSettings {
-  const safe = input || {}
-  const inbound = safe.inbound_auto_replies || {}
+function asFiniteNumberArray(value: any, fallback: number[]) {
+  if (!Array.isArray(value)) return fallback
+  const parsed = value.map((n: any) => Number(n)).filter(Number.isFinite)
+  return parsed.length ? parsed : fallback
+}
+
+function asStringArray(value: any, fallback: string[]) {
+  if (!Array.isArray(value)) return fallback
+  const parsed = value.map((s: any) => String(s)).filter((s: string) => s.trim().length > 0)
+  return parsed.length ? parsed : fallback
+}
+
+function asNonEmptyString(value: any, fallback: string) {
+  if (typeof value !== "string") return fallback
+  const trimmed = value.trim()
+  return trimmed.length ? trimmed : fallback
+}
+
+function mergeRawSettings(existing: any, incoming: any) {
+  const left = existing && typeof existing === "object" ? existing : {}
+  const right = incoming && typeof incoming === "object" ? incoming : {}
 
   return {
-    alert_sms_to: String(safe.alert_sms_to || DEFAULT_SETTINGS.alert_sms_to),
-    alert_email_to: String(safe.alert_email_to || DEFAULT_SETTINGS.alert_email_to),
-    lead_timings_minutes: Array.isArray(safe.lead_timings_minutes)
-      ? safe.lead_timings_minutes.map((n: any) => Number(n)).filter(Number.isFinite)
-      : DEFAULT_SETTINGS.lead_timings_minutes,
-    estimate_timings_minutes: Array.isArray(safe.estimate_timings_minutes)
-      ? safe.estimate_timings_minutes.map((n: any) => Number(n)).filter(Number.isFinite)
-      : DEFAULT_SETTINGS.estimate_timings_minutes,
-    contract_timings_minutes: Array.isArray(safe.contract_timings_minutes)
-      ? safe.contract_timings_minutes.map((n: any) => Number(n)).filter(Number.isFinite)
-      : DEFAULT_SETTINGS.contract_timings_minutes,
-    lead_messages: Array.isArray(safe.lead_messages)
-      ? safe.lead_messages.map((s: any) => String(s))
-      : DEFAULT_SETTINGS.lead_messages,
-    estimate_messages: Array.isArray(safe.estimate_messages)
-      ? safe.estimate_messages.map((s: any) => String(s))
-      : DEFAULT_SETTINGS.estimate_messages,
-    contract_messages: Array.isArray(safe.contract_messages)
-      ? safe.contract_messages.map((s: any) => String(s))
-      : DEFAULT_SETTINGS.contract_messages,
+    ...left,
+    ...right,
     inbound_auto_replies: {
-      estimate_request: String(
-        inbound.estimate_request || DEFAULT_SETTINGS.inbound_auto_replies.estimate_request
+      ...(left.inbound_auto_replies || {}),
+      ...(right.inbound_auto_replies || {}),
+    },
+  }
+}
+
+function sanitizeSettings(input: any): DevSettings {
+  const safe = input && typeof input === "object" ? input : {}
+  const inbound = safe.inbound_auto_replies && typeof safe.inbound_auto_replies === "object"
+    ? safe.inbound_auto_replies
+    : {}
+
+  return {
+    alert_sms_to: asNonEmptyString(safe.alert_sms_to, DEFAULT_SETTINGS.alert_sms_to),
+    alert_email_to: asNonEmptyString(safe.alert_email_to, DEFAULT_SETTINGS.alert_email_to),
+    lead_timings_minutes: asFiniteNumberArray(
+      safe.lead_timings_minutes,
+      DEFAULT_SETTINGS.lead_timings_minutes
+    ),
+    estimate_timings_minutes: asFiniteNumberArray(
+      safe.estimate_timings_minutes,
+      DEFAULT_SETTINGS.estimate_timings_minutes
+    ),
+    contract_timings_minutes: asFiniteNumberArray(
+      safe.contract_timings_minutes,
+      DEFAULT_SETTINGS.contract_timings_minutes
+    ),
+    lead_messages: asStringArray(safe.lead_messages, DEFAULT_SETTINGS.lead_messages),
+    estimate_messages: asStringArray(safe.estimate_messages, DEFAULT_SETTINGS.estimate_messages),
+    contract_messages: asStringArray(safe.contract_messages, DEFAULT_SETTINGS.contract_messages),
+    inbound_auto_replies: {
+      estimate_request: asNonEmptyString(
+        inbound.estimate_request,
+        DEFAULT_SETTINGS.inbound_auto_replies.estimate_request
       ),
-      inspection_request: String(
-        inbound.inspection_request || DEFAULT_SETTINGS.inbound_auto_replies.inspection_request
+      inspection_request: asNonEmptyString(
+        inbound.inspection_request,
+        DEFAULT_SETTINGS.inbound_auto_replies.inspection_request
       ),
-      callback_request: String(
-        inbound.callback_request || DEFAULT_SETTINGS.inbound_auto_replies.callback_request
+      callback_request: asNonEmptyString(
+        inbound.callback_request,
+        DEFAULT_SETTINGS.inbound_auto_replies.callback_request
       ),
-      contract_request: String(
-        inbound.contract_request || DEFAULT_SETTINGS.inbound_auto_replies.contract_request
+      contract_request: asNonEmptyString(
+        inbound.contract_request,
+        DEFAULT_SETTINGS.inbound_auto_replies.contract_request
       ),
-      pricing_objection: String(
-        inbound.pricing_objection || DEFAULT_SETTINGS.inbound_auto_replies.pricing_objection
+      pricing_objection: asNonEmptyString(
+        inbound.pricing_objection,
+        DEFAULT_SETTINGS.inbound_auto_replies.pricing_objection
       ),
-      general_question: String(
-        inbound.general_question || DEFAULT_SETTINGS.inbound_auto_replies.general_question
+      general_question: asNonEmptyString(
+        inbound.general_question,
+        DEFAULT_SETTINGS.inbound_auto_replies.general_question
       ),
-      buying_signal_only: String(
-        inbound.buying_signal_only || DEFAULT_SETTINGS.inbound_auto_replies.buying_signal_only
+      buying_signal_only: asNonEmptyString(
+        inbound.buying_signal_only,
+        DEFAULT_SETTINGS.inbound_auto_replies.buying_signal_only
       ),
-      unknown: String(
-        inbound.unknown || DEFAULT_SETTINGS.inbound_auto_replies.unknown
+      unknown: asNonEmptyString(
+        inbound.unknown,
+        DEFAULT_SETTINGS.inbound_auto_replies.unknown
       ),
     },
   }
@@ -168,10 +207,21 @@ export async function getDeveloperSettingsByTenantSlug(slug: string): Promise<De
   return sanitizeSettings(result.rows[0].settings)
 }
 
-export async function saveDeveloperSettingsByTenantSlug(slug: string, input: any): Promise<DevSettings> {
+export async function saveDeveloperSettingsByTenantSlug(
+  slug: string,
+  input: any
+): Promise<DevSettings> {
   await ensureTable()
   const tenantId = await getTenantIdBySlug(slug)
-  const settings = sanitizeSettings(input)
+
+  const existingResult = await pool.query(
+    `select settings from developer_settings where tenant_id = $1 limit 1`,
+    [tenantId]
+  )
+
+  const existingRaw = existingResult.rowCount ? existingResult.rows[0].settings : DEFAULT_SETTINGS
+  const mergedRaw = mergeRawSettings(existingRaw, input)
+  const settings = sanitizeSettings(mergedRaw)
 
   await pool.query(
     `

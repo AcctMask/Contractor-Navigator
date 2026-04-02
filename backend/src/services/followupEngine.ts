@@ -486,9 +486,10 @@ async function sendAutoClassificationReply(
   jobId: number,
   job: JobRow,
   classification: InboundClassification,
-  settings: DevSettings
+  settings: DevSettings,
+  fallbackPhone: string | null
 ) {
-  const phone = await getCustomerPhone(tenantId, job.customer_id)
+  const phone = (await getCustomerPhone(tenantId, job.customer_id)) || fallbackPhone
   if (!phone) {
     await addTimelineEvent(
       tenantId,
@@ -1009,7 +1010,7 @@ export async function handleInboundMessageByTenantSlug(
   const alertTargets = resolveAlertTargets(settings)
   const job = await getJob(tenantId, jobId)
   const trimmed = inboundMessage.trim()
-  const callbackNumber = await getCustomerPhone(tenantId, job.customer_id)
+  const callbackNumber = (await getCustomerPhone(tenantId, job.customer_id)) || normalizePhone(from)
 
   await addTimelineEvent(
     tenantId,
@@ -1039,46 +1040,51 @@ export async function handleInboundMessageByTenantSlug(
     }
   )
 
-  const matchedSignals = detectBuyingSignals(trimmed)
-
-  if (classification !== "unknown") {
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "next_action_routed",
-      `Next action routed for ${classification}`,
-      {
-        classification,
-        crm_substatus: routing.crm_substatus,
-        crm_flow_key: routing.crm_flow_key,
-      }
-    )
-
-    const actionAlertResults = await sendActionAlert(
-      job,
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "next_action_routed",
+    `Next action routed for ${classification}`,
+    {
       classification,
-      trimmed,
-      settings,
-      callbackNumber,
-      "sms"
-    )
+      crm_substatus: routing.crm_substatus,
+      crm_flow_key: routing.crm_flow_key,
+    }
+  )
 
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "action_alert_routed",
-      `Action alert processed for ${classification}`,
-      buildAlertMeta(
-        "sms_reply_action",
-        actionAlertResults.alertTargets,
-        actionAlertResults.sms,
-        actionAlertResults.email,
-        actionAlertResults.sms_preview
-      )
-    )
+  const actionAlertResults = await sendActionAlert(
+    job,
+    classification,
+    trimmed,
+    settings,
+    callbackNumber,
+    "sms"
+  )
 
-    await sendAutoClassificationReply(tenantId, jobId, job, classification, settings)
-  }
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "action_alert_routed",
+    `Action alert processed for ${classification}`,
+    buildAlertMeta(
+      "sms_reply_action",
+      actionAlertResults.alertTargets,
+      actionAlertResults.sms,
+      actionAlertResults.email,
+      actionAlertResults.sms_preview
+    )
+  )
+
+  await sendAutoClassificationReply(
+    tenantId,
+    jobId,
+    job,
+    classification,
+    settings,
+    callbackNumber
+  )
+
+  const matchedSignals = detectBuyingSignals(trimmed)
 
   if (matchedSignals.length) {
     await addTimelineEvent(
@@ -1124,10 +1130,8 @@ export async function handleInboundMessageByTenantSlug(
     crm_substatus: routing.crm_substatus,
     crm_flow_key: routing.crm_flow_key,
     matched_signals: matchedSignals,
-    alert_sms_to:
-      matchedSignals.length || classification !== "unknown" ? alertTargets.alert_sms_to : null,
-    alert_email_to:
-      matchedSignals.length || classification !== "unknown" ? alertTargets.alert_email_to : null,
+    alert_sms_to: alertTargets.alert_sms_to,
+    alert_email_to: alertTargets.alert_email_to,
   }
 }
 
