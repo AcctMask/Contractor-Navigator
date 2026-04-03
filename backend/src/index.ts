@@ -30,6 +30,23 @@ await app.register(multipart, {
   },
 })
 
+app.get("/", async () => {
+  return {
+    ok: true,
+    service: "contractor-autopilot-backend",
+    status: "live",
+    message: "Contractor Navigator backend is running.",
+  }
+})
+
+app.get("/health", async () => {
+  return {
+    ok: true,
+    service: "contractor-autopilot-backend",
+    status: "healthy",
+  }
+})
+
 await registerAdminRoutes(app)
 await registerEventsRoutes(app)
 await registerLeadRoutes(app)
