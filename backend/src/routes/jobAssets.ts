@@ -73,9 +73,18 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
       for await (const part of parts) {
         if (part.type === "field") {
-          if (part.fieldname === "asset_type") assetType = String(part.value || "other")
-          if (part.fieldname === "note") note = String(part.value || "")
-          if (part.fieldname === "uploaded_by") uploadedBy = String(part.value || "")
+          if (part.fieldname === "asset_type") {
+            assetType = String(part.value || "other")
+          }
+          if (part.fieldname === "kind") {
+            assetType = String(part.value || "other")
+          }
+          if (part.fieldname === "note") {
+            note = String(part.value || "")
+          }
+          if (part.fieldname === "uploaded_by") {
+            uploadedBy = String(part.value || "")
+          }
           continue
         }
 
