@@ -128,6 +128,7 @@ export default function JobDetail() {
   const [saving, setSaving] = useState(false)
   const [addingNote, setAddingNote] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [togglingBot, setTogglingBot] = useState(false)
 
   const [job, setJob] = useState<Job | null>(null)
   const [timeline, setTimeline] = useState<TimelineItem[]>([])
@@ -181,9 +182,7 @@ export default function JobDetail() {
       setError("")
       setSuccess("")
 
-      const res = await fetch(
-        `${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}`
-      )
+      const res = await fetch(`${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}`)
       const data = await res.json()
 
       if (!res.ok || !data?.ok) {
@@ -340,6 +339,38 @@ export default function JobDetail() {
     }
   }
 
+  async function toggleBotPaused() {
+    try {
+      setTogglingBot(true)
+      setError("")
+      setSuccess("")
+
+      const res = await fetch(
+        `${API_BASE}/admin/job/${TENANT_SLUG}/${jobId}/update`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bot_paused: !job?.bot_paused,
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to toggle bot")
+      }
+
+      setSuccess(job?.bot_paused ? "Bot resumed." : "Bot paused.")
+      await loadJob()
+    } catch (err: any) {
+      setError(err?.message || String(err))
+    } finally {
+      setTogglingBot(false)
+    }
+  }
+
   if (loading) {
     return (
       <div
@@ -446,7 +477,24 @@ export default function JobDetail() {
               <strong>Damage Summary:</strong> {job?.damage_summary || "—"}
             </div>
 
-            <div><strong>Bot Paused:</strong> {job?.bot_paused ? "Yes" : "No"}</div>
+            <div>
+              <strong>Bot Paused:</strong> {job?.bot_paused ? "Yes" : "No"}
+              <div style={{ marginTop: 8 }}>
+                <button
+                  type="button"
+                  style={buttonStyle(true)}
+                  onClick={toggleBotPaused}
+                  disabled={togglingBot}
+                >
+                  {togglingBot
+                    ? "Updating..."
+                    : job?.bot_paused
+                    ? "Resume Bot"
+                    : "Pause Bot"}
+                </button>
+              </div>
+            </div>
+
             <div><strong>Updated:</strong> {fmtDate(job?.updated_at)}</div>
           </div>
         </div>
@@ -878,7 +926,9 @@ export default function JobDetail() {
                   }}
                 >
                   <div style={{ fontWeight: 800, marginBottom: 6 }}>
-                    {item.kind || "event"}
+                    {item.meta?.author
+                      ? `${item.meta.author} added a note`
+                      : item.kind || "event"}
                   </div>
                   <div style={{ whiteSpace: "pre-wrap" }}>
                     {item.message || "—"}
