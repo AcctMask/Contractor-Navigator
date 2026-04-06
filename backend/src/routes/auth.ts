@@ -9,6 +9,9 @@ import {
   loginUserByTenantSlug,
 } from "../services/authService"
 
+const APP_BASE_URL =
+  process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/auth/:tenantSlug/invite", async (request: any, reply) => {
     try {
@@ -25,7 +28,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return {
         ok: true,
         invite,
-        invite_url: `http://localhost:5173/accept-invite/${invite.invite_token}`,
+        invite_url: `${APP_BASE_URL}/accept-invite/${invite.invite_token}`,
       }
     } catch (err: any) {
       reply.code(400)
