@@ -1,159 +1,321 @@
 import type { FastifyInstance } from "fastify"
-import fs from "node:fs/promises"
-import path from "node:path"
-import {
-  listJobAssetsByTenantSlug,
-  saveJobAssetByTenantSlug,
-} from "../services/jobAssetsService"
+import { pool } from "../db/db"
+import { getTenantIdBySlug } from "../services/followupEngine"
+import fs from "fs"
+import path from "path"
+import { pipeline } from "stream/promises"
+import { randomUUID } from "crypto"
 
-function getUploadRoot() {
-  return (
-    process.env.UPLOAD_ROOT ||
-    "/Users/stephenpashoian/Desktop/contractor-autopilot-storage"
+async function ensureJobExists(tenantId: number, jobId: number) {
+  const result = await pool.query(
+    `select id from jobs where tenant_id = $1 and id = $2 limit 1`,
+    [tenantId, jobId]
   )
-}
 
-function getMimeType(filePath: string) {
-  const ext = path.extname(filePath).toLowerCase()
-
-  switch (ext) {
-    case ".png":
-      return "image/png"
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg"
-    case ".pdf":
-      return "application/pdf"
-    case ".gif":
-      return "image/gif"
-    case ".webp":
-      return "image/webp"
-    case ".txt":
-      return "text/plain; charset=utf-8"
-    case ".zip":
-      return "application/zip"
-    case ".doc":
-      return "application/msword"
-    case ".docx":
-      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    case ".xls":
-      return "application/vnd.ms-excel"
-    case ".xlsx":
-      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    default:
-      return "application/octet-stream"
+  if (!result.rowCount) {
+    throw new Error("Job not found")
   }
 }
 
 export async function registerJobAssetsRoutes(app: FastifyInstance) {
-  app.get("/assets/:tenantSlug/job/:jobId", async (request: any, reply) => {
+  app.get("/assets/:tenantSlug/job/:jobId", async (req: any, reply) => {
     try {
-      const { tenantSlug, jobId } = request.params
-      const assets = await listJobAssetsByTenantSlug(tenantSlug, Number(jobId))
-      return { ok: true, assets }
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+
+      const assetsResult = await pool.query(
+        `
+        select
+          id,
+          job_id,
+          asset_type,
+          bucket,
+          original_name,
+          stored_name,
+          stored_path,
+          relative_path,
+          mime_type,
+          file_size_bytes,
+          note,
+          uploaded_by,
+          created_at,
+          file_name,
+          size_bytes,
+          file_path
+        from job_assets
+        where tenant_id = $1
+          and job_id = $2
+        order by created_at desc, id desc
+        `,
+        [tenantId, Number(jobId)]
+      )
+
+      const notesResult = await pool.query(
+        `
+        select
+          id,
+          message,
+          created_at
+        from timeline_events
+        where tenant_id = $1
+          and job_id = $2
+          and kind = 'staff_note'
+        order by created_at desc, id desc
+        `,
+        [tenantId, Number(jobId)]
+      )
+
+      return {
+        ok: true,
+        assets: assetsResult.rows.map((asset) => ({
+          ...asset,
+          original_name: asset.original_name || asset.file_name || "file",
+          mime_type: asset.mime_type || "",
+          size_bytes: asset.size_bytes || asset.file_size_bytes || null,
+          download_url: `/assets/${tenantSlug}/file/${asset.id}`,
+        })),
+        notes: notesResult.rows,
+      }
     } catch (err: any) {
       reply.code(400)
-      return { ok: false, error: err?.message || String(err) }
+      return { ok: false, error: err?.message || "Load files failed" }
     }
   })
 
-  app.post("/assets/:tenantSlug/job/:jobId/upload", async (request: any, reply) => {
+  app.get("/assets/:tenantSlug/file/:assetId", async (req: any, reply) => {
     try {
-      const { tenantSlug, jobId } = request.params
+      const { tenantSlug, assetId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
 
-      let assetType = "other"
-      let note = ""
-      let uploadedBy = ""
+      const result = await pool.query(
+        `
+        select
+          original_name,
+          stored_path,
+          file_path,
+          mime_type
+        from job_assets
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, Number(assetId)]
+      )
 
-      let originalName = ""
-      let mimeType: string | null = null
-      let fileBuffer: Buffer | null = null
+      if (!result.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "File not found" }
+      }
 
-      const parts = request.parts()
+      const asset = result.rows[0]
+      const resolvedPath = asset.stored_path || asset.file_path
+
+      if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+        reply.code(404)
+        return { ok: false, error: "File missing from disk" }
+      }
+
+      reply.header("Content-Type", asset.mime_type || "application/octet-stream")
+      reply.header("Content-Disposition", `inline; filename="${asset.original_name || "file"}"`)
+
+      return reply.send(fs.createReadStream(resolvedPath))
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Open file failed" }
+    }
+  })
+
+  app.post("/assets/:tenantSlug/job/:jobId/upload", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      await ensureJobExists(tenantId, numericJobId)
+
+      const relativeDir = path.join("job-assets", tenantSlug, String(numericJobId))
+      const jobDir = path.join(process.cwd(), "uploads", relativeDir)
+      fs.mkdirSync(jobDir, { recursive: true })
+
+      const uploaded: any[] = []
+      const parts = req.files()
 
       for await (const part of parts) {
-        if (part.type === "field") {
-          if (part.fieldname === "asset_type") {
-            assetType = String(part.value || "other")
-          }
-          if (part.fieldname === "kind") {
-            assetType = String(part.value || "other")
-          }
-          if (part.fieldname === "note") {
-            note = String(part.value || "")
-          }
-          if (part.fieldname === "uploaded_by") {
-            uploadedBy = String(part.value || "")
-          }
-          continue
-        }
+        const originalName = part.filename || "file"
+        const ext = path.extname(originalName)
+        const storedName = `${Date.now()}-${randomUUID()}${ext}`
+        const storedPath = path.join(jobDir, storedName)
+        const relativePath = path.join(relativeDir, storedName)
 
-        if (part.type === "file") {
-          originalName = part.filename || "upload.bin"
-          mimeType = part.mimetype || null
+        await pipeline(part.file, fs.createWriteStream(storedPath))
 
-          const chunks: Buffer[] = []
-          for await (const chunk of part.file) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-          }
+        const stat = fs.statSync(storedPath)
+        const assetType = part.mimetype?.startsWith("image/") ? "photo" : "file"
 
-          fileBuffer = Buffer.concat(chunks)
-        }
+        const result = await pool.query(
+          `
+          insert into job_assets
+          (
+            tenant_id,
+            job_id,
+            asset_type,
+            bucket,
+            original_name,
+            stored_name,
+            stored_path,
+            relative_path,
+            mime_type,
+            file_size_bytes,
+            note,
+            uploaded_by,
+            created_at,
+            file_name,
+            size_bytes,
+            file_path
+          )
+          values
+          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13,$14,$15)
+          returning
+            id,
+            job_id,
+            asset_type,
+            bucket,
+            original_name,
+            stored_name,
+            stored_path,
+            relative_path,
+            mime_type,
+            file_size_bytes,
+            note,
+            uploaded_by,
+            created_at,
+            file_name,
+            size_bytes,
+            file_path
+          `,
+          [
+            tenantId,
+            numericJobId,
+            assetType,
+            "local",
+            originalName,
+            storedName,
+            storedPath,
+            relativePath,
+            part.mimetype || null,
+            stat.size,
+            null,
+            "Steve",
+            storedName,
+            stat.size,
+            storedPath,
+          ]
+        )
+
+        uploaded.push({
+          ...result.rows[0],
+          download_url: `/assets/${tenantSlug}/file/${result.rows[0].id}`,
+        })
       }
 
-      if (!fileBuffer) {
-        reply.code(400)
-        return { ok: false, error: "No file uploaded" }
-      }
-
-      const asset = await saveJobAssetByTenantSlug({
-        tenantSlug,
-        jobId: Number(jobId),
-        assetType,
-        originalName,
-        mimeType,
-        note,
-        uploadedBy,
-        fileBuffer,
-      })
-
-      return { ok: true, asset }
+      return { ok: true, uploaded }
     } catch (err: any) {
+      console.error("UPLOAD ERROR:", err)
       reply.code(400)
-      return { ok: false, error: err?.message || String(err) }
+      return { ok: false, error: err?.message || "Upload failed" }
     }
   })
 
-  app.get("/files/*", async (request: any, reply) => {
+  app.delete("/assets/:tenantSlug/job/:jobId/file/:assetId", async (req: any, reply) => {
     try {
-      const wildcard = String(request.params["*"] || "")
-      const uploadRoot = getUploadRoot()
+      const { tenantSlug, jobId, assetId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
 
-      if (!wildcard) {
-        reply.code(400)
-        return { ok: false, error: "Missing file path" }
+      const result = await pool.query(
+        `
+        delete from job_assets
+        where tenant_id = $1
+          and job_id = $2
+          and id = $3
+        returning stored_path, file_path
+        `,
+        [tenantId, Number(jobId), Number(assetId)]
+      )
+
+      if (!result.rowCount) {
+        throw new Error("File not found")
       }
 
-      const normalizedRelative = wildcard.replace(/^\/+/, "")
-      const absolutePath = path.resolve(uploadRoot, normalizedRelative)
-      const resolvedRoot = path.resolve(uploadRoot)
+      const file = result.rows[0]
+      const resolvedPath = file.stored_path || file.file_path
 
-      if (!absolutePath.startsWith(resolvedRoot)) {
-        reply.code(403)
-        return { ok: false, error: "Forbidden path" }
+      if (resolvedPath && fs.existsSync(resolvedPath)) {
+        fs.unlinkSync(resolvedPath)
       }
 
-      await fs.access(absolutePath)
-
-      const fileBuffer = await fs.readFile(absolutePath)
-      const mimeType = getMimeType(absolutePath)
-
-      reply.header("Content-Type", mimeType)
-      reply.header("Cache-Control", "no-store")
-      return reply.send(fileBuffer)
+      return { ok: true }
     } catch (err: any) {
-      reply.code(404)
-      return { ok: false, error: err?.message || "File not found" }
+      reply.code(400)
+      return { ok: false, error: err?.message || "Delete file failed" }
+    }
+  })
+
+  app.post("/assets/:tenantSlug/job/:jobId/notes", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const { message } = req.body || {}
+
+      if (!String(message || "").trim()) {
+        throw new Error("Note is required")
+      }
+
+      const result = await pool.query(
+        `
+        insert into timeline_events
+          (tenant_id, job_id, kind, message, created_at)
+        values
+          ($1,$2,'staff_note',$3,now())
+        returning
+          id,
+          message,
+          created_at
+        `,
+        [tenantId, Number(jobId), String(message).trim()]
+      )
+
+      return { ok: true, note: result.rows[0] }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Add note failed" }
+    }
+  })
+
+  app.delete("/assets/:tenantSlug/job/:jobId/notes/:noteId", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId, noteId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+
+      const result = await pool.query(
+        `
+        delete from timeline_events
+        where tenant_id = $1
+          and job_id = $2
+          and id = $3
+          and kind = 'staff_note'
+        returning id
+        `,
+        [tenantId, Number(jobId), Number(noteId)]
+      )
+
+      if (!result.rowCount) {
+        throw new Error("Note not found")
+      }
+
+      return { ok: true }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Delete note failed" }
     }
   })
 }
