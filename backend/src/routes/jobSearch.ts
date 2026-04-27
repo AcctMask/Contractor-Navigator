@@ -1,14 +1,16 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
+import { planFollowUps } from "../services/conversationEngine"
 
+// helper
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "")
 }
 
 export async function registerJobSearchRoutes(app: FastifyInstance) {
 
-  // 🔍 SEARCH JOBS (FIXED + TENANT FILTERED)
+  // 🔍 SEARCH
   app.get("/admin/:tenantSlug/job-search", async (request: any, reply) => {
     try {
       const { tenantSlug } = request.params
@@ -18,9 +20,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
       const digitQ = digitsOnly(q)
       const numericId = /^\d+$/.test(q) ? Number(q) : null
 
-      if (!q) {
-        return { ok: true, results: [] }
-      }
+      if (!q) return { ok: true, results: [] }
 
       const result = await pool.query(
         `
@@ -103,7 +103,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
   })
 
 
-  // 📄 LOAD SINGLE JOB
+  // 📄 GET SINGLE JOB
   app.get("/admin/:tenantSlug/jobs/:jobId", async (request: any, reply) => {
     try {
       const { tenantSlug, jobId } = request.params
@@ -111,25 +111,27 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
 
       const result = await pool.query(
         `
-select
-  j.id,
-  j.stage,
-  j.crm_substatus,
-  j.address1,
-  j.city,
-  j.state,
-  j.zip,
-  j.bot_paused,
-  false as dnc,
-  c.full_name as customer_name,
-  c.email as customer_email
-from jobs j
-left join customers c
-  on c.id = j.customer_id
- and c.tenant_id = j.tenant_id
-where j.tenant_id = $1
-  and j.id = $2
-limit 1        `,
+        select
+          j.id,
+          j.stage,
+          j.crm_substatus,
+          j.address1,
+          j.city,
+          j.state,
+          j.zip,
+          j.bot_paused,
+          false as dnc,
+          c.full_name as customer_name,
+          c.phone as customer_phone,
+          c.email as customer_email
+        from jobs j
+        left join customers c
+          on c.id = j.customer_id
+         and c.tenant_id = j.tenant_id
+        where j.tenant_id = $1
+          and j.id = $2
+        limit 1
+        `,
         [tenantId, Number(jobId)]
       )
 
@@ -146,61 +148,63 @@ limit 1        `,
   })
 
 
-  // ➕ CREATE JOB
-  app.post("/admin/:tenantSlug/jobs", async (request: any, reply) => {
+  // 💾 SAVE STAGE (THIS FIXES YOUR STAGE ISSUE)
+  app.post("/admin/:tenantSlug/jobs/:jobId/stage", async (request: any, reply) => {
     try {
-      const { tenantSlug } = request.params
+      const { tenantSlug, jobId } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
 
-      const body = request.body || {}
+      const { stage, crm_substatus, bot_paused } = request.body || {}
 
-      const customerName = body.customer_name || "Unknown"
-      const customerPhone = body.customer_phone || null
-      const customerEmail = body.customer_email || null
-
-      if (!customerName && !customerPhone) {
-        throw new Error("Customer name or phone required")
-      }
-
-      // Create customer
-      const customerResult = await pool.query(
+      await pool.query(
         `
-        insert into customers
-          (tenant_id, full_name, phone, email, created_at, updated_at)
-        values
-          ($1, $2, $3, $4, now(), now())
-        returning id
-        `,
-        [tenantId, customerName, customerPhone, customerEmail]
-      )
-
-      const customerId = customerResult.rows[0].id
-
-      // Create job
-      const jobResult = await pool.query(
-        `
-        insert into jobs
-          (tenant_id, customer_id, stage, address1, city, state, zip, created_at, updated_at)
-        values
-          ($1, $2, $3, $4, $5, $6, $7, now(), now())
-        returning id
+        update jobs
+        set
+          stage = coalesce($3, stage),
+          crm_substatus = $4,
+          bot_paused = coalesce($5, bot_paused),
+          updated_at = now()
+        where tenant_id = $1
+          and id = $2
         `,
         [
           tenantId,
-          customerId,
-          body.stage || "lead",
-          body.address1 || null,
-          body.city || null,
-          body.state || null,
-          body.zip || null
+          Number(jobId),
+          stage || null,
+          crm_substatus || null,
+          typeof bot_paused === "boolean" ? bot_paused : null,
         ]
       )
 
-      return { ok: true, job_id: jobResult.rows[0].id }
+      if (stage) {
+        await planFollowUps({
+          tenant_id: tenantId,
+          job_id: Number(jobId),
+          stage,
+          occurred_at: new Date().toISOString(),
+        })
+
+        await pool.query(
+          `
+          insert into timeline_events
+            (tenant_id, job_id, kind, message, meta, created_at)
+          values
+            ($1, $2, 'workflow_planned', $3, $4::jsonb, now())
+          `,
+          [
+            tenantId,
+            Number(jobId),
+            `follow-ups scheduled for stage=${stage}`,
+            JSON.stringify({ stage, source: "manual_stage_save" }),
+          ]
+        )
+      }
+
+      return { ok: true }
 
     } catch (err: any) {
       reply.code(400)
-      return { ok: false, error: err?.message || "Create job failed" }
+      return { ok: false, error: err?.message || "Save failed" }
     }
   })
 }

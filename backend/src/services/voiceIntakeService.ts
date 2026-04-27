@@ -265,13 +265,6 @@ export async function startVoiceIntakeLead(tenantSlug: string, from: string | nu
     source: "Phone Call",
   })
 
-  try {
-    const { queueAiFollowupByTenantSlug } = await import("./followupEngine")
-    await queueAiFollowupByTenantSlug(tenantSlug, created.job_id)
-  } catch (err) {
-    console.error("Immediate lead follow-up failed:", err)
-  }
-
   return created
 }
 
@@ -518,6 +511,42 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
       summary,
     }
   )
+
+
+  try {
+    const { planFollowUps } = await import("./conversationEngine")
+
+    const workflowStage = "lead"
+
+    await planFollowUps({
+      tenant_id: ctx.tenant_id,
+      job_id: ctx.job_id,
+      stage: workflowStage,
+      occurred_at: new Date().toISOString(),
+    })
+
+    await addTimelineEvent(
+      ctx.tenant_id,
+      ctx.job_id,
+      "workflow_planned",
+      `follow-ups scheduled after completed voice intake for stage=${workflowStage}`,
+      {
+        stage: workflowStage,
+        source: "voice_intake_completed",
+      }
+    )
+  } catch (err: any) {
+    await addTimelineEvent(
+      ctx.tenant_id,
+      ctx.job_id,
+      "workflow_plan_failed",
+      "follow-up scheduling failed after completed voice intake",
+      {
+        error: err?.message || String(err),
+        source: "voice_intake_completed",
+      }
+    )
+  }
 }
 
 export async function getVoiceFinalConfirmation(tenantSlug: string, jobId: number) {
