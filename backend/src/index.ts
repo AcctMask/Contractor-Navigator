@@ -15,6 +15,7 @@ import { registerAuthRoutes } from "./routes/auth"
 import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
+import { registerCalendarRoutes } from "./routes/calendar"
 import { startFollowupScheduler } from "./services/followupScheduler"
 
 dotenv.config()
@@ -23,27 +24,18 @@ const app = Fastify({ logger: true })
 
 await app.register(cors, { origin: true })
 await app.register(formbody)
+
 await app.register(multipart, {
   limits: {
-    fileSize: 25 * 1024 * 1024,
-    files: 10,
+    fileSize: 100 * 1024 * 1024,
+    files: 20,
   },
 })
 
 app.get("/", async () => {
   return {
     ok: true,
-    service: "contractor-autopilot-backend",
-    status: "live",
-    message: "Contractor Navigator backend is running.",
-  }
-})
-
-app.get("/health", async () => {
-  return {
-    ok: true,
-    service: "contractor-autopilot-backend",
-    status: "healthy",
+    name: "contractor-autopilot-backend",
   }
 })
 
@@ -58,6 +50,7 @@ await registerAuthRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)
+await registerCalendarRoutes(app)
 
 const port = Number(process.env.PORT || 8787)
 
