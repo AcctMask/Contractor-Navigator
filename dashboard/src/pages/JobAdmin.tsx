@@ -74,7 +74,7 @@ export default function JobAdmin() {
       setError("")
       setStatus("Creating job...")
 
-      const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs`, {
+      const res = await fetch(`${API_BASE}/admin/create-job/${TENANT}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -86,7 +86,7 @@ export default function JobAdmin() {
         throw new Error(data.error || "Create failed")
       }
 
-      setStatus(`Job created: #${data.job_id}`)
+      setStatus(`Job created: #${data.job?.id || data.job_id}`)
 
       setForm({
         customer_name: "",
