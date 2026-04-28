@@ -17,6 +17,10 @@ async function ensureJobExists(tenantId: number, jobId: number) {
   }
 }
 
+function getUploadRoot() {
+  return process.env.UPLOAD_ROOT || path.join(process.cwd(), "uploads")
+}
+
 export async function registerJobAssetsRoutes(app: FastifyInstance) {
   app.get("/assets/:tenantSlug/job/:jobId", async (req: any, reply) => {
     try {
@@ -67,7 +71,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         assets: assetsResult.rows.map((asset) => ({
           ...asset,
           original_name: asset.original_name || asset.stored_name || "file",
-          mime_type: asset.mime_type || "": asset.file_size_bytes || null,
+          mime_type: asset.mime_type || "",
+          size_bytes: asset.file_size_bytes || null,
           download_url: `/assets/${tenantSlug}/file/${asset.id}`,
         })),
         notes: notesResult.rows,
@@ -129,7 +134,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       await ensureJobExists(tenantId, numericJobId)
 
       const relativeDir = path.join("job-assets", tenantSlug, String(numericJobId))
-      const jobDir = path.join(process.cwd(), "uploads", relativeDir)
+      const jobDir = path.join(getUploadRoot(), relativeDir)
+
       fs.mkdirSync(jobDir, { recursive: true })
 
       const uploaded: any[] = []
@@ -141,11 +147,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         const storedName = `${Date.now()}-${randomUUID()}${ext}`
         const storedPath = path.join(jobDir, storedName)
         const relativePath = path.join(relativeDir, storedName)
+        const mimetype = part.mimetype || null
 
         await pipeline(part.file, fs.createWriteStream(storedPath))
 
         const stat = fs.statSync(storedPath)
-        const assetType = part.mimetype?.startsWith("image/") ? "photo" : "file"
+        const assetType = mimetype?.startsWith("image/") ? "photo" : "file"
 
         const result = await pool.query(
           `
@@ -191,7 +198,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             storedName,
             storedPath,
             relativePath,
-            part.mimetype || null,
+            mimetype,
             stat.size,
             null,
             "Steve",
@@ -200,6 +207,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
         uploaded.push({
           ...result.rows[0],
+          original_name: result.rows[0].original_name || result.rows[0].stored_name || "file",
+          size_bytes: result.rows[0].file_size_bytes || null,
           download_url: `/assets/${tenantSlug}/file/${result.rows[0].id}`,
         })
       }
