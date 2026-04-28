@@ -38,10 +38,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           file_size_bytes,
           note,
           uploaded_by,
-          created_at,
-          file_name,
-          size_bytes,
-          file_path
+          created_at
         from job_assets
         where tenant_id = $1
           and job_id = $2
@@ -69,9 +66,9 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         ok: true,
         assets: assetsResult.rows.map((asset) => ({
           ...asset,
-          original_name: asset.original_name || asset.file_name || "file",
+          original_name: asset.original_name || asset.stored_name || "file",
           mime_type: asset.mime_type || "",
-          size_bytes: asset.size_bytes || asset.file_size_bytes || null,
+          size_bytes: asset.file_size_bytes || null,
           download_url: `/assets/${tenantSlug}/file/${asset.id}`,
         })),
         notes: notesResult.rows,

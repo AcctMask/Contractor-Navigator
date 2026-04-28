@@ -7,8 +7,8 @@ async function ensureCalendarTable() {
       id bigserial primary key,
       tenant_id bigint null references tenants(id) on delete cascade,
       job_id bigint null references jobs(id) on delete set null,
-      title text not null,
-      start_time timestamptz not null,
+      title text not null default 'Calendar Event',
+      start_time timestamptz null,
       end_time timestamptz null,
       location text null,
       notes text null,
@@ -16,6 +16,20 @@ async function ensureCalendarTable() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
+  `)
+
+  await pool.query(`
+    alter table calendar_events
+      add column if not exists tenant_id bigint null,
+      add column if not exists job_id bigint null,
+      add column if not exists title text not null default 'Calendar Event',
+      add column if not exists start_time timestamptz null,
+      add column if not exists end_time timestamptz null,
+      add column if not exists location text null,
+      add column if not exists notes text null,
+      add column if not exists event_type text not null default 'general',
+      add column if not exists created_at timestamptz not null default now(),
+      add column if not exists updated_at timestamptz not null default now()
   `)
 }
 

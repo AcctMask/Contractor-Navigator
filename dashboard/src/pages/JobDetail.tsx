@@ -16,6 +16,8 @@ const STAGES = [
   "pre_production",
   "in_production",
   "completed",
+  "tarp_complete",
+  "invoiced",
   "paid",
   "dnc",
 ]
@@ -214,6 +216,16 @@ export default function JobDetail() {
               {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}
             </p>
             <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
+            <hr style={{ borderColor: "#374151", margin: "18px 0" }} />
+            <h3>Claim / Insurance Info</h3>
+            <p><strong>Carrier:</strong> {job.carrier || "—"}</p>
+            <p><strong>Claim #:</strong> {job.claim_number || "—"}</p>
+            <p><strong>Policy Holder:</strong> {job.policy_holder || "—"}</p>
+            <p><strong>Adjuster:</strong> {job.adjuster_name || "—"}</p>
+            <p><strong>Adjuster Phone:</strong> {job.adjuster_phone || "—"}</p>
+            <p><strong>Adjuster Email:</strong> {job.adjuster_email || "—"}</p>
+            <p><strong>Damage Location:</strong> {job.damage_location || "—"}</p>
+            <p><strong>Damage Summary:</strong> {job.damage_summary || "—"}</p>
           </>
         ) : (
           <p>Loading job...</p>
