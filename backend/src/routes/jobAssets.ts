@@ -67,8 +67,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         assets: assetsResult.rows.map((asset) => ({
           ...asset,
           original_name: asset.original_name || asset.stored_name || "file",
-          mime_type: asset.mime_type || "",
-          size_bytes: asset.file_size_bytes || null,
+          mime_type: asset.mime_type || "": asset.file_size_bytes || null,
           download_url: `/assets/${tenantSlug}/file/${asset.id}`,
         })),
         notes: notesResult.rows,
@@ -89,7 +88,6 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         select
           original_name,
           stored_path,
-          file_path,
           mime_type
         from job_assets
         where tenant_id = $1
@@ -105,7 +103,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       }
 
       const asset = result.rows[0]
-      const resolvedPath = asset.stored_path || asset.file_path
+      const resolvedPath = asset.stored_path
 
       if (!resolvedPath || !fs.existsSync(resolvedPath)) {
         reply.code(404)
@@ -165,13 +163,10 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             file_size_bytes,
             note,
             uploaded_by,
-            created_at,
-            file_name,
-            size_bytes,
-            file_path
+            created_at
           )
           values
-          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now(),$13,$14,$15)
+          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
           returning
             id,
             job_id,
@@ -185,10 +180,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             file_size_bytes,
             note,
             uploaded_by,
-            created_at,
-            file_name,
-            size_bytes,
-            file_path
+            created_at
           `,
           [
             tenantId,
@@ -203,9 +195,6 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             stat.size,
             null,
             "Steve",
-            storedName,
-            stat.size,
-            storedPath,
           ]
         )
 
@@ -234,7 +223,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = $3
-        returning stored_path, file_path
+        returning stored_path
         `,
         [tenantId, Number(jobId), Number(assetId)]
       )
@@ -244,7 +233,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       }
 
       const file = result.rows[0]
-      const resolvedPath = file.stored_path || file.file_path
+      const resolvedPath = file.stored_path
 
       if (resolvedPath && fs.existsSync(resolvedPath)) {
         fs.unlinkSync(resolvedPath)
