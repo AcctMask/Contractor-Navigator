@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787"
@@ -7,10 +7,31 @@ const TENANT = "g2g-roofing"
 export default function JobDetail() {
   const { id } = useParams()
 
-  const [form, setForm] = useState<any>({})
-  const [isEditing, setIsEditing] = useState(false)
+  const [job, setJob] = useState<any>(null)
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
+
+  const [form, setForm] = useState({
+    customer_name: "",
+    customer_phone: "",
+    customer_email: "",
+    address1: "",
+    city: "",
+    state: "",
+    zip: "",
+    carrier: "",
+    claim_number: "",
+    policy_holder: "",
+    adjuster_name: "",
+    adjuster_phone: "",
+    adjuster_email: "",
+    damage_location: "",
+    damage_summary: "",
+  })
+
+  function setField(field: string, value: string) {
+    setForm((prev) => ({ ...prev, [field]: value }))
+  }
 
   async function loadJob() {
     if (!id) return
@@ -23,35 +44,49 @@ export default function JobDetail() {
       return
     }
 
-    setForm(data.job)
+    setJob(data.job)
+
+    setForm({
+      customer_name: data.job.customer_name || "",
+      customer_phone: data.job.customer_phone || "",
+      customer_email: data.job.customer_email || "",
+      address1: data.job.address1 || "",
+      city: data.job.city || "",
+      state: data.job.state || "",
+      zip: data.job.zip || "",
+      carrier: data.job.carrier || "",
+      claim_number: data.job.claim_number || "",
+      policy_holder: data.job.policy_holder || "",
+      adjuster_name: data.job.adjuster_name || "",
+      adjuster_phone: data.job.adjuster_phone || "",
+      adjuster_email: data.job.adjuster_email || "",
+      damage_location: data.job.damage_location || "",
+      damage_summary: data.job.damage_summary || "",
+    })
   }
 
-  function setField(key: string, value: string) {
-    setForm((prev: any) => ({ ...prev, [key]: value }))
-  }
-
-  async function saveChanges() {
+  async function saveJob() {
     if (!id) return
 
     setStatus("Saving...")
-    setError("")
 
-    const res = await fetch(`${API_BASE}/admin/${TENANT}/job/${id}/update`, {
+    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/update`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(form),
     })
 
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
-      setError(data?.error || "Save failed")
       setStatus("")
+      setError(data?.error || "Save failed")
       return
     }
 
-    setStatus("Saved")
-    setIsEditing(false)
+    setStatus("Saved successfully")
     await loadJob()
   }
 
@@ -61,73 +96,81 @@ export default function JobDetail() {
 
   return (
     <div style={page}>
-      <Link to="/job-admin" style={linkStyle}>← Back</Link>
+      <Link to="/job-admin" style={link}>← Back</Link>
 
       <h1 style={{ color: "white" }}>Job #{id}</h1>
 
       {status && <p style={success}>{status}</p>}
       {error && <p style={danger}>{error}</p>}
 
-      {!isEditing ? (
-        <button onClick={() => setIsEditing(true)} style={button}>
-          Edit Customer / Claim Data
+      <section style={card}>
+        <h2>Edit Customer / Claim Data</h2>
+
+        <div style={grid}>
+          <Field label="Customer Name" value={form.customer_name} onChange={(v: string) => setField("customer_name", v)} />
+          <Field label="Phone" value={form.customer_phone} onChange={(v: string) => setField("customer_phone", v)} />
+          <Field label="Email" value={form.customer_email} onChange={(v: string) => setField("customer_email", v)} />
+
+          <Field label="Address" value={form.address1} onChange={(v: string) => setField("address1", v)} />
+          <Field label="City" value={form.city} onChange={(v: string) => setField("city", v)} />
+          <Field label="State" value={form.state} onChange={(v: string) => setField("state", v)} />
+          <Field label="Zip" value={form.zip} onChange={(v: string) => setField("zip", v)} />
+
+          <Field label="Carrier" value={form.carrier} onChange={(v: string) => setField("carrier", v)} />
+          <Field label="Claim #" value={form.claim_number} onChange={(v: string) => setField("claim_number", v)} />
+          <Field label="Policy Holder" value={form.policy_holder} onChange={(v: string) => setField("policy_holder", v)} />
+
+          <Field label="Adjuster Name" value={form.adjuster_name} onChange={(v: string) => setField("adjuster_name", v)} />
+          <Field label="Adjuster Phone" value={form.adjuster_phone} onChange={(v: string) => setField("adjuster_phone", v)} />
+          <Field label="Adjuster Email" value={form.adjuster_email} onChange={(v: string) => setField("adjuster_email", v)} />
+
+          <Field label="Damage Location" value={form.damage_location} onChange={(v: string) => setField("damage_location", v)} />
+        </div>
+
+        <label style={label}>Damage Summary</label>
+        <textarea
+          value={form.damage_summary}
+          onChange={(e) => setField("damage_summary", e.target.value)}
+          style={textarea}
+        />
+
+        <button onClick={saveJob} style={button}>
+          Save Changes
         </button>
-      ) : (
-        <>
-          <button onClick={saveChanges} style={button}>Save</button>
-          <button onClick={() => setIsEditing(false)} style={buttonSecondary}>Cancel</button>
-        </>
-      )}
+      </section>
 
       <section style={card}>
-        <h2>Customer Info</h2>
-
-        <Field label="Name" value={form.customer_name} edit={isEditing} onChange={(v: string) => setField("customer_name", v)} />
-        <Field label="Phone" value={form.customer_phone} edit={isEditing} onChange={(v: string) => setField("customer_phone", v)} />
-        <Field label="Email" value={form.customer_email} edit={isEditing} onChange={(v: string) => setField("customer_email", v)} />
-        <Field label="Address" value={form.address1} edit={isEditing} onChange={(v: string) => setField("address1", v)} />
-        <Field label="City" value={form.city} edit={isEditing} onChange={(v: string) => setField("city", v)} />
-        <Field label="State" value={form.state} edit={isEditing} onChange={(v: string) => setField("state", v)} />
-        <Field label="Zip" value={form.zip} edit={isEditing} onChange={(v: string) => setField("zip", v)} />
-
-        <h3 style={{ marginTop: 20 }}>Claim Info</h3>
-
-        <Field label="Carrier" value={form.carrier} edit={isEditing} onChange={(v: string) => setField("carrier", v)} />
-        <Field label="Claim #" value={form.claim_number} edit={isEditing} onChange={(v: string) => setField("claim_number", v)} />
-        <Field label="Policy Holder" value={form.policy_holder} edit={isEditing} onChange={(v: string) => setField("policy_holder", v)} />
-        <Field label="Adjuster Name" value={form.adjuster_name} edit={isEditing} onChange={(v: string) => setField("adjuster_name", v)} />
-        <Field label="Adjuster Phone" value={form.adjuster_phone} edit={isEditing} onChange={(v: string) => setField("adjuster_phone", v)} />
-        <Field label="Adjuster Email" value={form.adjuster_email} edit={isEditing} onChange={(v: string) => setField("adjuster_email", v)} />
-        <Field label="Damage Location" value={form.damage_location} edit={isEditing} onChange={(v: string) => setField("damage_location", v)} />
-        <Field label="Damage Summary" value={form.damage_summary} edit={isEditing} onChange={(v: string) => setField("damage_summary", v)} multiline />
+        <h2>Current Data</h2>
+        {job ? (
+          <>
+            <p><strong>Customer:</strong> {job.customer_name}</p>
+            <p><strong>Carrier:</strong> {job.carrier}</p>
+            <p><strong>Claim #:</strong> {job.claim_number}</p>
+          </>
+        ) : (
+          <p>Loading...</p>
+        )}
       </section>
     </div>
   )
 }
 
-function Field({ label, value, edit, onChange, multiline }: any) {
+function Field({ label, value, onChange }: any) {
   return (
-    <p>
-      <strong>{label}:</strong>{" "}
-      {edit ? (
-        multiline ? (
-          <textarea value={value || ""} onChange={(e) => onChange(e.target.value)} style={textarea} />
-        ) : (
-          <input value={value || ""} onChange={(e) => onChange(e.target.value)} style={input} />
-        )
-      ) : (
-        value || "—"
-      )}
-    </p>
+    <div>
+      <label style={label}>{label}</label>
+      <input value={value} onChange={(e) => onChange(e.target.value)} style={input} />
+    </div>
   )
 }
 
-const page = { padding: 20 }
-const card = { background: "#111827", color: "white", padding: 20, borderRadius: 10, marginTop: 20 }
-const input = { marginLeft: 10, padding: 6 }
-const textarea = { width: "100%", marginTop: 5 }
-const button = { marginTop: 10, marginRight: 10 }
-const buttonSecondary = { marginTop: 10, background: "#444", color: "white" }
-const linkStyle = { color: "#93c5fd" }
-const success = { color: "#22c55e" }
-const danger = { color: "#ef4444" }
+const page: CSSProperties = { padding: 20 }
+const card: CSSProperties = { background: "#111827", color: "white", padding: 20, marginBottom: 20, borderRadius: 10 }
+const grid: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }
+const input: CSSProperties = { width: "100%", padding: 8 }
+const textarea: CSSProperties = { width: "100%", padding: 8, minHeight: 80 }
+const label: CSSProperties = { display: "block", marginBottom: 4 }
+const button: CSSProperties = { marginTop: 10, padding: 10 }
+const link: CSSProperties = { color: "#93c5fd" }
+const success: CSSProperties = { color: "#22c55e" }
+const danger: CSSProperties = { color: "#ef4444" }
