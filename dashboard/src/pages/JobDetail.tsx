@@ -16,7 +16,6 @@ export default function JobDetail() {
   const [job, setJob] = useState<any>(null)
   const [assets, setAssets] = useState<any[]>([])
   const [notes, setNotes] = useState<any[]>([])
-  const [files, setFiles] = useState<FileList | null>(null)
   const [noteText, setNoteText] = useState("")
   const [stage, setStage] = useState("lead")
   const [crmSubstatus, setCrmSubstatus] = useState("")
