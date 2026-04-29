@@ -1,0 +1,476 @@
+import { useState } from "react"
+import type { CSSProperties } from "react"
+import { Link, useNavigate } from "react-router-dom"
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787"
+const TENANT_SLUG = "g2g-roofing"
+
+type SearchRow = {
+  id: number | string
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+  stage?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  lead_source?: string | null
+  carrier?: string | null
+  claim_number?: string | null
+  bot_paused?: boolean | null
+}
+
+type JobRow = {
+  id: number | string
+  stage?: string | null
+  crm_substatus?: string | null
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+  bot_paused?: boolean | null
+  dnc?: boolean | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_email?: string | null
+  lead_source?: string | null
+  lead_source_detail?: string | null
+  carrier?: string | null
+  claim_number?: string | null
+}
+
+function safeText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—"
+  return String(value)
+}
+
+function formatAddress(row: Partial<JobRow | SearchRow>) {
+  return [row.address1, row.city, row.state, row.zip].filter(Boolean).join(", ") || "—"
+}
+
+export default function JobAdmin() {
+  const navigate = useNavigate()
+
+  const [query, setQuery] = useState("")
+  const [results, setResults] = useState<SearchRow[]>([])
+  const [jobId, setJobId] = useState("")
+  const [job, setJob] = useState<JobRow | null>(null)
+
+  const [stage, setStage] = useState("lead")
+  const [crmSubstatus, setCrmSubstatus] = useState("")
+  const [botPaused, setBotPaused] = useState(false)
+  const [dnc, setDnc] = useState(false)
+
+  const [searchStatus, setSearchStatus] = useState("")
+  const [loadStatus, setLoadStatus] = useState("")
+  const [saveStatus, setSaveStatus] = useState("")
+  const [error, setError] = useState("")
+
+  const [searching, setSearching] = useState(false)
+  const [loadingJob, setLoadingJob] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function searchJobs() {
+    setError("")
+    setSearchStatus("Searching...")
+    setSearching(true)
+    setResults([])
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/admin/${TENANT_SLUG}/job-search?q=${encodeURIComponent(query.trim())}`
+      )
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Search failed")
+      }
+
+      const rows = Array.isArray(json.jobs)
+        ? json.jobs
+        : Array.isArray(json.results)
+          ? json.results
+          : Array.isArray(json)
+            ? json
+            : []
+
+      setResults(rows)
+      setSearchStatus(rows.length ? `Found ${rows.length} result(s)` : "No matching jobs found")
+    } catch (err: any) {
+      setSearchStatus("Search failed")
+      setError(err?.message || "Search failed")
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  async function loadJobById(id: number | string) {
+    setError("")
+    setLoadStatus("Loading job...")
+    setLoadingJob(true)
+
+    try {
+      const numericId = Number(id)
+
+      if (!numericId) {
+        throw new Error("Job ID is required")
+      }
+
+      const res = await fetch(`${API_BASE}/admin/${TENANT_SLUG}/job/${numericId}`)
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Load failed")
+      }
+
+      const loadedJob: JobRow = json.job || json
+
+      setJob(loadedJob)
+      setJobId(String(loadedJob.id))
+      setStage(loadedJob.stage || "lead")
+      setCrmSubstatus(loadedJob.crm_substatus || "")
+      setBotPaused(Boolean(loadedJob.bot_paused))
+      setDnc(Boolean(loadedJob.dnc))
+      setLoadStatus("Job loaded")
+    } catch (err: any) {
+      setLoadStatus("Load failed")
+      setError(err?.message || "Load failed")
+      setJob(null)
+    } finally {
+      setLoadingJob(false)
+    }
+  }
+
+  async function saveStage() {
+    if (!job?.id) {
+      setError("Load a job first")
+      return
+    }
+
+    setError("")
+    setSaveStatus("Saving...")
+    setSaving(true)
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/${TENANT_SLUG}/job/${job.id}/update`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          stage,
+          crm_substatus: crmSubstatus,
+          bot_paused: botPaused,
+          dnc,
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok) {
+        throw new Error(json?.error || json?.message || "Save failed")
+      }
+
+      setSaveStatus("Stage saved")
+      await loadJobById(job.id)
+    } catch (err: any) {
+      setSaveStatus("Save failed")
+      setError(err?.message || "Save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={pageStyle}>
+      <header style={topBarStyle}>
+        <div>
+          <div style={{ opacity: 0.8 }}>Contractor Autopilot</div>
+        </div>
+
+        <nav style={navStyle}>
+          <Link to="/job-admin" style={activeNavStyle}>Job Admin</Link>
+          <Link to="/documents" style={navButtonStyle}>Documents</Link>
+          <Link to="/users" style={navButtonStyle}>Users</Link>
+          <button
+            style={navButtonStyle}
+            onClick={() => {
+              localStorage.removeItem("contractor_autopilot_token")
+              navigate("/login")
+            }}
+          >
+            Logout
+          </button>
+        </nav>
+      </header>
+
+      <section style={cardStyle}>
+        <h1 style={h1Style}>Job Admin</h1>
+        <p style={mutedTextStyle}>
+          Search by job ID, customer name, phone number, or property address.
+        </p>
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Search Jobs</h2>
+
+        <label style={labelStyle}>Search</label>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Steve Pashoian, 7272154507, 113 E Lime, or 27"
+          style={inputStyle}
+        />
+
+        <div style={actionRowStyle}>
+          <button onClick={searchJobs} disabled={searching} style={primaryButtonStyle}>
+            {searching ? "Searching..." : "Search Jobs"}
+          </button>
+          <span style={mutedTextStyle}>{searchStatus}</span>
+        </div>
+
+        {results.length > 0 ? (
+          <div style={{ display: "grid", gap: "14px", marginTop: 18 }}>
+            {results.map((row) => (
+              <div key={String(row.id)} style={rowStyle}>
+                <strong style={{ fontSize: 18 }}>{safeText(row.customer_name)}</strong>
+                <div>Job ID: {safeText(row.id)}</div>
+                <div>Phone: {safeText(row.customer_phone)}</div>
+                <div>Address: {formatAddress(row)}</div>
+                <div>Stage: {safeText(row.stage)}</div>
+                <div>Source: {safeText(row.lead_source)}</div>
+                <button
+                  onClick={() => loadJobById(row.id)}
+                  disabled={loadingJob}
+                  style={{ ...primaryButtonStyle, marginTop: 12 }}
+                >
+                  Load This Job
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Load Job</h2>
+
+        <label style={labelStyle}>Job ID</label>
+        <input
+          value={jobId}
+          onChange={(e) => setJobId(e.target.value)}
+          placeholder="27"
+          style={inputStyle}
+        />
+
+        <div style={actionRowStyle}>
+          <button onClick={() => loadJobById(jobId)} disabled={loadingJob} style={primaryButtonStyle}>
+            {loadingJob ? "Loading..." : "Load Job"}
+          </button>
+          <span style={mutedTextStyle}>{loadStatus}</span>
+        </div>
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Job Summary</h2>
+
+        {job ? (
+          <div style={{ lineHeight: 1.7, fontSize: 18 }}>
+            <div><strong>Customer:</strong> {safeText(job.customer_name)}</div>
+            <div><strong>Email:</strong> {safeText(job.customer_email)}</div>
+            <div><strong>Phone:</strong> {safeText(job.customer_phone)}</div>
+            <div><strong>Address:</strong> {formatAddress(job)}</div>
+            <div><strong>Stage:</strong> {safeText(job.stage)}</div>
+            <div><strong>CRM Substatus:</strong> {safeText(job.crm_substatus)}</div>
+            <div><strong>Source:</strong> {safeText(job.lead_source)}</div>
+            <div><strong>Carrier:</strong> {safeText(job.carrier)}</div>
+            <div><strong>Claim #:</strong> {safeText(job.claim_number)}</div>
+            <div><strong>Bot Paused:</strong> {job.bot_paused ? "Yes" : "No"}</div>
+            <div><strong>DNC:</strong> {job.dnc ? "Yes" : "No"}</div>
+          </div>
+        ) : (
+          <p style={mutedTextStyle}>No job loaded yet.</p>
+        )}
+      </section>
+
+      <section style={cardStyle}>
+        <h2 style={h2Style}>Manual Stage Control</h2>
+
+        <label style={labelStyle}>Stage</label>
+        <select value={stage} onChange={(e) => setStage(e.target.value)} style={inputStyle}>
+          <option value="lead">lead</option>
+          <option value="inspection_scheduled">inspection_scheduled</option>
+          <option value="inspection_completed">inspection_completed</option>
+          <option value="estimate_sent">estimate_sent</option>
+          <option value="contract_sent">contract_sent</option>
+          <option value="tarp_scheduled">tarp_scheduled</option>
+          <option value="pre_production">pre_production</option>
+          <option value="in_production">in_production</option>
+          <option value="completed">completed</option>
+          <option value="paid">paid</option>
+          <option value="dnc">dnc</option>
+          <option value="lost">lost</option>
+        </select>
+
+        <label style={labelStyle}>CRM Substatus</label>
+        <input
+          value={crmSubstatus}
+          onChange={(e) => setCrmSubstatus(e.target.value)}
+          placeholder="message_received"
+          style={inputStyle}
+        />
+
+        <label style={checkboxStyle}>
+          <input
+            type="checkbox"
+            checked={botPaused}
+            onChange={(e) => setBotPaused(e.target.checked)}
+          />
+          Pause bot for this job
+        </label>
+
+        <label style={checkboxStyle}>
+          <input
+            type="checkbox"
+            checked={dnc}
+            onChange={(e) => setDnc(e.target.checked)}
+          />
+          Mark customer DNC
+        </label>
+
+        <div style={actionRowStyle}>
+          <button onClick={saveStage} disabled={saving || !job} style={primaryButtonStyle}>
+            {saving ? "Saving..." : "Save Stage"}
+          </button>
+          <span style={mutedTextStyle}>{saveStatus}</span>
+        </div>
+      </section>
+
+      {error ? <div style={errorStyle}>{error}</div> : null}
+    </div>
+  )
+}
+
+const pageStyle: CSSProperties = {
+  minHeight: "100vh",
+  background: "linear-gradient(135deg, rgba(0,25,70,1) 0%, rgba(2,18,47,1) 45%, rgba(8,42,102,1) 100%)",
+  color: "#e8eefc",
+  padding: "28px",
+}
+
+const topBarStyle: CSSProperties = {
+  maxWidth: 1200,
+  margin: "0 auto 24px",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 16,
+}
+
+const navStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+}
+
+const navButtonStyle: CSSProperties = {
+  color: "#e8eefc",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: 12,
+  padding: "10px 16px",
+  textDecoration: "none",
+  cursor: "pointer",
+  font: "inherit",
+}
+
+const activeNavStyle: CSSProperties = {
+  ...navButtonStyle,
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+}
+
+const cardStyle: CSSProperties = {
+  maxWidth: 1200,
+  margin: "0 auto 24px",
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(81, 133, 255, 0.25)",
+  borderRadius: 24,
+  padding: 24,
+}
+
+const rowStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 16,
+  padding: "14px 16px",
+}
+
+const h1Style: CSSProperties = {
+  marginTop: 0,
+  fontSize: 44,
+  lineHeight: 1.1,
+}
+
+const h2Style: CSSProperties = {
+  marginTop: 0,
+}
+
+const mutedTextStyle: CSSProperties = {
+  opacity: 0.86,
+}
+
+const labelStyle: CSSProperties = {
+  display: "block",
+  marginBottom: 8,
+  fontWeight: 700,
+}
+
+const inputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  background: "rgba(255,255,255,0.06)",
+  color: "#e8eefc",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: 14,
+  padding: "14px 16px",
+  fontSize: 16,
+  outline: "none",
+  marginBottom: 14,
+}
+
+const primaryButtonStyle: CSSProperties = {
+  color: "#fff",
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+  border: "none",
+  padding: "12px 18px",
+  borderRadius: 14,
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 16,
+}
+
+const actionRowStyle: CSSProperties = {
+  display: "flex",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginTop: 4,
+}
+
+const checkboxStyle: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "center",
+  marginBottom: 12,
+}
+
+const errorStyle: CSSProperties = {
+  maxWidth: 1200,
+  margin: "0 auto 24px",
+  background: "rgba(150, 30, 30, 0.22)",
+  border: "1px solid rgba(255, 120, 120, 0.35)",
+  color: "#ffd1d1",
+  borderRadius: 14,
+  padding: "12px 14px",
+}
