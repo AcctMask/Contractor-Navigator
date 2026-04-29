@@ -602,7 +602,7 @@ async function sendBuyingSignalAlerts(
     jobId: job.id,
   })
 
-  if (alertTargets.alert_sms_to) {
+  if (false && alertTargets.alert_sms_to) {
     try {
       smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
     } catch (err: any) {
@@ -674,7 +674,7 @@ async function sendActionAlert(
     channel,
   })
 
-  if (alertTargets.alert_sms_to) {
+  if (false && alertTargets.alert_sms_to) {
     try {
       smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
     } catch (err: any) {
@@ -724,7 +724,7 @@ async function sendNewLeadAlert(job: JobRow, settings: DevSettings, callbackNumb
     jobId: job.id,
   })
 
-  if (alertTargets.alert_sms_to) {
+  if (false && alertTargets.alert_sms_to) {
     try {
       smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
     } catch (err: any) {
@@ -774,7 +774,7 @@ async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callback
     jobId: job.id,
   })
 
-  if (alertTargets.alert_sms_to) {
+  if (false && alertTargets.alert_sms_to) {
     try {
       smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
     } catch (err: any) {
@@ -1034,7 +1034,7 @@ export async function handleInboundMessageByTenantSlug(
   let customerReplySmsResult: any = null
   let customerReplyEmailResult: any = null
 
-  if (alertTargets.alert_sms_to) {
+  if (false && alertTargets.alert_sms_to) {
     try {
       customerReplySmsResult = await sendSMS(alertTargets.alert_sms_to, customerReplyAlertText)
     } catch (err: any) {
