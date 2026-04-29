@@ -107,24 +107,24 @@ export default function JobDetail() {
         <h2>Edit Customer / Claim Data</h2>
 
         <div style={grid}>
-          <Field label="Customer Name" value={form.customer_name} onChange={(v) => setField("customer_name", v)} />
-          <Field label="Phone" value={form.customer_phone} onChange={(v) => setField("customer_phone", v)} />
-          <Field label="Email" value={form.customer_email} onChange={(v) => setField("customer_email", v)} />
+          <Field label="Customer Name" value={form.customer_name} onChange={(v: string) => setField("customer_name", v)} />
+          <Field label="Phone" value={form.customer_phone} onChange={(v: string) => setField("customer_phone", v)} />
+          <Field label="Email" value={form.customer_email} onChange={(v: string) => setField("customer_email", v)} />
 
-          <Field label="Address" value={form.address1} onChange={(v) => setField("address1", v)} />
-          <Field label="City" value={form.city} onChange={(v) => setField("city", v)} />
-          <Field label="State" value={form.state} onChange={(v) => setField("state", v)} />
-          <Field label="Zip" value={form.zip} onChange={(v) => setField("zip", v)} />
+          <Field label="Address" value={form.address1} onChange={(v: string) => setField("address1", v)} />
+          <Field label="City" value={form.city} onChange={(v: string) => setField("city", v)} />
+          <Field label="State" value={form.state} onChange={(v: string) => setField("state", v)} />
+          <Field label="Zip" value={form.zip} onChange={(v: string) => setField("zip", v)} />
 
-          <Field label="Carrier" value={form.carrier} onChange={(v) => setField("carrier", v)} />
-          <Field label="Claim #" value={form.claim_number} onChange={(v) => setField("claim_number", v)} />
-          <Field label="Policy Holder" value={form.policy_holder} onChange={(v) => setField("policy_holder", v)} />
+          <Field label="Carrier" value={form.carrier} onChange={(v: string) => setField("carrier", v)} />
+          <Field label="Claim #" value={form.claim_number} onChange={(v: string) => setField("claim_number", v)} />
+          <Field label="Policy Holder" value={form.policy_holder} onChange={(v: string) => setField("policy_holder", v)} />
 
-          <Field label="Adjuster Name" value={form.adjuster_name} onChange={(v) => setField("adjuster_name", v)} />
-          <Field label="Adjuster Phone" value={form.adjuster_phone} onChange={(v) => setField("adjuster_phone", v)} />
-          <Field label="Adjuster Email" value={form.adjuster_email} onChange={(v) => setField("adjuster_email", v)} />
+          <Field label="Adjuster Name" value={form.adjuster_name} onChange={(v: string) => setField("adjuster_name", v)} />
+          <Field label="Adjuster Phone" value={form.adjuster_phone} onChange={(v: string) => setField("adjuster_phone", v)} />
+          <Field label="Adjuster Email" value={form.adjuster_email} onChange={(v: string) => setField("adjuster_email", v)} />
 
-          <Field label="Damage Location" value={form.damage_location} onChange={(v) => setField("damage_location", v)} />
+          <Field label="Damage Location" value={form.damage_location} onChange={(v: string) => setField("damage_location", v)} />
         </div>
 
         <label style={label}>Damage Summary</label>
