@@ -1023,6 +1023,57 @@ export async function handleInboundMessageByTenantSlug(
     }
   )
 
+  const customerReplyAlertText =
+    `CUSTOMER RESPONSE ALERT\n` +
+    `Customer: ${job.customer_name || "Unknown Customer"}\n` +
+    `Job ID: ${jobId}\n` +
+    `Phone: ${callbackNumber || from || "Unknown"}\n\n` +
+    `Message:\n${trimmed}\n\n` +
+    `Next: Review this customer response and reply if needed.`
+
+  let customerReplySmsResult: any = null
+  let customerReplyEmailResult: any = null
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      customerReplySmsResult = await sendSMS(alertTargets.alert_sms_to, customerReplyAlertText)
+    } catch (err: any) {
+      customerReplySmsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    customerReplySmsResult = { skipped: true, reason: "missing_alert_sms_to" }
+  }
+
+  if (alertTargets.alert_email_to) {
+    try {
+      customerReplyEmailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `Customer response: ${job.customer_name || `Job #${jobId}`}`,
+        customerReplyAlertText
+      )
+    } catch (err: any) {
+      customerReplyEmailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    customerReplyEmailResult = { skipped: true, reason: "missing_alert_email_to" }
+  }
+
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "customer_reply_alert_routed",
+    "Customer response alert routed to internal team",
+    {
+      from,
+      channel: "sms",
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+      sms_result: customerReplySmsResult,
+      email_result: customerReplyEmailResult,
+      sms_preview: customerReplyAlertText,
+    }
+  )
+
   const classification = classifyInboundMessage(trimmed)
   const routing = await updateJobRoutingForClassification(tenantId, jobId, classification)
 
