@@ -6,6 +6,9 @@ import { pool } from "../db/db"
 */
 
 export type DevSettings = {
+  alert_email_to?: string
+  alert_sms_to?: string
+
   lead_messages: string[]
   estimate_messages: string[]
   contract_messages: string[]
@@ -19,6 +22,9 @@ export type DevSettings = {
 
 function defaultSettings(): DevSettings {
   return {
+    alert_email_to: "",
+    alert_sms_to: "",
+
     lead_messages: ["", "", "", ""],
     estimate_messages: ["", "", "", ""],
     contract_messages: ["", "", "", "", ""],
@@ -78,11 +84,10 @@ export async function saveDeveloperSettings(tenantId: number, settings: DevSetti
   return { ok: true }
 }
 
-/* Compatibility helpers (DO NOT REMOVE) */
-
-export async function getDeveloperSettingsByTenantSlug(tenantSlug: string) {
+export async function getDeveloperSettingsByTenantSlug(tenantSlug: string): Promise<DevSettings> {
   const { getTenantIdBySlug } = await import("./followupEngine")
   const tenantId = await getTenantIdBySlug(tenantSlug)
+
   return getDeveloperSettings(tenantId)
 }
 
@@ -92,5 +97,6 @@ export async function saveDeveloperSettingsByTenantSlug(
 ) {
   const { getTenantIdBySlug } = await import("./followupEngine")
   const tenantId = await getTenantIdBySlug(tenantSlug)
+
   return saveDeveloperSettings(tenantId, settings)
 }
