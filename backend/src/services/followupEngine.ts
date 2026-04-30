@@ -88,6 +88,76 @@ function cleanPart(value: string | null | undefined) {
   return value && value.trim() ? value.trim() : ""
 }
 
+function extractZip(value: string) {
+  const match = String(value || "").match(/\b\d{5}(?:-\d{4})?\b/)
+  return match ? match[0].slice(0, 5) : null
+}
+
+function cleanIntakeName(value: string) {
+  return String(value || "")
+    .replace(/^(um+|uh+|ah+|hey|hi|hello)[,\s]+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+async function updateCustomerNameForIntake(
+  tenantId: number,
+  customerId: number | null,
+  fullName: string
+) {
+  if (!customerId || !fullName.trim()) return
+
+  await pool.query(
+    `
+    update customers
+    set full_name = $3,
+        updated_at = now()
+    where tenant_id = $1
+      and id = $2
+    `,
+    [tenantId, customerId, fullName.trim()]
+  )
+}
+
+async function updateJobAddressForIntake(
+  tenantId: number,
+  jobId: number,
+  address: string
+) {
+  const zip = extractZip(address)
+
+  await pool.query(
+    `
+    update jobs
+    set address1 = $3,
+        zip = coalesce($4, zip),
+        updated_at = now()
+    where tenant_id = $1
+      and id = $2
+    `,
+    [tenantId, jobId, address.trim(), zip]
+  )
+}
+
+async function getLatestIntakeQuestion(tenantId: number, jobId: number) {
+  const result = await pool.query(
+    `
+    select kind, message, meta, created_at
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'intake_question_sent'
+    order by created_at desc, id desc
+    limit 1
+    `,
+    [tenantId, jobId]
+  )
+
+  if (!result.rowCount) return null
+  return result.rows[0]
+}
+
+
 function firstNonEmpty(...values: Array<string | null | undefined>) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
@@ -1025,6 +1095,130 @@ export async function handleInboundMessageByTenantSlug(
       channel: "sms",
     }
   )
+
+  const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
+
+  if (latestIntakeQuestion?.meta?.missing_name) {
+    const capturedName = cleanIntakeName(trimmed)
+
+    if (capturedName.length >= 3) {
+      await updateCustomerNameForIntake(tenantId, job.customer_id, capturedName)
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "intake_name_captured",
+        capturedName,
+        {
+          from,
+          channel: "sms",
+        }
+      )
+
+      const nextQuestion = "Thanks — what’s the property address or ZIP?"
+
+      await sendSMS(callbackNumber, nextQuestion)
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "intake_question_sent",
+        nextQuestion,
+        {
+          stage: "intake",
+          missing_name: false,
+          missing_address: true,
+        }
+      )
+
+      return {
+        ok: true,
+        intake_in_progress: true,
+        intake_step_completed: "name",
+        reason: "waiting_for_property_address",
+      }
+    }
+  }
+
+  if (latestIntakeQuestion?.meta?.missing_address) {
+    await updateJobAddressForIntake(tenantId, jobId, trimmed)
+    job.address1 = trimmed
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_address_captured",
+      trimmed,
+      {
+        from,
+        channel: "sms",
+        zip_detected: extractZip(trimmed),
+      }
+    )
+
+    const updatedJob = await getJob(tenantId, jobId)
+
+    const intakeAlertText =
+      `SMS INTAKE COMPLETE\n` +
+      `Customer: ${updatedJob.customer_name || "Unknown Customer"}\n` +
+      `Job ID: ${jobId}\n` +
+      `Phone: ${callbackNumber || from || "Unknown"}\n` +
+      `Address / ZIP: ${trimmed}\n\n` +
+      `Next: Call customer and confirm the roofing need.`
+
+    let intakeEmailResult: any = null
+    let intakeSmsResult: any = null
+
+    if (alertTargets.alert_sms_to) {
+      try {
+        intakeSmsResult = await sendSMS(alertTargets.alert_sms_to, intakeAlertText)
+      } catch (err: any) {
+        intakeSmsResult = { error: err?.message || String(err) }
+      }
+    }
+
+    if (alertTargets.alert_email_to) {
+      try {
+        intakeEmailResult = await sendAlertEmail(
+          alertTargets.alert_email_to,
+          `SMS intake complete: ${updatedJob.customer_name || `Job #${jobId}`}`,
+          intakeAlertText
+        )
+      } catch (err: any) {
+        intakeEmailResult = { error: err?.message || String(err) }
+      }
+    }
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_complete_alert_routed",
+      "SMS intake completed and routed to owner",
+      {
+        from,
+        channel: "sms",
+        alert_sms_to: alertTargets.alert_sms_to,
+        alert_email_to: alertTargets.alert_email_to,
+        sms_result: intakeSmsResult,
+        email_result: intakeEmailResult,
+        sms_preview: intakeAlertText,
+      }
+    )
+
+    await sendSMS(
+      callbackNumber,
+      "Thanks — we received your information and someone from Good2Go Roofing Team will follow up."
+    )
+
+    return {
+      ok: true,
+      intake_complete: true,
+      tenant_id: tenantId,
+      job_id: jobId,
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+    }
+  }
 
   const classification = classifyInboundMessage(trimmed)
   const matchedSignals = detectBuyingSignals(trimmed)
