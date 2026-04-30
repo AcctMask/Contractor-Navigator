@@ -828,7 +828,11 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
 
   const timelineBefore = await getTimeline(tenantId, jobId)
 
-  if (job.stage === "lead" && !hasTimelineKind(timelineBefore, "new_lead_alert_routed")) {
+  if (
+    job.stage === "lead" &&
+    !hasTimelineKind(timelineBefore, "new_lead_alert_routed") &&
+    !hasTimelineKind(timelineBefore, "voice_intake_alert_routed")
+  ) {
     const alertResults = await sendNewLeadAlert(job, settings, callbackNumber)
 
     await addTimelineEvent(
@@ -1333,27 +1337,16 @@ export async function createLeadFromInboundCallByTenantSlug(
     }
   )
 
-  if (!hasTimelineKind(await getTimeline(tenantId, jobId), "new_lead_alert_routed")) {
-    const alertResults = await sendNewLeadAlert(
-      await getJob(tenantId, jobId),
-      settings,
-      phone
-    )
-
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "new_lead_alert_routed",
-      "New voice lead alert processed",
-      buildAlertMeta(
-        "voice_lead",
-        alertResults.alertTargets,
-        alertResults.sms,
-        alertResults.email,
-        alertResults.sms_preview
-      )
-    )
-  }
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "voice_generic_lead_alert_skipped",
+    "Generic voice lead alert skipped because voice dispatch summary is the primary owner notification",
+    {
+      from: phone,
+      source,
+    }
+  )
 
   return {
     ok: true,
