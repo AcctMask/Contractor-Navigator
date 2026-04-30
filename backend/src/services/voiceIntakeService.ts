@@ -484,14 +484,27 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
   let smsResult: any = null
   let emailResult: any = null
 
+  const alertSmsTo =
+    settings.alert_sms_to ||
+    process.env.ALERT_SMS_TO ||
+    process.env.ESCALATION_SMS_TO ||
+    process.env.TWILIO_ALERT_TO ||
+    ""
+
+  const alertEmailTo =
+    settings.alert_email_to ||
+    process.env.ALERT_EMAIL_TO ||
+    process.env.ESCALATION_EMAIL_TO ||
+    ""
+
   try {
-    smsResult = await sendSMS(settings.alert_sms_to, smsBody)
+    smsResult = await sendSMS(alertSmsTo, smsBody)
   } catch (err: any) {
     smsResult = { error: err?.message || String(err) }
   }
 
   try {
-    emailResult = await sendAlertEmail(settings.alert_email_to, emailSubject, emailBody)
+    emailResult = await sendAlertEmail(alertEmailTo, emailSubject, emailBody)
   } catch (err: any) {
     emailResult = { error: err?.message || String(err) }
   }
@@ -500,11 +513,11 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     ctx.tenant_id,
     ctx.job_id,
     "voice_intake_alert_routed",
-    `Voice intake alert sent to ${settings.alert_sms_to} and ${settings.alert_email_to}`,
+    `Voice intake alert sent to ${alertSmsTo} and ${alertEmailTo}`,
     {
       channel: "voice",
-      alert_sms_to: settings.alert_sms_to,
-      alert_email_to: settings.alert_email_to,
+      alert_sms_to: alertSmsTo,
+      alert_email_to: alertEmailTo,
       sms_result: smsResult,
       email_result: emailResult,
       sms_preview: smsBody,
