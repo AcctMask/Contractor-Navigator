@@ -181,8 +181,7 @@ export default function JobDetail() {
     setStatus("Uploading files...")
 
     const formData = new FormData()
-    Array.from(files).forEach((file) => formData.append("files", file))
-
+    Array.from(files).forEach((file) => formData.append("file", file))
     const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
       method: "POST",
       body: formData,
