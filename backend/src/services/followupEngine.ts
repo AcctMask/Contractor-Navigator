@@ -583,6 +583,11 @@ async function sendBuyingSignalAlerts(
 ) {
   const alertTargets = resolveAlertTargets(settings)
 
+  console.log("🚨 ALERT TARGET DEBUG", {
+    tenantSlug,
+    alert_email_from_settings: settings?.alert_email_to,
+    alert_email_final: alertTargets.alert_email_to,
+  });
   const summary = buildDispatcherSummary("BUYING SIGNAL DISPATCH SUMMARY", job, {
     callbackNumber,
     message: inboundMessage,
