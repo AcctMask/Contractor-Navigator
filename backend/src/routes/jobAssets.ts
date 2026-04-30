@@ -60,7 +60,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         from timeline_events
         where tenant_id = $1
           and job_id = $2
-          and kind = 'staff_note'
+          and kind in ('staff_note', 'job_asset_uploaded')
         order by created_at desc, id desc
         `,
         [tenantId, Number(jobId)]
@@ -202,6 +202,29 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             stat.size,
             null,
             "Steve",
+          ]
+        )
+
+        await pool.query(
+          `
+          insert into timeline_events
+            (tenant_id, job_id, kind, message, meta, created_at)
+          values
+            ($1, $2, 'job_asset_uploaded', $3, $4::jsonb, now())
+          `,
+          [
+            tenantId,
+            numericJobId,
+            `File uploaded: ${originalName}`,
+            JSON.stringify({
+              asset_id: result.rows[0].id,
+              original_name: originalName,
+              stored_name: storedName,
+              relative_path: relativePath,
+              mime_type: mimetype,
+              file_size_bytes: stat.size,
+              uploaded_by: "Steve",
+            }),
           ]
         )
 
