@@ -1239,9 +1239,52 @@ const isWeakMessage =
   (classification === "unknown" || classification === "callback_request") &&
   trimmed.length < 35
 
+// If weak message AND we already know the customer → ask what they need today
+if (isWeakMessage && hasName) {
+  const firstName = String(job.customer_name || "there").trim().split(/\s+/)[0]
+  const question = `Hi ${firstName} — got your message. What can we help you with today?`
+
+  try {
+    await sendSMS(callbackNumber, question)
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_question_sent",
+      question,
+      {
+        stage: "intake",
+        recognized_customer: true,
+        missing_name: false,
+        missing_address: !hasAddress,
+        missing_service_need: true,
+      }
+    )
+  } catch (err: any) {
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_question_failed",
+      err?.message || String(err),
+      {}
+    )
+  }
+
+  return {
+    ok: true,
+    intake_in_progress: true,
+    reason: "recognized_customer_waiting_for_service_need",
+  }
+}
+
 // If weak message AND missing key info → ask intake question instead of alerting
 if (isWeakMessage && (!hasName || !hasAddress)) {
   let question = ""
+  let meta: Record<string, unknown> = {
+    stage: "intake",
+    missing_name: !hasName,
+    missing_address: !hasAddress,
+  }
 
   if (!hasName) {
     question = "Got it — what’s your full name?"
@@ -1258,11 +1301,7 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
         jobId,
         "intake_question_sent",
         question,
-        {
-          stage: "intake",
-          missing_name: !hasName,
-          missing_address: !hasAddress,
-        }
+        meta
       )
     } catch (err: any) {
       await addTimelineEvent(
