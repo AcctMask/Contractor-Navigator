@@ -228,6 +228,30 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           ]
         )
 
+        // 🔥 CYA: Log upload to timeline_events
+        await pool.query(
+          `
+          insert into timeline_events
+            (tenant_id, job_id, kind, message, meta, created_at)
+          values
+            ($1, $2, 'job_asset_uploaded', $3, $4::jsonb, now())
+          `,
+          [
+            tenantId,
+            numericJobId,
+            `File uploaded: ${originalName}`,
+            JSON.stringify({
+              asset_id: result.rows[0].id,
+              original_name: originalName,
+              stored_name: storedName,
+              relative_path: relativePath,
+              mime_type: mimetype,
+              file_size_bytes: stat.size,
+              uploaded_by: "Steve",
+            }),
+          ]
+        )
+
         uploaded.push({
           ...result.rows[0],
           original_name: result.rows[0].original_name || result.rows[0].stored_name || "file",
