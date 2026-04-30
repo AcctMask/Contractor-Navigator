@@ -5,7 +5,6 @@ import { sendAlertEmail } from "./emailService"
 import {
   createLeadFromInboundCallByTenantSlug,
   getTenantIdBySlug,
-  handleInboundMessageByTenantSlug,
 } from "./followupEngine"
 
 type JobContext = {
@@ -290,7 +289,6 @@ export async function saveVoiceReason(
     }
   )
 
-  await handleInboundMessageByTenantSlug(tenantSlug, jobId, reason, from)
 
   if (emergencyTarpRequested) {
     await updateJobForEmergencyTarp(ctx.tenant_id, ctx.job_id)
