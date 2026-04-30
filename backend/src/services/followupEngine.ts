@@ -1032,13 +1032,18 @@ export async function handleInboundMessageByTenantSlug(
 // 🧠 INTAKE ENGINE (LIGHT)
 // =========================
 
-const hasName = job.customer_name && job.customer_name.length > 3
-const hasAddress = job.address1 && job.address1.length > 5
+const customerNameValue = String(job.customer_name || "").trim().toLowerCase()
+
+const hasName =
+  !!job.customer_name &&
+  job.customer_name.length > 3 &&
+  !["inbound caller", "unknown customer", "unknown"].includes(customerNameValue)
+
+const hasAddress = !!job.address1 && job.address1.length > 5
 
 const isWeakMessage =
-  classification === "unknown" &&
-  !matchedSignals.length &&
-  trimmed.length < 25
+  (classification === "unknown" || classification === "callback_request") &&
+  trimmed.length < 35
 
 // If weak message AND missing key info → ask intake question instead of alerting
 if (isWeakMessage && (!hasName || !hasAddress)) {
