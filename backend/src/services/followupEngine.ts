@@ -100,6 +100,55 @@ function cleanIntakeName(value: string) {
     .trim()
 }
 
+function normalizeIntakeText(value: string | null | undefined) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function isInvalidIntakeName(value: string | null | undefined) {
+  const normalized = normalizeIntakeText(value)
+
+  return (
+    !normalized ||
+    [
+      "inbound caller",
+      "unknown",
+      "unknown customer",
+      "call me",
+      "please call me",
+      "call me please",
+      "can someone call me",
+      "can you call me",
+      "can you call me please",
+      "test",
+      "na",
+      "n a"
+    ].includes(normalized)
+  )
+}
+
+function isWeakServiceNeed(value: string | null | undefined) {
+  const normalized = normalizeIntakeText(value)
+
+  return (
+    normalized.length < 8 ||
+    [
+      "call me",
+      "please call me",
+      "call me please",
+      "can someone call me",
+      "can you call me",
+      "can you call me please",
+      "someone call me",
+      "callback",
+      "call back"
+    ].includes(normalized)
+  )
+}
+
 async function updateCustomerNameForIntake(
   tenantId: number,
   customerId: number | null,
@@ -1099,6 +1148,41 @@ export async function handleInboundMessageByTenantSlug(
   const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
 
   if (latestIntakeQuestion?.meta?.missing_service_need) {
+    const currentNameIsValid =
+      !!job.customer_name &&
+      job.customer_name.length > 3 &&
+      !isInvalidIntakeName(job.customer_name)
+
+    if (isWeakServiceNeed(trimmed)) {
+      const question = currentNameIsValid
+        ? `Hi ${String(job.customer_name || "there").trim().split(/\s+/)[0]} — got your message. Briefly, what do you need help with? For example: roof leak, estimate, inspection, tarp, repair, or insurance claim.`
+        : "Got it — what’s your full name?"
+
+      await sendSMS(callbackNumber, question)
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "intake_question_sent",
+        question,
+        {
+          stage: "intake",
+          missing_name: !currentNameIsValid,
+          missing_address: false,
+          missing_service_need: currentNameIsValid,
+          weak_service_need_reprompt: true,
+        }
+      )
+
+      return {
+        ok: true,
+        intake_in_progress: true,
+        reason: currentNameIsValid
+          ? "waiting_for_clear_service_need"
+          : "waiting_for_customer_name",
+      }
+    }
+
     const updatedJob = await getJob(tenantId, jobId)
 
     await addTimelineEvent(
@@ -1266,25 +1350,10 @@ export async function handleInboundMessageByTenantSlug(
 // 🧠 INTAKE ENGINE (LIGHT)
 // =========================
 
-const customerNameValue = String(job.customer_name || "").trim().toLowerCase()
-
-const invalidNames = [
-  "inbound caller",
-  "unknown",
-  "unknown customer",
-  "call me",
-  "can someone call me",
-  "please call me",
-  "can you call me",
-  "test",
-  "na",
-  "n/a"
-]
-
 const hasName =
   !!job.customer_name &&
   job.customer_name.length > 3 &&
-  !invalidNames.includes(customerNameValue)
+  !isInvalidIntakeName(job.customer_name)
 
 const hasAddress = !!job.address1 && job.address1.length > 5
 
