@@ -1268,10 +1268,23 @@ export async function handleInboundMessageByTenantSlug(
 
 const customerNameValue = String(job.customer_name || "").trim().toLowerCase()
 
+const invalidNames = [
+  "inbound caller",
+  "unknown",
+  "unknown customer",
+  "call me",
+  "can someone call me",
+  "please call me",
+  "can you call me",
+  "test",
+  "na",
+  "n/a"
+]
+
 const hasName =
   !!job.customer_name &&
   job.customer_name.length > 3 &&
-  !["inbound caller", "unknown customer", "unknown"].includes(customerNameValue)
+  !invalidNames.includes(customerNameValue)
 
 const hasAddress = !!job.address1 && job.address1.length > 5
 
