@@ -111,9 +111,7 @@ function resolveAlertTargets(settings: Partial<DevSettings> | null | undefined):
     firstNonEmpty(
       settings?.alert_email_to,
       process.env.ALERT_EMAIL_TO,
-      process.env.ESCALATION_EMAIL_TO,
-      process.env.SMTP_FROM,
-      process.env.SMTP_USER
+      process.env.ESCALATION_EMAIL_TO
     )
   )
 
