@@ -1098,6 +1098,84 @@ export async function handleInboundMessageByTenantSlug(
 
   const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
 
+  if (latestIntakeQuestion?.meta?.missing_service_need) {
+    const updatedJob = await getJob(tenantId, jobId)
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_service_need_captured",
+      trimmed,
+      {
+        from,
+        channel: "sms",
+      }
+    )
+
+    const intakeAlertText =
+      `SMS INTAKE COMPLETE\n` +
+      `Customer: ${updatedJob.customer_name || "Unknown Customer"}\n` +
+      `Job ID: ${jobId}\n` +
+      `Phone: ${callbackNumber || from || "Unknown"}\n` +
+      `Address / ZIP: ${updatedJob.address1 || "Not provided"}\n` +
+      `Need: ${trimmed}\n\n` +
+      `Next: Call customer and confirm next step.`
+
+    let intakeEmailResult: any = null
+    let intakeSmsResult: any = null
+
+    if (alertTargets.alert_sms_to) {
+      try {
+        intakeSmsResult = await sendSMS(alertTargets.alert_sms_to, intakeAlertText)
+      } catch (err: any) {
+        intakeSmsResult = { error: err?.message || String(err) }
+      }
+    }
+
+    if (alertTargets.alert_email_to) {
+      try {
+        intakeEmailResult = await sendAlertEmail(
+          alertTargets.alert_email_to,
+          `SMS intake complete: ${updatedJob.customer_name || `Job #${jobId}`}`,
+          intakeAlertText
+        )
+      } catch (err: any) {
+        intakeEmailResult = { error: err?.message || String(err) }
+      }
+    }
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "intake_complete_alert_routed",
+      "SMS intake completed and routed to owner",
+      {
+        from,
+        channel: "sms",
+        service_need: trimmed,
+        alert_sms_to: alertTargets.alert_sms_to,
+        alert_email_to: alertTargets.alert_email_to,
+        sms_result: intakeSmsResult,
+        email_result: intakeEmailResult,
+        sms_preview: intakeAlertText,
+      }
+    )
+
+    await sendSMS(
+      callbackNumber,
+      "Thanks — we received your information and someone from Good2Go Roofing Team will follow up."
+    )
+
+    return {
+      ok: true,
+      intake_complete: true,
+      tenant_id: tenantId,
+      job_id: jobId,
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+    }
+  }
+
   if (latestIntakeQuestion?.meta?.missing_name) {
     const capturedName = cleanIntakeName(trimmed)
 
@@ -1156,67 +1234,29 @@ export async function handleInboundMessageByTenantSlug(
       }
     )
 
-    const updatedJob = await getJob(tenantId, jobId)
+    const nextQuestion =
+      "Thanks — briefly, what do you need help with? For example: roof leak, estimate, inspection, tarp, repair, or insurance claim."
 
-    const intakeAlertText =
-      `SMS INTAKE COMPLETE\n` +
-      `Customer: ${updatedJob.customer_name || "Unknown Customer"}\n` +
-      `Job ID: ${jobId}\n` +
-      `Phone: ${callbackNumber || from || "Unknown"}\n` +
-      `Address / ZIP: ${trimmed}\n\n` +
-      `Next: Call customer and confirm the roofing need.`
-
-    let intakeEmailResult: any = null
-    let intakeSmsResult: any = null
-
-    if (alertTargets.alert_sms_to) {
-      try {
-        intakeSmsResult = await sendSMS(alertTargets.alert_sms_to, intakeAlertText)
-      } catch (err: any) {
-        intakeSmsResult = { error: err?.message || String(err) }
-      }
-    }
-
-    if (alertTargets.alert_email_to) {
-      try {
-        intakeEmailResult = await sendAlertEmail(
-          alertTargets.alert_email_to,
-          `SMS intake complete: ${updatedJob.customer_name || `Job #${jobId}`}`,
-          intakeAlertText
-        )
-      } catch (err: any) {
-        intakeEmailResult = { error: err?.message || String(err) }
-      }
-    }
+    await sendSMS(callbackNumber, nextQuestion)
 
     await addTimelineEvent(
       tenantId,
       jobId,
-      "intake_complete_alert_routed",
-      "SMS intake completed and routed to owner",
+      "intake_question_sent",
+      nextQuestion,
       {
-        from,
-        channel: "sms",
-        alert_sms_to: alertTargets.alert_sms_to,
-        alert_email_to: alertTargets.alert_email_to,
-        sms_result: intakeSmsResult,
-        email_result: intakeEmailResult,
-        sms_preview: intakeAlertText,
+        stage: "intake",
+        missing_name: false,
+        missing_address: false,
+        missing_service_need: true,
       }
-    )
-
-    await sendSMS(
-      callbackNumber,
-      "Thanks — we received your information and someone from Good2Go Roofing Team will follow up."
     )
 
     return {
       ok: true,
-      intake_complete: true,
-      tenant_id: tenantId,
-      job_id: jobId,
-      alert_sms_to: alertTargets.alert_sms_to,
-      alert_email_to: alertTargets.alert_email_to,
+      intake_in_progress: true,
+      intake_step_completed: "address",
+      reason: "waiting_for_service_need",
     }
   }
 
