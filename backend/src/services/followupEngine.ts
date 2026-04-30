@@ -1027,8 +1027,62 @@ export async function handleInboundMessageByTenantSlug(
   )
 
   const classification = classifyInboundMessage(trimmed)
-  const routing = await updateJobRoutingForClassification(tenantId, jobId, classification)
   const matchedSignals = detectBuyingSignals(trimmed)
+// =========================
+// 🧠 INTAKE ENGINE (LIGHT)
+// =========================
+
+const hasName = job.customer_name && job.customer_name.length > 3
+const hasAddress = job.address1 && job.address1.length > 5
+
+const isWeakMessage =
+  classification === "unknown" &&
+  !matchedSignals.length &&
+  trimmed.length < 25
+
+// If weak message AND missing key info → ask intake question instead of alerting
+if (isWeakMessage && (!hasName || !hasAddress)) {
+  let question = ""
+
+  if (!hasName) {
+    question = "Got it — what’s your full name?"
+  } else if (!hasAddress) {
+    question = "Thanks — what’s the property address or ZIP?"
+  }
+
+  if (question) {
+    try {
+      await sendSMS(callbackNumber, question)
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "intake_question_sent",
+        question,
+        {
+          stage: "intake",
+          missing_name: !hasName,
+          missing_address: !hasAddress,
+        }
+      )
+    } catch (err: any) {
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "intake_question_failed",
+        err?.message || String(err),
+        {}
+      )
+    }
+
+    return {
+      ok: true,
+      intake_in_progress: true,
+      reason: "waiting_for_customer_info",
+    }
+  }
+}
+  const routing = await updateJobRoutingForClassification(tenantId, jobId, classification)
 
   await addTimelineEvent(
     tenantId,
