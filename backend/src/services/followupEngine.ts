@@ -195,7 +195,7 @@ async function getLatestIntakeQuestion(tenantId: number, jobId: number) {
     from timeline_events
     where tenant_id = $1
       and job_id = $2
-      and kind = 'intake_question_sent'
+      and kind in ('intake_question_sent', 'intake_complete_alert_routed')
     order by created_at desc, id desc
     limit 1
     `,
@@ -203,7 +203,14 @@ async function getLatestIntakeQuestion(tenantId: number, jobId: number) {
   )
 
   if (!result.rowCount) return null
-  return result.rows[0]
+
+  const latest = result.rows[0]
+
+  if (latest.kind !== "intake_question_sent") {
+    return null
+  }
+
+  return latest
 }
 
 
