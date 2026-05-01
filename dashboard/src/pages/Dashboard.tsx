@@ -155,7 +155,9 @@ export default function DashboardPage() {
             <div style={sideNavItemMuted}>Message Center</div>
             <div style={sideNavItemMuted}>Claims</div>
             <div style={sideNavItemMuted}>Production</div>
-            <div style={sideNavItemMuted}>Reports</div>
+            <Link to="/reports" style={sideNavItem}>
+              Reports
+            </Link>
             <div style={sideNavItemMuted}>Settings</div>
           </div>
         </aside>

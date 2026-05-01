@@ -9,6 +9,7 @@ import LoginPage from "./pages/Login"
 import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
+import ReportsPage from "./pages/Reports"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
 import SignDocument from "./pages/SignDocument"
@@ -118,6 +119,18 @@ export default function App() {
             <div style={pageStyle}>
               <HeaderBar />
               <UsersPage />
+            </div>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <div style={pageStyle}>
+              <HeaderBar />
+              <ReportsPage />
             </div>
           </ProtectedRoute>
         }
