@@ -775,7 +775,7 @@ async function sendBuyingSignalAlerts(
     jobId: job.id,
   })
 
-  if (false && alertTargets.alert_sms_to) {
+  if (alertTargets.alert_sms_to) {
     try {
       smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
     } catch (err: any) {
