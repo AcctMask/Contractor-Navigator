@@ -775,9 +775,20 @@ async function sendBuyingSignalAlerts(
     jobId: job.id,
   })
 
+  const ownerSms =
+    `🚨 HIGH INTENT LEAD\n\n` +
+    `Customer: ${job.customer_name || "Unknown"}\n` +
+    `Job ID: ${job.id}\n` +
+    `Phone: ${callbackNumber || "Unknown"}\n` +
+    `Email: ${job.customer_email || "Unknown"}\n` +
+    `Address: ${buildAddressLine(job)}\n\n` +
+    `Customer said:\n"${inboundMessage}"\n\n` +
+    `Reason: ${matchedSignals.join(", ") || "high intent reply"}\n` +
+    `Action: Call immediately and close.`
+
   if (alertTargets.alert_sms_to) {
     try {
-      smsResult = await sendSMS(alertTargets.alert_sms_to, summary.sms)
+      smsResult = await sendSMS(alertTargets.alert_sms_to, ownerSms)
     } catch (err: any) {
       smsResult = { error: err?.message || String(err) }
     }
