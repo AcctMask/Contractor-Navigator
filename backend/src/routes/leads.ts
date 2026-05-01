@@ -39,18 +39,7 @@ async function findOrCreateCustomer(
     if (byAddress.rowCount) return Number(byAddress.rows[0].id);
   }
 
-  // Second: match by email only. Do not match by phone alone.
-  if (email) {
-    const byEmail = await pool.query(
-      `select id from customers
-       where tenant_id = $1
-         and lower(trim(email)) = lower(trim($2))
-       limit 1`,
-      [tenantId, email]
-    );
-
-    if (byEmail.rowCount) return Number(byEmail.rows[0].id);
-  }
+  // Do not match by phone or email alone. Address/property is the job anchor.
 
   const inserted = await pool.query(
     `insert into customers (tenant_id, full_name, phone, email)

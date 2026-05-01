@@ -60,7 +60,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         from timeline_events
         where tenant_id = $1
           and job_id = $2
-          and kind in ('staff_note', 'job_asset_uploaded')
+          and kind in ('staff_note', 'job_asset_uploaded', 'estimate_details', 'lead_created')
         order by created_at desc, id desc
         `,
         [tenantId, Number(jobId)]
