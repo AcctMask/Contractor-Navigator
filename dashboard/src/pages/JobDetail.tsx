@@ -29,7 +29,7 @@ export default function JobDetail() {
   async function loadJob() {
     if (!id) return
 
-    const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs/${id}`)
+    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}`)
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
