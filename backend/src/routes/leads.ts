@@ -98,6 +98,21 @@ async function registerLeadRoutes(app: FastifyInstance) {
 
     const jobId = Number(insertedJob.rows[0].id);
 
+    // Save structured estimate details for sales + AI follow-up
+    try {
+      const { upsertEstimateDetailsByTenantSlug } = await import("../services/documentPipelineService")
+
+      await upsertEstimateDetailsByTenantSlug(tenantSlug, jobId, {
+        roof_type: asString(body.roofType),
+        roof_squares: body.roofSqft ? Number(body.roofSqft) / 100 : null,
+        low_amount: body.estimateLow ? Number(body.estimateLow) : null,
+        high_amount: body.estimateHigh ? Number(body.estimateHigh) : null,
+        estimator_remarks: asString(body.estimateSummary)
+      })
+    } catch (err) {
+      console.error("Failed to save estimate details", err)
+    }
+
     await pool.query(
       `insert into timeline_events (
         tenant_id, job_id, kind, message, meta
