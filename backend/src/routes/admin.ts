@@ -317,6 +317,71 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     return reply.send({ ok: true, tenant_id: tenantId, bootstrapped: true });
   });
 
+  app.get("/admin/reports/:tenant_slug", async (req, reply) => {
+    const tenant_slug = String((req.params as any).tenant_slug || "");
+    const tenantId = await getTenantIdBySlug(tenant_slug);
+    const q: any = (req.query as any) || {};
+    const range = String(q.range || "30d");
+
+    let fromSql = "now() - interval '30 days'";
+    if (range === "7d") fromSql = "now() - interval '7 days'";
+    if (range === "all") fromSql = "null";
+
+    const dateFilter = range === "all" ? "" : `and j.created_at >= ${fromSql}`;
+
+    const bySource = await pool.query(
+      `
+      select
+        coalesce(nullif(trim(j.lead_source_detail), ''), nullif(trim(j.lead_source), ''), 'unknown') as label,
+        count(*)::int as count
+      from jobs j
+      where j.tenant_id = $1
+      ${dateFilter}
+      group by 1
+      order by count desc, label asc
+      limit 50
+      `,
+      [tenantId]
+    );
+
+    const byJobType = await pool.query(
+      `
+      select
+        coalesce(nullif(trim(j.job_type), ''), 'unknown') as label,
+        count(*)::int as count
+      from jobs j
+      where j.tenant_id = $1
+      ${dateFilter}
+      group by 1
+      order by count desc, label asc
+      `,
+      [tenantId]
+    );
+
+    const byStage = await pool.query(
+      `
+      select
+        coalesce(nullif(trim(j.stage), ''), 'unknown') as label,
+        count(*)::int as count
+      from jobs j
+      where j.tenant_id = $1
+      ${dateFilter}
+      group by 1
+      order by count desc, label asc
+      `,
+      [tenantId]
+    );
+
+    return reply.send({
+      ok: true,
+      tenant_id: tenantId,
+      range,
+      by_source: bySource.rows,
+      by_job_type: byJobType.rows,
+      by_stage: byStage.rows,
+    });
+  });
+
   app.get("/admin/jobs/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
