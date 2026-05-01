@@ -15,6 +15,53 @@ function asString(v: any): string | null {
   return s.length ? s : null;
 }
 
+function classifyEstimatorLead(body: any): { jobType: string; stage: string; crmSubstatus: string | null } {
+  const text = [
+    body.custSource,
+    body.source,
+    body.heardAbout,
+    body.notes,
+    body.roofType,
+    body.estimateSummary,
+  ]
+    .map((v) => String(v || "").toLowerCase())
+    .join(" ");
+
+  if (
+    text.includes("tarp") ||
+    text.includes("emergency") ||
+    text.includes("ems") ||
+    text.includes("mitigation") ||
+    text.includes("alacrity") ||
+    text.includes("preferred repair") ||
+    text.includes("prn")
+  ) {
+    return {
+      jobType: "TARP",
+      stage: "tarp",
+      crmSubstatus: "possible_emergency_tarp",
+    };
+  }
+
+  if (
+    text.includes("repair") ||
+    text.includes("leak") ||
+    text.includes("patch")
+  ) {
+    return {
+      jobType: "ROOF_REPAIR",
+      stage: "roof_repair",
+      crmSubstatus: "possible_roof_repair",
+    };
+  }
+
+  return {
+    jobType: "ROOF_REPLACEMENT",
+    stage: "estimate_sent",
+    crmSubstatus: null,
+  };
+}
+
 async function findOrCreateCustomer(
   tenantId: number,
   fullName: string | null,
@@ -64,6 +111,7 @@ async function registerLeadRoutes(app: FastifyInstance) {
     const email = asString(body.email);
 
     const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, asString(body.address));
+    const classification = classifyEstimatorLead(body);
 
     const insertedJob = await pool.query(
       `insert into jobs (
@@ -73,6 +121,7 @@ async function registerLeadRoutes(app: FastifyInstance) {
         external_job_id,
         job_type,
         stage,
+        crm_substatus,
         address1,
         city,
         state,
@@ -84,9 +133,10 @@ async function registerLeadRoutes(app: FastifyInstance) {
         $1,$2,
         'estimator_app',
         $3,
-        'ROOF_REPLACEMENT',
-        'estimate_sent',
-        $4,$5,$6,$7,
+        $4,
+        $5,
+        $6,
+        $7,$8,$9,$10,
         'estimator',
         $8
       )
@@ -95,6 +145,9 @@ async function registerLeadRoutes(app: FastifyInstance) {
         tenantId,
         customerId,
         `est-${Date.now()}`,
+        classification.jobType,
+        classification.stage,
+        classification.crmSubstatus,
         asString(body.address),
         asString(body.city),
         asString(body.state),
