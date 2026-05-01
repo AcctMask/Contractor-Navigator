@@ -87,8 +87,8 @@ async function registerLeadRoutes(app: FastifyInstance) {
         'ROOF_REPLACEMENT',
         'estimate_sent',
         $4,$5,$6,$7,
-        'website',
-        'estimate_form'
+        'estimator',
+        $8
       )
       returning id`,
       [
@@ -99,6 +99,7 @@ async function registerLeadRoutes(app: FastifyInstance) {
         asString(body.city),
         asString(body.state),
         asString(body.zip),
+        asString(body.custSource) || asString(body.source) || asString(body.heardAbout) || "instant_estimator",
       ]
     );
 
