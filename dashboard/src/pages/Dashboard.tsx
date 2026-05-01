@@ -144,63 +144,25 @@ export default function DashboardPage() {
 
           <div style={navSectionLabel}>WORKSPACE</div>
 
-          <div style={navList}>
-            <Link to="/" style={{ ...sideNavItem, ...sideNavItemActive }}>
-              Dashboard
-            </Link>
-            <Link to="/job-admin" style={sideNavItem}>
-              Jobs
-            </Link>
-            <Link to="/job-admin" style={sideNavItem}>
-              Customer Search
-            </Link>
-            <Link to="/calendar" style={sideNavItem}>
-              Calendar
-            </Link>
-            <Link to="/document-pipeline" style={sideNavItem}>
-              Documents
-            </Link>
-            <Link to="/users" style={sideNavItem}>
-              Users
-            </Link>
-            <div style={sideNavItemMuted}>Message Center</div>
-            <div style={sideNavItemMuted}>Claims</div>
-            <div style={sideNavItemMuted}>Production</div>
-            <Link to="/reports" style={sideNavItem}>
-              Reports
-            </Link>
-            <div style={sideNavItemMuted}>Settings</div>
+          <div style={tenantSummary}>
+            <div style={tenantSummaryTitle}>Operating System Status</div>
+            <div style={tenantSummaryText}>
+              Live lead intake, AI follow-up, job tracking, document storage, reporting,
+              and claim workflow support for the Good2Go Roofing team.
+            </div>
           </div>
         </aside>
 
         <main style={main}>
           <section style={heroCard}>
-            <div style={heroEyebrow}>Welcome to Co-Pilot</div>
+            <div style={heroEyebrow}>Good2Go Roofing Command Center</div>
             <h1 style={heroTitle}>
-              Customer contact, AI follow-up, and information-tracking operations platform.
+              Lead intake, job routing, customer follow-up, claims visibility, and reporting in one place.
             </h1>
             <p style={heroText}>
-              Built for contractor teams that need customer visibility, workflow control,
-              claims handling, and sales follow-up in one operating system.
+              This dashboard shows where opportunities are coming from, what stage each job is in,
+              and which records need attention next.
             </p>
-
-            <div style={heroActions}>
-              <Link to="/job-admin" style={primaryAction}>
-                Customer Search
-              </Link>
-
-              <Link to="/calendar" style={secondaryActionLink}>
-                Calendar
-              </Link>
-
-              <Link to="/document-pipeline" style={secondaryActionLink}>
-                Documents
-              </Link>
-
-              <Link to="/job-admin" style={primaryActionAlt}>
-                Add Manual Note
-              </Link>
-            </div>
           </section>
 
           <section style={statsGrid}>
@@ -321,10 +283,10 @@ export default function DashboardPage() {
                 <Link to="/calendar" style={primaryAction}>
                   Open Calendar
                 </Link>
-                <Link to="/users" style={secondaryActionLink}>
+                <Link to="/users" style={primaryAction}>
                   Manage Users
                 </Link>
-                <Link to="/document-pipeline" style={secondaryActionLink}>
+                <Link to="/document-pipeline" style={primaryAction}>
                   Open Documents
                 </Link>
               </div>
@@ -377,7 +339,7 @@ const brandBadge: CSSProperties = {
 }
 
 const brandTitle: CSSProperties = {
-  fontSize: "18px",
+  fontSize: "15px",
   fontWeight: 800,
 }
 
@@ -387,10 +349,11 @@ const brandSub: CSSProperties = {
 }
 
 const companyCard: CSSProperties = {
-  background: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.12)",
   borderRadius: "18px",
-  padding: "14px",
+  padding: "18px",
+  marginTop: "18px",
   marginBottom: "18px",
 }
 
@@ -419,31 +382,9 @@ const navSectionLabel: CSSProperties = {
   marginBottom: "10px",
 }
 
-const navList: CSSProperties = {
-  display: "grid",
-  gap: "8px",
-}
 
-const sideNavItem: CSSProperties = {
-  textDecoration: "none",
-  color: "#e8eefc",
-  padding: "12px 14px",
-  borderRadius: "14px",
-  display: "block",
-  background: "transparent",
-}
 
-const sideNavItemActive: CSSProperties = {
-  background: "rgba(74,168,255,0.16)",
-  border: "1px solid rgba(74,168,255,0.24)",
-}
 
-const sideNavItemMuted: CSSProperties = {
-  color: "#e8eefc",
-  padding: "12px 14px",
-  borderRadius: "14px",
-  opacity: 0.75,
-}
 
 const main: CSSProperties = {
   display: "grid",
@@ -454,7 +395,7 @@ const heroCard: CSSProperties = {
   background: "linear-gradient(135deg, rgba(13,33,85,0.98) 0%, rgba(17,44,108,0.92) 100%)",
   border: "1px solid rgba(81, 133, 255, 0.25)",
   borderRadius: "26px",
-  padding: "24px",
+  padding: "18px 22px",
   boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
 }
 
@@ -469,7 +410,7 @@ const heroEyebrow: CSSProperties = {
 
 const heroTitle: CSSProperties = {
   margin: 0,
-  fontSize: "36px",
+  fontSize: "24px",
   lineHeight: 1.08,
   maxWidth: "900px",
 }
@@ -478,15 +419,9 @@ const heroText: CSSProperties = {
   fontSize: "18px",
   opacity: 0.86,
   maxWidth: "860px",
-  marginTop: "14px",
+  marginTop: "10px",
 }
 
-const heroActions: CSSProperties = {
-  display: "flex",
-  gap: "12px",
-  flexWrap: "wrap",
-  marginTop: "22px",
-}
 
 const primaryAction: CSSProperties = {
   textDecoration: "none",
@@ -498,30 +433,11 @@ const primaryAction: CSSProperties = {
   display: "inline-block",
 }
 
-const primaryActionAlt: CSSProperties = {
-  textDecoration: "none",
-  color: "#fff",
-  background: "linear-gradient(90deg, #2c6af5 0%, #5aaeff 100%)",
-  padding: "12px 18px",
-  borderRadius: "14px",
-  fontWeight: 700,
-  display: "inline-block",
-}
 
-const secondaryActionLink: CSSProperties = {
-  textDecoration: "none",
-  color: "#fff",
-  background: "rgba(255,255,255,0.08)",
-  border: "1px solid rgba(255,255,255,0.12)",
-  padding: "12px 18px",
-  borderRadius: "14px",
-  fontWeight: 700,
-  display: "inline-block",
-}
 
 const statsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))",
   gap: "12px",
 }
 
@@ -530,7 +446,7 @@ const statCard: CSSProperties = {
   background: "rgba(30, 58, 138, 0.55)",
   border: "1px solid rgba(147, 197, 253, 0.42)",
   borderRadius: "16px",
-  padding: "14px 16px",
+  padding: "10px 12px",
   color: "#f8fafc",
 }
 
@@ -541,7 +457,7 @@ const statCardActive: CSSProperties = {
 }
 
 const statNumber: CSSProperties = {
-  fontSize: "30px",
+  fontSize: "24px",
   fontWeight: 800,
   lineHeight: 1,
   marginBottom: "6px",
@@ -549,7 +465,7 @@ const statNumber: CSSProperties = {
 }
 
 const statLabel: CSSProperties = {
-  fontSize: "14px",
+  fontSize: "13px",
   fontWeight: 800,
   color: "#ffffff",
   textTransform: "capitalize",
@@ -624,7 +540,7 @@ const tableHeader: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
   gap: "10px",
-  padding: "14px 16px",
+  padding: "10px 12px",
   fontSize: "12px",
   fontWeight: 800,
   letterSpacing: "0.04em",
@@ -641,7 +557,7 @@ const tableRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1.6fr 1fr 0.8fr 1fr 1fr 1fr 0.7fr",
   gap: "10px",
-  padding: "14px 16px",
+  padding: "10px 12px",
   borderBottom: "1px solid rgba(255,255,255,0.06)",
   alignItems: "center",
 }
@@ -667,6 +583,30 @@ const errorBox: CSSProperties = {
   background: "rgba(255, 90, 90, 0.12)",
   border: "1px solid rgba(255, 90, 90, 0.3)",
   borderRadius: "14px",
-  padding: "14px 16px",
+  padding: "10px 12px",
   color: "#ffd7d7",
+}
+
+
+const tenantSummary: CSSProperties = {
+  marginTop: "18px",
+  padding: "16px",
+  borderRadius: "18px",
+  background: "rgba(15, 23, 42, 0.72)",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+}
+
+const tenantSummaryTitle: CSSProperties = {
+  fontSize: "13px",
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  opacity: 0.85,
+  marginBottom: "8px",
+}
+
+const tenantSummaryText: CSSProperties = {
+  fontSize: "14px",
+  lineHeight: 1.45,
+  opacity: 0.82,
 }

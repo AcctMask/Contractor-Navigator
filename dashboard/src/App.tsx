@@ -80,6 +80,13 @@ function HeaderBar() {
               Users
             </Link>
 
+            <Link
+              to="/reports"
+              style={location.pathname === "/reports" ? activeLinkStyle : mutedLinkStyle}
+            >
+              Reports
+            </Link>
+
             <button onClick={handleLogout} style={logoutButtonStyle}>
               Logout
             </button>
