@@ -171,19 +171,19 @@ function buildSalesIntentReply(intent: string, job: JobRow) {
   const name = String(job.customer_name || "there").trim().split(/\s+/)[0] || "there"
 
   if (intent === "just_looking") {
-    return `Totally understand, ${name}. Most people start there and do not want to be pressured. The best way to get a useful number without wasting anyone’s time is the estimator on our website. It will give you a realistic range, and when you are ready to move forward we can tighten it up from there.`
+    return `Totally understand, ${name} — most people start there and nobody wants to be pressured. Just so I point you in the right direction, are you looking because you already know there is an issue, or are you just being proactive? Either way is fine.`
   }
 
   if (intent === "pricing_objection") {
-    return `${name}, I understand. When you say the price feels too high, is that compared to another quote or just higher than expected? Roofing prices vary by ZIP code, materials, and scope, and a lot of lower numbers leave out important items. What matters most to you: lowest price, best long-term protection, or getting it done quickly?`
+    return `${name}, I understand. Compared to what? Roof pricing can vary a lot depending on materials, scope, and even ZIP code. What specifically feels high to you — the total cost, the monthly impact, or something else?`
   }
 
   if (intent === "callback_request") {
-    return `Absolutely, ${name}. Can you give me a brief explanation of what you need help with so the person calling you is prepared?`
+    return `Absolutely, ${name}. I can have someone call you. Quick heads up — what is the main thing you want to go over so they are prepared and not wasting your time?`
   }
 
   if (intent === "contract_request") {
-    return `Great, ${name}. I’ll flag this so we can get the next step moving. If there is a specific price, material, or timing concern you want addressed before paperwork, reply here and I’ll make sure it is noted.`
+    return `Great, ${name} — that is exactly what we want to hear. Before we move to paperwork, is there anything you want clarified on pricing, materials, or timing? Once we lock that in, we can get everything moving for you.`
   }
 
   if (intent === "tarp_request") {
@@ -191,76 +191,11 @@ function buildSalesIntentReply(intent: string, job: JobRow) {
   }
 
   if (intent === "estimate_request") {
-    return `${name}, we can help. If you are looking for a solid starting number, the estimator is the best first step because roof pricing depends on size, pitch, materials, and location. If you are ready to move forward soon, we can help tighten that estimate into the next step.`
+    return `${name}, we can get you a solid estimate range. The fastest way is through our estimator because roof pricing depends on size, pitch, materials, and location. If you are not ready to move forward yet, it is better to start there than guessing a number that may change later.`
   }
 
   return null
 }
-
-async function updateCustomerNameForIntake(
-  tenantId: number,
-  customerId: number | null,
-  fullName: string
-) {
-  if (!customerId || !fullName.trim()) return
-
-  await pool.query(
-    `
-    update customers
-    set full_name = $3,
-        updated_at = now()
-    where tenant_id = $1
-      and id = $2
-    `,
-    [tenantId, customerId, fullName.trim()]
-  )
-}
-
-async function updateJobAddressForIntake(
-  tenantId: number,
-  jobId: number,
-  address: string
-) {
-  const zip = extractZip(address)
-
-  await pool.query(
-    `
-    update jobs
-    set address1 = $3,
-        zip = coalesce($4, zip),
-        updated_at = now()
-    where tenant_id = $1
-      and id = $2
-    `,
-    [tenantId, jobId, address.trim(), zip]
-  )
-}
-
-async function getLatestIntakeQuestion(tenantId: number, jobId: number) {
-  const result = await pool.query(
-    `
-    select kind, message, meta, created_at
-    from timeline_events
-    where tenant_id = $1
-      and job_id = $2
-      and kind in ('intake_question_sent', 'intake_complete_alert_routed')
-    order by created_at desc, id desc
-    limit 1
-    `,
-    [tenantId, jobId]
-  )
-
-  if (!result.rowCount) return null
-
-  const latest = result.rows[0]
-
-  if (latest.kind !== "intake_question_sent") {
-    return null
-  }
-
-  return latest
-}
-
 
 function firstNonEmpty(...values: Array<string | null | undefined>) {
   for (const value of values) {
