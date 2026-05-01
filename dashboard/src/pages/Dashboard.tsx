@@ -145,10 +145,23 @@ export default function DashboardPage() {
           <div style={navSectionLabel}>WORKSPACE</div>
 
           <div style={tenantSummary}>
-            <div style={tenantSummaryTitle}>Operating System Status</div>
+            <div style={tenantSummaryTitle}>System Capabilities</div>
             <div style={tenantSummaryText}>
-              Live lead intake, AI follow-up, job tracking, document storage, reporting,
-              and claim workflow support for the Good2Go Roofing team.
+              Connected tools supporting lead identification, follow-up, job tracking,
+              storm response, reporting, and contract closure.
+            </div>
+
+            <div style={capabilityWrap}>
+              <span style={capabilityPill}>SEO Lead Engine</span>
+              <span style={capabilityPill}>Storm Targeting</span>
+              <span style={capabilityPill}>Roof Age Targeting</span>
+              <span style={capabilityPill}>Evergreen Social</span>
+              <span style={capabilityPill}>Instant Estimator</span>
+              <span style={capabilityPill}>Follow-Up Engine</span>
+              <span style={capabilityPill}>Timeline Tracking</span>
+              <span style={capabilityPill}>Source Reporting</span>
+              <span style={capabilityPill}>Claim Support</span>
+              <span style={capabilityPill}>Contract Closure</span>
             </div>
           </div>
         </aside>
@@ -609,4 +622,22 @@ const tenantSummaryText: CSSProperties = {
   fontSize: "14px",
   lineHeight: 1.45,
   opacity: 0.82,
+}
+
+
+const capabilityWrap: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "7px",
+  marginTop: "12px",
+}
+
+const capabilityPill: CSSProperties = {
+  fontSize: "11px",
+  fontWeight: 700,
+  padding: "6px 8px",
+  borderRadius: "999px",
+  color: "#dbeafe",
+  background: "rgba(37, 99, 235, 0.22)",
+  border: "1px solid rgba(147, 197, 253, 0.28)",
 }
