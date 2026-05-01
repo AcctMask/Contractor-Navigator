@@ -521,38 +521,44 @@ const secondaryActionLink: CSSProperties = {
 
 const statsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap: "18px",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: "12px",
 }
 
 
 const statCard: CSSProperties = {
-  background: "rgba(8, 22, 59, 0.92)",
-  border: "1px solid rgba(81, 133, 255, 0.18)",
-  borderRadius: "22px",
-  padding: "22px",
+  background: "rgba(30, 58, 138, 0.55)",
+  border: "1px solid rgba(147, 197, 253, 0.42)",
+  borderRadius: "16px",
+  padding: "14px 16px",
+  color: "#f8fafc",
 }
 
 const statCardActive: CSSProperties = {
-  border: "1px solid rgba(96, 165, 250, 0.85)",
-  background: "rgba(37, 99, 235, 0.35)",
+  border: "1px solid rgba(191, 219, 254, 0.95)",
+  background: "rgba(59, 130, 246, 0.78)",
+  boxShadow: "0 0 0 1px rgba(147, 197, 253, 0.45), 0 12px 28px rgba(37, 99, 235, 0.28)",
 }
 
 const statNumber: CSSProperties = {
-  fontSize: "44px",
+  fontSize: "30px",
   fontWeight: 800,
   lineHeight: 1,
-  marginBottom: "10px",
+  marginBottom: "6px",
+  color: "#ffffff",
 }
 
 const statLabel: CSSProperties = {
-  fontSize: "18px",
-  fontWeight: 700,
+  fontSize: "14px",
+  fontWeight: 800,
+  color: "#ffffff",
+  textTransform: "capitalize",
 }
 
 const statSub: CSSProperties = {
-  fontSize: "13px",
-  opacity: 0.72,
+  fontSize: "12px",
+  opacity: 0.9,
+  color: "#dbeafe",
   marginTop: "6px",
 }
 
