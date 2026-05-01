@@ -170,11 +170,10 @@ export default function DashboardPage() {
           <section style={heroCard}>
             <div style={heroEyebrow}>Good2Go Roofing Command Center</div>
             <h1 style={heroTitle}>
-              Lead intake, job routing, customer follow-up, claims visibility, and reporting in one place.
+              AI-driven lead intake, job routing, customer follow-up, claims visibility, and reporting in one place.
             </h1>
             <p style={heroText}>
-              This dashboard shows where opportunities are coming from, what stage each job is in,
-              and which records need attention next.
+              Automatically load leads from web forms, calls, and text conversations, then track every opportunity from first contact through follow-up, claims support, and contract closure. Never lose an opportunity again.
             </p>
           </section>
 
