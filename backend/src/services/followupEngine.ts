@@ -1477,6 +1477,39 @@ export async function handleInboundMessageByTenantSlug(
       }
     )
 
+    let buyingSignalAlertResult: any = null
+
+    const isHighIntent =
+      salesIntent === "contract_request" ||
+      matchedSignals.length > 0 ||
+      trimmed.toLowerCase().includes("ready") ||
+      trimmed.toLowerCase().includes("move forward") ||
+      trimmed.toLowerCase().includes("get started")
+
+    if (isHighIntent) {
+      buyingSignalAlertResult = await sendBuyingSignalAlerts(
+        job,
+        trimmed,
+        matchedSignals.length ? matchedSignals : [salesIntent],
+        settings,
+        callbackNumber
+      )
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "high_intent_alert_routed",
+        "High-intent customer reply routed to owner.",
+        {
+          intent: salesIntent,
+          matched_signals: matchedSignals,
+          alert_result: buyingSignalAlertResult,
+          from,
+          channel: "sms",
+        }
+      )
+    }
+
     if (salesIntent === "callback_request") {
       await pool.query(
         `
@@ -1508,6 +1541,7 @@ export async function handleInboundMessageByTenantSlug(
       handled_by_sales_intent_engine: true,
       intent: salesIntent,
       message: salesIntentReply,
+      high_intent_alert_routed: Boolean(buyingSignalAlertResult),
     }
   }
 
