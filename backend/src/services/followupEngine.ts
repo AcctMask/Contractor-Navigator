@@ -1845,8 +1845,8 @@ export async function createLeadFromInboundCallByTenantSlug(
         'twilio_voice',
         null,
         $3,
-        'INSPECTION',
-        'lead',
+        'VOICE_INTAKE',
+        'intake_pending',
         null,
         null,
         null,
@@ -1888,8 +1888,8 @@ export async function createLeadFromInboundCallByTenantSlug(
   await addTimelineEvent(
     tenantId,
     jobId,
-    "lead_created_from_call",
-    "Lead created from inbound voice AI call",
+    "voice_intake_started",
+    "Voice intake started; not counted as qualified lead until caller provides required information.",
     {
       from: phone,
       source,
