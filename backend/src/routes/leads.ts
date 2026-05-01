@@ -113,49 +113,54 @@ async function registerLeadRoutes(app: FastifyInstance) {
     const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, asString(body.address));
     const classification = classifyEstimatorLead(body);
 
-    const insertedJob = await pool.query(
-      `insert into jobs (
-        tenant_id,
-        customer_id,
-        external_crm,
-        external_job_id,
-        job_type,
-        stage,
-        crm_substatus,
-        address1,
-        city,
-        state,
-        zip,
-        lead_source,
-        lead_source_detail
-      )
-      values (
-        $1,$2,
-        'estimator_app',
-        $3,
-        $4,
-        $5,
-        $6,
-        $7,$8,$9,$10,
-        'estimator',
-        $8
-      )
-      returning id`,
-      [
-        tenantId,
-        customerId,
-        `est-${Date.now()}`,
-        classification.jobType,
-        classification.stage,
-        classification.crmSubstatus,
-        asString(body.address),
-        asString(body.city),
-        asString(body.state),
-        asString(body.zip),
-        asString(body.custSource) || asString(body.source) || asString(body.heardAbout) || "instant_estimator",
-      ]
-    );
+const insertedJob = await pool.query(
+  `insert into jobs (
+    tenant_id,
+    customer_id,
+    external_crm,
+    external_job_id,
+    job_type,
+    stage,
+    crm_substatus,
+    address1,
+    city,
+    state,
+    zip,
+    lead_source,
+    lead_source_detail
+  )
+  values (
+    $1,$2,
+    'estimator_app',
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,$8,$9,$10,
+    'estimator',
+    $11
+  )
+  returning id`,
+  [
+    tenantId,
+    customerId,
+    `est-${Date.now()}`,
 
+    classification.jobType,
+    classification.stage,
+    classification.crmSubstatus,
+
+    asString(body.address),
+    asString(body.city),
+    asString(body.state),
+    asString(body.zip),
+
+    asString(body.custSource) ||
+      asString(body.source) ||
+      asString(body.heardAbout) ||
+      "instant_estimator",
+  ]
+);
     const jobId = Number(insertedJob.rows[0].id);
 
     // Save structured estimate details for sales + AI follow-up
