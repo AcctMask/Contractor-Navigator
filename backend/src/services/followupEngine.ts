@@ -149,6 +149,54 @@ function isWeakServiceNeed(value: string | null | undefined) {
   )
 }
 
+function detectSalesIntent(message: string) {
+  const text = message.toLowerCase()
+
+  if (text.includes("just looking") || text.includes("not ready") || text.includes("shopping around") || text.includes("ballpark")) return "just_looking"
+
+  if (text.includes("too expensive") || text.includes("price is high") || text.includes("cheaper") || text.includes("lower price") || text.includes("better price")) return "pricing_objection"
+
+  if (text.includes("call me") || text.includes("call back") || text.includes("please call") || text.includes("can you call")) return "callback_request"
+
+  if (text.includes("send contract") || text.includes("send paperwork") || text.includes("where do i sign") || text.includes("ready to sign") || text.includes("move forward")) return "contract_request"
+
+  if (text.includes("tarp") || text.includes("leaking") || text.includes("active leak") || text.includes("storm damage") || text.includes("emergency")) return "tarp_request"
+
+  if (text.includes("estimate") || text.includes("quote") || text.includes("price") || text.includes("number")) return "estimate_request"
+
+  return null
+}
+
+function buildSalesIntentReply(intent: string, job: JobRow) {
+  const name = String(job.customer_name || "there").trim().split(/\s+/)[0] || "there"
+
+  if (intent === "just_looking") {
+    return `Totally understand, ${name}. Most people start there and do not want to be pressured. The best way to get a useful number without wasting anyone’s time is the estimator on our website. It will give you a realistic range, and when you are ready to move forward we can tighten it up from there.`
+  }
+
+  if (intent === "pricing_objection") {
+    return `${name}, I understand. When you say the price feels too high, is that compared to another quote or just higher than expected? Roofing prices vary by ZIP code, materials, and scope, and a lot of lower numbers leave out important items. What matters most to you: lowest price, best long-term protection, or getting it done quickly?`
+  }
+
+  if (intent === "callback_request") {
+    return `Absolutely, ${name}. Can you give me a brief explanation of what you need help with so the person calling you is prepared?`
+  }
+
+  if (intent === "contract_request") {
+    return `Great, ${name}. I’ll flag this so we can get the next step moving. If there is a specific price, material, or timing concern you want addressed before paperwork, reply here and I’ll make sure it is noted.`
+  }
+
+  if (intent === "tarp_request") {
+    return `${name}, we received this as an urgent tarp-related request. If this is storm or active leak damage, we will need a signed work authorization before dispatch. We can send that by text or email. What is the best way to send it?`
+  }
+
+  if (intent === "estimate_request") {
+    return `${name}, we can help. If you are looking for a solid starting number, the estimator is the best first step because roof pricing depends on size, pitch, materials, and location. If you are ready to move forward soon, we can help tighten that estimate into the next step.`
+  }
+
+  return null
+}
+
 async function updateCustomerNameForIntake(
   tenantId: number,
   customerId: number | null,
@@ -1394,6 +1442,75 @@ export async function handleInboundMessageByTenantSlug(
 
   const classification = classifyInboundMessage(trimmed)
   const matchedSignals = detectBuyingSignals(trimmed)
+
+  const salesIntent = detectSalesIntent(trimmed)
+  const salesIntentReply = salesIntent ? buildSalesIntentReply(salesIntent, job) : null
+
+  if (salesIntent && salesIntentReply && callbackNumber) {
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "sales_intent_detected",
+      `Sales intent detected: ${salesIntent}`,
+      {
+        intent: salesIntent,
+        from,
+        channel: "sms",
+        stage: job.stage,
+      }
+    )
+
+    const sms = await sendSMS(callbackNumber, salesIntentReply)
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "ai_inbound_response_sent",
+      salesIntentReply,
+      {
+        intent: salesIntent,
+        from,
+        to: callbackNumber,
+        channel: "sms",
+        twilio_sid: sms.sid,
+        twilio_status: sms.status,
+      }
+    )
+
+    if (salesIntent === "callback_request") {
+      await pool.query(
+        `
+        update jobs
+        set bot_paused = true,
+            crm_substatus = 'callback_context_requested',
+            updated_at = now()
+        where tenant_id = $1
+          and id = $2
+        `,
+        [tenantId, jobId]
+      )
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "bot_paused",
+        "Bot paused after callback request so staff can take over after customer provides context.",
+        {
+          reason: "callback_request",
+          from,
+          channel: "sms",
+        }
+      )
+    }
+
+    return {
+      ok: true,
+      handled_by_sales_intent_engine: true,
+      intent: salesIntent,
+      message: salesIntentReply,
+    }
+  }
+
 // =========================
 // 🧠 INTAKE ENGINE (LIGHT)
 // =========================

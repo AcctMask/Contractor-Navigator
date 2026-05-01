@@ -750,6 +750,37 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, contact_saved: true });
   });
+
+  app.post("/admin/simulate-inbound/:tenant_slug", async (req, reply) => {
+    try {
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const body: any = (req as any).body || {};
+
+      const jobId = Number(body.job_id);
+      const message = String(body.message || "");
+
+      const { handleInboundMessageByTenantSlug } = await import("../services/followupEngine");
+
+      const result = await handleInboundMessageByTenantSlug(
+        tenant_slug,
+        jobId,
+        message,
+        "+15555555555"
+      );
+
+      return reply.send({
+        ok: true,
+        simulated: true,
+        result
+      });
+    } catch (err: any) {
+      return reply.status(500).send({
+        ok: false,
+        error: err?.message || String(err)
+      });
+    }
+  });
+
 }
 
 export default registerAdminRoutes;
