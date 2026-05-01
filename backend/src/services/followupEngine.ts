@@ -890,6 +890,12 @@ async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callback
     channel: "sms",
   })
 
+  summary.email =
+    summary.email +
+    `\n\nSOURCE DETAILS\n` +
+    `Source: ${job.lead_source || "-"}\n` +
+    `How They Heard About Us: ${job.lead_source_detail || "-"}\n`
+
   try {
     const estimateResult = await pool.query(
       `
