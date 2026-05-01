@@ -82,7 +82,21 @@ function speechify(text: string) {
   return `<prosody rate="92%" pitch="-2%">${xmlEscape(text)}</prosody>`
 }
 
+function elevenLabsEnabled() {
+  return Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID)
+}
+
+function elevenLabsPlayUrl(text: string) {
+  const url = new URL(`${buildBaseUrl()}/twilio/voice/tts`)
+  url.searchParams.set("text", text)
+  return url.toString()
+}
+
 function sayBlock(text: string) {
+  if (elevenLabsEnabled()) {
+    return `<Play>${xmlEscape(elevenLabsPlayUrl(text))}</Play>`
+  }
+
   return `<Say voice="${VOICE_NAME}" language="${VOICE_LANGUAGE}">${speechify(text)}</Say>`
 }
 
@@ -458,6 +472,57 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     )
 
     return reply.send(response)
+  })
+
+  app.get("/twilio/voice/tts", async (req, reply) => {
+    try {
+      const q: any = (req as any).query || {}
+      const text = String(q.text || "").trim()
+
+      if (!text) {
+        return reply.status(400).send("Missing text")
+      }
+
+      const apiKey = process.env.ELEVENLABS_API_KEY
+      const voiceId = process.env.ELEVENLABS_VOICE_ID
+
+      if (!apiKey || !voiceId) {
+        return reply.status(500).send("ElevenLabs is not configured")
+      }
+
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        method: "POST",
+        headers: {
+          "xi-api-key": apiKey,
+          "Content-Type": "application/json",
+          "Accept": "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text,
+          model_id: "eleven_multilingual_v2",
+          voice_settings: {
+            stability: 0.55,
+            similarity_boost: 0.75,
+            style: 0.15,
+            use_speaker_boost: true
+          }
+        })
+      })
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "")
+        return reply.status(502).send(`ElevenLabs TTS failed: ${response.status} ${errText}`)
+      }
+
+      const audio = Buffer.from(await response.arrayBuffer())
+
+      reply
+        .header("Content-Type", "audio/mpeg")
+        .header("Cache-Control", "public, max-age=86400")
+        .send(audio)
+    } catch (err: any) {
+      return reply.status(500).send(err?.message || String(err))
+    }
   })
 
   app.post("/twilio/inbound-call", async (req, reply) => {
