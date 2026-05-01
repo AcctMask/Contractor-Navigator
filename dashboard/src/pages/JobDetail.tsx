@@ -258,6 +258,7 @@ export default function JobDetail() {
               <p><strong>Address:</strong> {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</p>
               <p><strong>Source:</strong> {job.lead_source || "—"}</p>
               <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
+              <p><strong>Job Type:</strong> {job.job_type || "—"}</p>
               <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
 
               <hr style={hr} />
