@@ -890,6 +890,41 @@ async function sendNewEstimateAlert(job: JobRow, settings: DevSettings, callback
     channel: "sms",
   })
 
+  try {
+    const estimateResult = await pool.query(
+      `
+      select
+        roof_type,
+        roof_squares,
+        low_amount,
+        high_amount,
+        estimator_remarks,
+        created_at
+      from job_estimate_details
+      where tenant_id = $1
+        and job_id = $2
+      limit 1
+      `,
+      [job.tenant_id, job.id]
+    )
+
+    if (estimateResult.rowCount) {
+      const e = estimateResult.rows[0]
+
+      summary.email =
+        summary.email +
+        `\n\nESTIMATOR DETAILS\n` +
+        `Roof Type: ${e.roof_type || "-"}\n` +
+        `Roof Squares: ${e.roof_squares || "-"}\n` +
+        `Estimate Low: ${e.low_amount || "-"}\n` +
+        `Estimate High: ${e.high_amount || "-"}\n` +
+        `Estimate Summary: ${e.estimator_remarks || "-"}\n` +
+        `Captured At: ${e.created_at || "-"}\n`
+    }
+  } catch (err: any) {
+    console.error("Failed to attach estimator details to estimate alert", err)
+  }
+
   let smsResult: any = null
   let emailResult: any = null
 
