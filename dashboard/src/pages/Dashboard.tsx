@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [selectedStage, setSelectedStage] = useState<string | null>(null)
 
   useEffect(() => {
     void loadDashboard()
@@ -93,18 +94,28 @@ export default function DashboardPage() {
     })
   }, [jobs])
 
-  const activeJobsCount = sortedJobs.length
-  const botPausedCount = sortedJobs.filter((j) => Boolean(j.bot_paused)).length
-  const claimJobsCount = sortedJobs.filter(
-    (j) => Boolean(j.claim_number) || Boolean(j.carrier)
-  ).length
-  const googleLeadsCount = sortedJobs.filter((j) => {
-    const source = String(j.lead_source || "").toLowerCase()
-    const detail = String(j.lead_source_detail || "").toLowerCase()
-    return source.includes("google") || detail.includes("google")
-  }).length
+  const stageOrder = [
+    "lead",
+    "estimate_sent",
+    "tarp",
+    "roof_repair",
+    "roof_replacement",
+    "contract_sent",
+    "in_production",
+    "completed",
+    "paid",
+  ]
 
-  const newestJobs = sortedJobs.slice(0, 10)
+  const stageCounts = stageOrder.map((stage) => ({
+    stage,
+    count: sortedJobs.filter((j) => (j.stage || "lead") === stage).length,
+  }))
+
+  const filteredJobs = selectedStage
+    ? sortedJobs.filter((j) => (j.stage || "lead") === selectedStage)
+    : sortedJobs
+
+  const newestJobs = filteredJobs.slice(0, 10)
   const upcomingEvents = [...events]
     .sort((a, b) => {
       const aTime = new Date(a.start_at || 0).getTime()
@@ -193,37 +204,24 @@ export default function DashboardPage() {
           </section>
 
           <section style={statsGrid}>
-            <Link to="/job-admin" style={statCardLink}>
-              <div style={statCard}>
-                <div style={statNumber}>{loading ? "…" : activeJobsCount}</div>
-                <div style={statLabel}>Active Jobs</div>
-                <div style={statSub}>Tracked in CRM</div>
-              </div>
-            </Link>
-
-            <Link to="/job-admin" style={statCardLink}>
-              <div style={statCard}>
-                <div style={statNumber}>{loading ? "…" : botPausedCount}</div>
-                <div style={statLabel}>Bot Paused</div>
-                <div style={statSub}>Human takeover</div>
-              </div>
-            </Link>
-
-            <Link to="/job-admin" style={statCardLink}>
-              <div style={statCard}>
-                <div style={statNumber}>{loading ? "…" : claimJobsCount}</div>
-                <div style={statLabel}>Claim Jobs</div>
-                <div style={statSub}>Insurance-related</div>
-              </div>
-            </Link>
-
-            <Link to="/job-admin" style={statCardLink}>
-              <div style={statCard}>
-                <div style={statNumber}>{loading ? "…" : googleLeadsCount}</div>
-                <div style={statLabel}>Google Leads</div>
-                <div style={statSub}>Current top source</div>
-              </div>
-            </Link>
+            {stageCounts.map(({ stage, count }) => (
+              <button
+                key={stage}
+                onClick={() => setSelectedStage(selectedStage === stage ? null : stage)}
+                style={{
+                  ...statCard,
+                  ...(selectedStage === stage ? statCardActive : {}),
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div style={statNumber}>{loading ? "…" : count}</div>
+                <div style={statLabel}>{stage.replaceAll("_", " ")}</div>
+                <div style={statSub}>
+                  {selectedStage === stage ? "Showing below" : "Click to filter"}
+                </div>
+              </button>
+            ))}
           </section>
 
           <section style={panelGrid}>
@@ -232,7 +230,9 @@ export default function DashboardPage() {
                 <div>
                   <h2 style={panelTitle}>Job Command Center</h2>
                   <div style={panelSub}>
-                    Search and open jobs, then review the record from the job detail view.
+                    {selectedStage
+                      ? `Showing ${selectedStage.replaceAll("_", " ")} jobs. Click the same stage again to clear.`
+                      : "Search and open jobs, then review the record from the job detail view."}
                   </div>
                 </div>
 
@@ -525,16 +525,17 @@ const statsGrid: CSSProperties = {
   gap: "18px",
 }
 
-const statCardLink: CSSProperties = {
-  textDecoration: "none",
-  color: "#e8eefc",
-}
 
 const statCard: CSSProperties = {
   background: "rgba(8, 22, 59, 0.92)",
   border: "1px solid rgba(81, 133, 255, 0.18)",
   borderRadius: "22px",
   padding: "22px",
+}
+
+const statCardActive: CSSProperties = {
+  border: "1px solid rgba(96, 165, 250, 0.85)",
+  background: "rgba(37, 99, 235, 0.35)",
 }
 
 const statNumber: CSSProperties = {
