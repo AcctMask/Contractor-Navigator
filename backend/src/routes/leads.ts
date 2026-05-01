@@ -127,26 +127,41 @@ async function registerLeadRoutes(app: FastifyInstance) {
       [tenantId, jobId, JSON.stringify(body)]
     );
 
+    const estimateDetailsMeta = {
+      roof_type: asString(body.roofType),
+      stories: asString(body.stories),
+      condition: asString(body.condition),
+      structure_sqft: body.structureSqft ? Number(body.structureSqft) : null,
+      roof_sqft: body.roofSqft ? Number(body.roofSqft) : null,
+      estimate_low: body.estimateLow ? Number(body.estimateLow) : null,
+      estimate_high: body.estimateHigh ? Number(body.estimateHigh) : null,
+      estimate_summary: asString(body.estimateSummary),
+      estimator_notes: asString(body.notes),
+      captured_at: new Date().toISOString()
+    };
+
+    const estimateDetailsMessage =
+      `Estimator details captured\n` +
+      `Roof Type: ${estimateDetailsMeta.roof_type || "-"}\n` +
+      `Stories: ${estimateDetailsMeta.stories || "-"}\n` +
+      `Condition: ${estimateDetailsMeta.condition || "-"}\n` +
+      `Home Sq Ft: ${estimateDetailsMeta.structure_sqft || "-"}\n` +
+      `Roof Sq Ft: ${estimateDetailsMeta.roof_sqft || "-"}\n` +
+      `Estimate Low: ${estimateDetailsMeta.estimate_low || "-"}\n` +
+      `Estimate High: ${estimateDetailsMeta.estimate_high || "-"}\n` +
+      `Estimate Summary: ${estimateDetailsMeta.estimate_summary || "-"}\n` +
+      `Customer Notes: ${estimateDetailsMeta.estimator_notes || "-"}`;
+
     await pool.query(
       `insert into timeline_events (
         tenant_id, job_id, kind, message, meta
       )
-      values ($1,$2,'estimate_details','Estimator details captured',$3)`,
+      values ($1,$2,'estimate_details',$3,$4)`,
       [
         tenantId,
         jobId,
-        JSON.stringify({
-          roof_type: asString(body.roofType),
-          stories: asString(body.stories),
-          condition: asString(body.condition),
-          structure_sqft: body.structureSqft ? Number(body.structureSqft) : null,
-          roof_sqft: body.roofSqft ? Number(body.roofSqft) : null,
-          estimate_low: body.estimateLow ? Number(body.estimateLow) : null,
-          estimate_high: body.estimateHigh ? Number(body.estimateHigh) : null,
-          estimate_summary: asString(body.estimateSummary),
-          estimator_notes: asString(body.notes),
-          captured_at: new Date().toISOString()
-        })
+        estimateDetailsMessage,
+        JSON.stringify(estimateDetailsMeta)
       ]
     );
 
