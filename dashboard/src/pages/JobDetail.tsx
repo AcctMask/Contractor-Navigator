@@ -256,6 +256,8 @@ export default function JobDetail() {
               <p><strong>Phone:</strong> {job.customer_phone || "—"}</p>
               <p><strong>Email:</strong> {job.customer_email || "—"}</p>
               <p><strong>Address:</strong> {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</p>
+              <p><strong>Source:</strong> {job.lead_source || "—"}</p>
+              <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
               <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
 
               <hr style={hr} />
