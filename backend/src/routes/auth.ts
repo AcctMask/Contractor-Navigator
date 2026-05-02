@@ -12,9 +12,42 @@ import {
 const APP_BASE_URL =
   process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
 
+function getBearerToken(request: any) {
+  const auth = request.headers.authorization || ""
+  return auth.startsWith("Bearer ") ? auth.slice(7) : ""
+}
+
+async function requireRole(request: any, reply: any, allowedRoles: string[]) {
+  const token = getBearerToken(request)
+
+  if (!token) {
+    reply.code(401)
+    return null
+  }
+
+  const user = await getCurrentUserFromToken(token)
+
+  if (!user?.is_active) {
+    reply.code(401)
+    return null
+  }
+
+  if (!allowedRoles.includes(user.role)) {
+    reply.code(403)
+    return null
+  }
+
+  return user
+}
+
+const TENANT_ADMIN_PLUS = ["platform_owner", "tenant_admin"]
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/auth/:tenantSlug/invite", async (request: any, reply) => {
     try {
+      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      if (!actor) return { ok: false, error: "Not authorized" }
+
       const { tenantSlug } = request.params
       const { email, full_name, role, invited_by_user_id } = request.body || {}
 
@@ -100,6 +133,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/auth/:tenantSlug/users", async (request: any, reply) => {
     try {
+      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      if (!actor) return { ok: false, error: "Not authorized" }
+
       const { tenantSlug } = request.params
       const users = await listUsersByTenantSlug(tenantSlug)
       return { ok: true, users }
@@ -111,6 +147,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/auth/:tenantSlug/invitations", async (request: any, reply) => {
     try {
+      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      if (!actor) return { ok: false, error: "Not authorized" }
+
       const { tenantSlug } = request.params
       const invitations = await listInvitationsByTenantSlug(tenantSlug)
       return { ok: true, invitations }
