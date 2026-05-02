@@ -15,6 +15,45 @@ function asString(v: any): string | null {
   return s.length ? s : null;
 }
 
+function classifyLeadIntent(body: any): { intent: string; recommendedAction: string } {
+  const timeline = String(body.projectTimeline || "").toLowerCase();
+  const budget = String(body.budgetComfort || "").toLowerCase();
+  const roofingPreference = String(body.roofingPreference || "").toLowerCase();
+
+  if (timeline.includes("asap") && (budget.includes("balanced") || budget.includes("premium"))) {
+    return {
+      intent: "high_intent",
+      recommendedAction: "Call quickly. Customer appears closer-ready. Confirm details, pricing comfort, and next step."
+    };
+  }
+
+  if (timeline.includes("30") || timeline.includes("60")) {
+    return {
+      intent: "medium_intent",
+      recommendedAction: "Let Autopilot nurture. Follow up with options, material guidance, and timing."
+    };
+  }
+
+  if (timeline.includes("researching") || budget.includes("lowest")) {
+    return {
+      intent: "low_intent",
+      recommendedAction: "Automated follow-up only. Do not spend inspection or measurement time unless customer re-engages."
+    };
+  }
+
+  if (roofingPreference.includes("metal")) {
+    return {
+      intent: "metal_interest",
+      recommendedAction: "Clarify that standing seam metal is typically about 2x shingle pricing before spending time."
+    };
+  }
+
+  return {
+    intent: "standard_estimate",
+    recommendedAction: "Standard estimate follow-up. Let Autopilot continue nurturing."
+  };
+}
+
 function classifyEstimatorLead(body: any): { jobType: string; stage: string; crmSubstatus: string | null } {
   const text = [
     body.custSource,
@@ -112,6 +151,7 @@ async function registerLeadRoutes(app: FastifyInstance) {
 
     const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, asString(body.address));
     const classification = classifyEstimatorLead(body);
+    const leadIntent = classifyLeadIntent(body);
 
 const insertedJob = await pool.query(
   `insert into jobs (
@@ -163,6 +203,23 @@ const insertedJob = await pool.query(
 );
     const jobId = Number(insertedJob.rows[0].id);
 
+    await pool.query(
+      `
+      update jobs
+         set crm_substatus = coalesce($1, crm_substatus),
+             crm_flow_key = $2,
+             updated_at = now()
+       where tenant_id = $3
+         and id = $4
+      `,
+      [
+        leadIntent.intent,
+        `estimator_${leadIntent.intent}`,
+        tenantId,
+        jobId
+      ]
+    );
+
     // Save structured estimate details for sales + AI follow-up
     try {
       const { upsertEstimateDetailsByTenantSlug } = await import("../services/documentPipelineService")
@@ -195,6 +252,11 @@ const insertedJob = await pool.query(
       estimate_low: body.estimateLow ? Number(body.estimateLow) : null,
       estimate_high: body.estimateHigh ? Number(body.estimateHigh) : null,
       estimate_summary: asString(body.estimateSummary),
+      project_timeline: asString(body.projectTimeline),
+      roofing_preference: asString(body.roofingPreference),
+      budget_comfort: asString(body.budgetComfort),
+      lead_intent: leadIntent.intent,
+      recommended_action: leadIntent.recommendedAction,
       estimator_notes: asString(body.notes),
       captured_at: new Date().toISOString()
     };
@@ -209,6 +271,11 @@ const insertedJob = await pool.query(
       `Estimate Low: ${estimateDetailsMeta.estimate_low || "-"}\n` +
       `Estimate High: ${estimateDetailsMeta.estimate_high || "-"}\n` +
       `Estimate Summary: ${estimateDetailsMeta.estimate_summary || "-"}\n` +
+      `Project Timeline: ${estimateDetailsMeta.project_timeline || "-"}\n` +
+      `Roofing Preference: ${estimateDetailsMeta.roofing_preference || "-"}\n` +
+      `Budget Comfort: ${estimateDetailsMeta.budget_comfort || "-"}\n` +
+      `Lead Intent: ${estimateDetailsMeta.lead_intent || "-"}\n` +
+      `Recommended Action: ${estimateDetailsMeta.recommended_action || "-"}\n` +
       `Customer Notes: ${estimateDetailsMeta.estimator_notes || "-"}`;
 
     await pool.query(
@@ -224,9 +291,30 @@ const insertedJob = await pool.query(
       ]
     );
 
+    await pool.query(
+      `insert into timeline_events (
+        tenant_id, job_id, kind, message, meta
+      )
+      values ($1,$2,'lead_intent_classified',$3,$4)`,
+      [
+        tenantId,
+        jobId,
+        `Lead classified as ${leadIntent.intent}. Recommended action: ${leadIntent.recommendedAction}`,
+        JSON.stringify({
+          lead_intent: leadIntent.intent,
+          recommended_action: leadIntent.recommendedAction,
+          projectTimeline: asString(body.projectTimeline),
+          roofingPreference: asString(body.roofingPreference),
+          budgetComfort: asString(body.budgetComfort)
+        })
+      ]
+    );
+
     return reply.send({
       ok: true,
-      job_id: jobId
+      job_id: jobId,
+      lead_intent: leadIntent.intent,
+      recommended_action: leadIntent.recommendedAction
     });
   });
 
