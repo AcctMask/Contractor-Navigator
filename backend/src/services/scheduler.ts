@@ -10,6 +10,91 @@ type ScheduledActionRow = {
   payload: any;
 };
 
+const QUIET_TIME_ZONE = "America/New_York";
+const QUIET_START_HOUR = 19; // 7 PM
+const QUIET_END_HOUR = 7;    // 7 AM
+
+function easternParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: QUIET_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value || 0);
+
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+function isQuietHours(date = new Date()) {
+  const { hour } = easternParts(date);
+  return hour >= QUIET_START_HOUR || hour < QUIET_END_HOUR;
+}
+
+function nextQuietHoursEndIso(date = new Date()) {
+  const p = easternParts(date);
+
+  // If after 7 PM Eastern, next opening is tomorrow 7 AM Eastern.
+  // If before 7 AM Eastern, opening is today 7 AM Eastern.
+  const dayOffset = p.hour >= QUIET_START_HOUR ? 1 : 0;
+
+  const approxUtc = new Date(Date.UTC(p.year, p.month - 1, p.day + dayOffset, QUIET_END_HOUR + 5, 0, 0));
+  return approxUtc.toISOString();
+}
+
+async function pushDueActionsToQuietHoursEnd(limit = 250) {
+  const nextRunAt = nextQuietHoursEndIso();
+
+  const result = await pool.query(
+    `
+    update scheduled_actions
+       set run_at = $1::timestamptz,
+           updated_at = now(),
+           payload = coalesce(payload,'{}'::jsonb) || $2::jsonb
+     where status = 'pending'
+       and run_at <= now()
+     returning id, tenant_id, job_id, action_key
+    `,
+    [
+      nextRunAt,
+      JSON.stringify({
+        quiet_hours_delayed: true,
+        quiet_hours_timezone: QUIET_TIME_ZONE,
+        delayed_until: nextRunAt,
+      }),
+    ]
+  );
+
+  for (const row of result.rows.slice(0, limit)) {
+    await timeline(
+      row.tenant_id,
+      row.job_id,
+      "scheduled_action_delayed_quiet_hours",
+      `Scheduled action delayed until ${nextRunAt} due to quiet hours.`,
+      {
+        action_id: row.id,
+        action_key: row.action_key,
+        delayed_until: nextRunAt,
+        timezone: QUIET_TIME_ZONE,
+      }
+    );
+  }
+
+  return result.rowCount || 0;
+}
+
 async function timeline(
   tenantId: number,
   jobId: number | null,
@@ -176,6 +261,14 @@ async function runAction(action: ScheduledActionRow) {
 }
 
 export async function schedulerTick(limit = 25) {
+  if (isQuietHours()) {
+    const delayed = await pushDueActionsToQuietHoursEnd();
+    if (delayed > 0) {
+      console.log(`Quiet hours active — delayed ${delayed} scheduled actions until 7 AM Eastern`);
+    }
+    return { ok: true, delayed, quiet_hours: true };
+  }
+
   const actions = await claimDueActions(limit);
 
   for (const action of actions) {

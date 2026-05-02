@@ -20,6 +20,22 @@ let schedulerStarted = false
 const POLL_MS = 60 * 1000
 const MAX_AUTOMATION_JOB_AGE_MS = 24 * 60 * 60 * 1000
 
+const QUIET_TIME_ZONE = "America/New_York"
+const QUIET_START_HOUR = 19
+const QUIET_END_HOUR = 7
+
+function isQuietHoursNow() {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: QUIET_TIME_ZONE,
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date())
+  )
+
+  return hour >= QUIET_START_HOUR || hour < QUIET_END_HOUR
+}
+
 function timingsToMs(values: number[]) {
   return values.map((n) => Number(n) * 60 * 1000)
 }
@@ -101,6 +117,7 @@ function isRecentEnough(createdAt: string) {
 }
 
 async function processJob(job: SchedJob) {
+  if (isQuietHoursNow()) return
   if (job.bot_paused || !job.stage) return
 
   const delays = await stageDelaysForTenant(job.tenant_slug, job.stage)
