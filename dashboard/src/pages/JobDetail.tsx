@@ -88,6 +88,36 @@ export default function JobDetail() {
     await loadJob()
   }
 
+  async function archiveCustomerFile() {
+    if (!id) return
+
+    const ok = window.confirm(
+      "Archive this customer file? This will remove it from the active dashboard, pause the bot, and cancel pending follow-ups for this job."
+    )
+
+    if (!ok) return
+
+    setError("")
+    setStatus("Archiving customer file...")
+
+    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: "Archived from Job Detail screen" }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setStatus("")
+      setError(data?.error || "Archive failed")
+      return
+    }
+
+    setStatus("Customer file archived and follow-ups cancelled")
+    await loadJob()
+  }
+
   function cancelEdit() {
     setForm(job || {})
     setIsEditing(false)
@@ -244,6 +274,7 @@ export default function JobDetail() {
           ) : (
             <div style={buttonRow}>
               <button onClick={saveCustomerClaimData} style={button}>Save Changes</button>
+              <button onClick={archiveCustomerFile} style={dangerButton}>Archive / Remove Customer File</button>
               <button onClick={cancelEdit} style={button}>Cancel</button>
             </div>
           )}
