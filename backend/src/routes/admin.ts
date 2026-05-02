@@ -422,7 +422,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         on c.id = j.customer_id
        and c.tenant_id = j.tenant_id
       where j.tenant_id = $1
-        and coalesce(j.stage, '') <> 'intake_pending'
+        and coalesce(j.stage, '') not in ('intake_pending', 'archived')
         and coalesce(j.job_type, '') <> 'VOICE_INTAKE'
         and ($2::timestamptz is null or j.created_at >= $2::timestamptz)
         and ($3::timestamptz is null or j.created_at <= $3::timestamptz)
@@ -686,6 +686,50 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
 
     return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, updated: true });
+  });
+
+
+  app.post("/admin/job/:tenant_slug/:job_id/archive", async (req, reply) => {
+    const tenant_slug = String((req.params as any).tenant_slug || "");
+    const tenantId = await getTenantIdBySlug(tenant_slug);
+    const jobId = Number((req.params as any).job_id);
+    const body: any = (req as any).body || {};
+    const reason = String(body.reason || "Archived / removed from active CRM by user").trim();
+
+    await pool.query(
+      `
+      update jobs
+         set stage = 'archived',
+             crm_substatus = 'archived_by_user',
+             bot_paused = true,
+             updated_at = now()
+       where tenant_id = $1
+         and id = $2
+      `,
+      [tenantId, jobId]
+    );
+
+    await pool.query(
+      `
+      update scheduled_actions
+         set status = 'cancelled',
+             updated_at = now()
+       where tenant_id = $1
+         and job_id = $2
+         and status = 'pending'
+      `,
+      [tenantId, jobId]
+    );
+
+    await pool.query(
+      `
+      insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
+      values ($1, $2, 'job_archived', $3, $4::jsonb, now())
+      `,
+      [tenantId, jobId, reason, JSON.stringify({ reason, source: "job_detail_ui" })]
+    );
+
+    return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, archived: true });
   });
 
   app.post("/admin/job/:tenant_slug/:job_id/note", async (req, reply) => {
