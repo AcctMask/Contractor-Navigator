@@ -1,3 +1,4 @@
+import { getToken } from "../lib/auth"
 import { useEffect, useMemo, useState } from "react"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
@@ -70,9 +71,14 @@ export default function UsersPage() {
     setStatus("Loading users and invitations...")
 
     try {
+      const token = getToken()
+      const authHeaders = {
+        Authorization: `Bearer ${token}`,
+      }
+
       const [usersRes, invitesRes] = await Promise.all([
-        fetch(`${API_BASE}/auth/${TENANT_SLUG}/users`),
-        fetch(`${API_BASE}/auth/${TENANT_SLUG}/invitations`),
+        fetch(`${API_BASE}/auth/${TENANT_SLUG}/users`, { headers: authHeaders }),
+        fetch(`${API_BASE}/auth/${TENANT_SLUG}/invitations`, { headers: authHeaders }),
       ])
 
       const usersJson = await usersRes.json()
@@ -104,10 +110,13 @@ export default function UsersPage() {
     setStatus("Creating invitation...")
 
     try {
+      const token = getToken()
+
       const res = await fetch(`${API_BASE}/auth/${TENANT_SLUG}/invite`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           email: email.trim(),
