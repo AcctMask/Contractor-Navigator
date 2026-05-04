@@ -2,6 +2,7 @@ import { FastifyInstance } from "fastify";
 import {
   importCommercialTargets,
   sendQueuedCommercialEmail,
+  runCommercialEmailScheduler,
   getPipelineView,
 } from "./service";
 import { commercialPool as pool } from "./db";
@@ -483,6 +484,22 @@ export async function commercialRoutes(app: FastifyInstance) {
       rows: result.rows,
     })
   })
+
+  // COMMERCIAL EMAIL SCHEDULER - SEND LIMITED PENDING BATCH
+  app.post("/commercial/scheduler/run", async (req, reply) => {
+    try {
+      const body = req.body as any;
+      const max = Number(body?.max || body?.limit || 10);
+
+      const result = await runCommercialEmailScheduler(max);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.code(500).send({
+        ok: false,
+        error: err.message || "Commercial scheduler failed",
+      });
+    }
+  });
 
   // PRIORITY ENGINE
   app.post("/commercial/prioritize", async (_req, reply) => {

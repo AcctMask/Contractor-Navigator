@@ -160,6 +160,14 @@ export async function sendQueuedCommercialEmail(queueId: string) {
     return { ok: false, error: "No email" };
   }
 
+  if (target.do_not_contact || target.pipeline_status === "opted_out") {
+    await pool.query(
+      `update commercial_email_queue set status='skipped', error=$2 where id=$1`,
+      [queueId, "DNC / opted out"]
+    );
+    return { ok: false, skipped: true, error: "DNC / opted out" };
+  }
+
   const msg = getMessageByState(target);
 
   const subject = renderTemplate(msg.subject, target);
@@ -200,6 +208,61 @@ const sendResult = await sendCommercialEmail(
   );
 
   return { ok: true, sent: true };
+}
+
+
+// -------- COMMERCIAL EMAIL SCHEDULER --------
+
+export async function runCommercialEmailScheduler(maxToSend = 10) {
+  const safeLimit = Math.max(1, Math.min(Number(maxToSend || 10), 50));
+
+  const pending = await pool.query(
+    `
+    select q.id
+    from commercial_email_queue q
+    join commercial_targets t on t.id = q.target_id
+    where q.status = 'pending'
+      and coalesce(t.do_not_contact,false) = false
+      and coalesce(t.pipeline_status,'working') <> 'opted_out'
+      and t.email is not null
+      and t.email <> ''
+    order by q.created_at asc
+    limit $1
+    `,
+    [safeLimit]
+  );
+
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+  const results: any[] = [];
+
+  for (const row of pending.rows) {
+    const result = await sendQueuedCommercialEmail(row.id);
+
+    if (result.ok && result.sent) {
+      sent++;
+    } else if (result.skipped) {
+      skipped++;
+    } else {
+      failed++;
+    }
+
+    results.push({
+      queue_id: row.id,
+      ...result,
+    });
+  }
+
+  return {
+    ok: true,
+    requested_limit: safeLimit,
+    processed: pending.rowCount,
+    sent,
+    failed,
+    skipped,
+    results,
+  };
 }
 
 // -------- GROUPED VIEW (for UI) --------
