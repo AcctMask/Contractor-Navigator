@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import type { CSSProperties } from "react"
 
-const API = "http://localhost:8795"
+const API = "http://127.0.0.1:8787"
 
 export default function CommercialPipelinePage() {
   const [targets, setTargets] = useState<any[]>([])
@@ -12,6 +12,7 @@ export default function CommercialPipelinePage() {
   const [loading, setLoading] = useState(false)
   const [notice, setNotice] = useState("")
   const [error, setError] = useState("")
+  const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null)
 
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState("all")
@@ -45,6 +46,29 @@ export default function CommercialPipelinePage() {
     const res = await fetch(`${API}/commercial/campaigns/batches`)
     const data = await res.json()
     setBatches(data.rows || [])
+  }
+
+  async function loadCampaignRecipients(id: string) {
+    setLoading(true)
+    setNotice("")
+    setError("")
+
+    try {
+      const res = await fetch(`${API}/commercial/campaigns/${id}/recipients`)
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || "Failed to load campaign recipients")
+      }
+
+      setTargets(data.rows || [])
+      setActiveCampaignId(id)
+      setSearch("")
+    } catch (err: any) {
+      setError(err.message || "Failed to load campaign recipients")
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function loadDetail(id: string) {
@@ -237,35 +261,77 @@ export default function CommercialPipelinePage() {
 
       <div style={grid}>
         <div style={panel}>
-          <h2>Contractors</h2>
+<h2>Campaign Control</h2>
 
-          <div style={filterBox}>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, city, email, ZIP..." style={input} />
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={select}>
-              <option value="all">All Types</option>
-              <option value="general_contractor">General Contractor</option>
-              <option value="building_contractor">Building Contractor</option>
-              <option value="residential_contractor">Residential Contractor</option>
-            </select>
-            <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City..." style={input} />
-            <select value={status} onChange={(e) => setStatus(e.target.value)} style={select}>
-              <option value="all">All Status</option>
-              <option value="working">Working</option>
-              <option value="active">Active</option>
-              <option value="on_hook">On Hook</option>
-              <option value="unresponsive">Unresponsive</option>
-              <option value="opted_out">Opted Out</option>
-              <option value="not_fit">Not Fit</option>
-            </select>
-            <select value={priority} onChange={(e) => setPriority(e.target.value)} style={select}>
-              <option value="all">All Priority</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="none">None</option>
-            </select>
-          </div>
+          {activeCampaignId && (
+            <div style={{ marginBottom: 10, fontSize: 13, opacity: 0.7 }}>
+              Viewing Campaign: {activeCampaignId}
+            </div>
+          )}
 
+<div style={filterBox}>
+  <input
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+    placeholder="Search contractor..."
+    style={input}
+  />
+
+  <select value={category} onChange={(e) => setCategory(e.target.value)} style={select}>
+    <option value="all">All Types</option>
+    <option value="general_contractor">General Contractor</option>
+    <option value="building_contractor">Building Contractor</option>
+    <option value="residential_contractor">Residential Contractor</option>
+  </select>
+
+  <input
+    value={city}
+    onChange={(e) => setCity(e.target.value)}
+    placeholder="City..."
+    style={input}
+  />
+
+  <select value={status} onChange={(e) => setStatus(e.target.value)} style={select}>
+    <option value="all">All Status</option>
+    <option value="working">Working</option>
+    <option value="active">Active</option>
+    <option value="on_hook">On Hook</option>
+    <option value="opted_out">Opted Out</option>
+  </select>
+
+  <select value={priority} onChange={(e) => setPriority(e.target.value)} style={select}>
+    <option value="all">All Priority</option>
+    <option value="high">High Priority</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+  </select>
+</div>
+
+<div style={{ marginTop: 16 }}>
+  <button style={primaryButton} onClick={launchCampaign}>
+    Launch Campaign From Filters
+  </button>
+</div>
+
+<div style={{ marginTop: 20 }}>
+  <h3>Quick Segments</h3>
+
+  <div style={segment} onClick={() => setStatus("working")}>
+    Working Pipeline
+  </div>
+
+  <div style={segment} onClick={() => setStatus("active")}>
+    Active Conversations
+  </div>
+
+  <div style={segment} onClick={() => setPriority("high")}>
+    High Priority Targets
+  </div>
+
+  <div style={segment} onClick={() => setStatus("opted_out")}>
+    DNC / Opt-Outs
+  </div>
+</div>
           <div style={countLine}>
             Showing {counts.shown} displayed records out of {counts.loaded} loaded / {counts.totalDatabase} total database records
           </div>
@@ -333,7 +399,8 @@ export default function CommercialPipelinePage() {
 
             <h3 style={{ marginTop: 18 }}>Recent Campaign Batches</h3>
             {batches.slice(0, 5).map((b) => (
-              <div key={b.id} style={batchBox}>
+              <div key={b.id}
+    onClick={() => loadCampaignRecipients(b.id)} style={batchBox}>
                 <div style={name}>{b.name}</div>
                 <div style={sub}>
                   {b.status} • {b.queued_count} queued • {b.skipped_count} skipped • {new Date(b.created_at).toLocaleString()}
@@ -418,3 +485,11 @@ const primaryButton: CSSProperties = { color: "#fff", background: "linear-gradie
 const noticeBox: CSSProperties = { background: "rgba(34,197,94,0.14)", border: "1px solid rgba(34,197,94,0.30)", padding: 12, borderRadius: 14, marginBottom: 12 }
 const errorBox: CSSProperties = { background: "rgba(239,68,68,0.16)", border: "1px solid rgba(239,68,68,0.35)", padding: 12, borderRadius: 14, marginBottom: 12 }
 const batchBox: CSSProperties = { marginTop: 10, padding: 10, borderRadius: 12, background: "rgba(0,0,0,0.18)", border: "1px solid rgba(255,255,255,0.08)" }
+const segment: CSSProperties = {
+  padding: 10,
+  borderRadius: 10,
+  marginTop: 8,
+  background: "rgba(255,255,255,0.06)",
+  cursor: "pointer",
+  fontSize: 13,
+}

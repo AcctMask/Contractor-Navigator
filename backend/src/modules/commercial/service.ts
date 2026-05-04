@@ -165,7 +165,12 @@ export async function sendQueuedCommercialEmail(queueId: string) {
   const subject = renderTemplate(msg.subject, target);
   const body = renderTemplate(msg.body, target);
 
-  const sendResult = await sendCommercialEmail(target.email, subject, body);
+const sendResult = await sendCommercialEmail(
+  target.email,
+  subject,
+  body,
+  target.id
+);
 
   if (!sendResult.ok) {
     await pool.query(
