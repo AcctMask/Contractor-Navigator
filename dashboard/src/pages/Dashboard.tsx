@@ -652,13 +652,6 @@ const tenantSummaryTitle: CSSProperties = {
   marginBottom: "8px",
 }
 
-const tenantSummaryText: CSSProperties = {
-  fontSize: "14px",
-  lineHeight: 1.45,
-  opacity: 0.82,
-}
-
-
 const capabilityWrap: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
