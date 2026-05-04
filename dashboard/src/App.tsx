@@ -1,5 +1,5 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import type { CSSProperties } from "react"
+import type { CSSProperties, ReactNode } from "react"
 import UsersPage from "./pages/Users"
 import JobAdminPage from "./pages/JobAdmin"
 import JobDetailPage from "./pages/JobDetail"
@@ -10,6 +10,12 @@ import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
 import ReportsPage from "./pages/Reports"
+import CommercialPipelinePage from "./pages/CommercialPipeline"
+import StormPage from "./pages/Storm"
+import RoofIntelligencePage from "./pages/RoofIntelligence"
+import SocialPage from "./pages/Social"
+import EstimatorPage from "./pages/Estimator"
+import TimelinePage from "./pages/Timeline"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
 import SignDocument from "./pages/SignDocument"
@@ -25,65 +31,37 @@ function HeaderBar() {
   }
 
   return (
-    <div
-      style={{
-        maxWidth: "1200px",
-        margin: "0 auto 24px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        gap: "12px",
-        flexWrap: "wrap",
-      }}
-    >
-      <div style={{ fontSize: "14px", opacity: 0.85 }}>Contractor Autopilot</div>
+    <div style={headerWrap}>
+      <div style={{ fontSize: "14px", opacity: 0.85 }}>Actual Assistant</div>
 
-      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+      <div style={headerLinks}>
         {authed ? (
           <>
             <Link to="/" style={location.pathname === "/" ? activeLinkStyle : mutedLinkStyle}>
               Command Center
             </Link>
 
-            <Link
-              to="/job-admin"
-              style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/job-admin" style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}>
               Jobs
             </Link>
 
-            <Link
-              to="/calendar"
-              style={location.pathname === "/calendar" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/calendar" style={location.pathname === "/calendar" ? activeLinkStyle : mutedLinkStyle}>
               Calendar
             </Link>
 
-            <Link
-              to="/developer-settings"
-              style={location.pathname === "/developer-settings" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/developer-settings" style={location.pathname === "/developer-settings" ? activeLinkStyle : mutedLinkStyle}>
               Developer Settings
             </Link>
 
-            <Link
-              to="/document-pipeline"
-              style={location.pathname === "/document-pipeline" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/document-pipeline" style={location.pathname === "/document-pipeline" ? activeLinkStyle : mutedLinkStyle}>
               Documents
             </Link>
 
-            <Link
-              to="/users"
-              style={location.pathname === "/users" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/users" style={location.pathname === "/users" ? activeLinkStyle : mutedLinkStyle}>
               Users
             </Link>
 
-            <Link
-              to="/reports"
-              style={location.pathname === "/reports" ? activeLinkStyle : mutedLinkStyle}
-            >
+            <Link to="/reports" style={location.pathname === "/reports" ? activeLinkStyle : mutedLinkStyle}>
               Reports
             </Link>
 
@@ -101,112 +79,57 @@ function HeaderBar() {
   )
 }
 
+function ProtectedPage({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <div style={pageStyle}>
+        <HeaderBar />
+        {children}
+      </div>
+    </ProtectedRoute>
+  )
+}
+
 export default function App() {
   return (
     <Routes>
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <DashboardPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
+      <Route path="/" element={<ProtectedPage><DashboardPage /></ProtectedPage>} />
+      <Route path="/commercial" element={<ProtectedPage><CommercialPipelinePage /></ProtectedPage>} />
+      <Route path="/users" element={<ProtectedPage><UsersPage /></ProtectedPage>} />
+      <Route path="/reports" element={<ProtectedPage><ReportsPage /></ProtectedPage>} />
+      <Route path="/job-admin" element={<ProtectedPage><JobAdminPage /></ProtectedPage>} />
+      <Route path="/job/:id" element={<ProtectedPage><JobDetailPage /></ProtectedPage>} />
+      <Route path="/calendar" element={<ProtectedPage><CalendarPage /></ProtectedPage>} />
+      <Route path="/developer-settings" element={<ProtectedPage><DeveloperSettingsPage /></ProtectedPage>} />
+      <Route path="/document-pipeline" element={<ProtectedPage><DocumentPipelinePage /></ProtectedPage>} />
+      <Route path="/storm" element={<ProtectedPage><StormPage /></ProtectedPage>} />
+      <Route path="/roof-intelligence" element={<ProtectedPage><RoofIntelligencePage /></ProtectedPage>} />
+      <Route path="/social" element={<ProtectedPage><SocialPage /></ProtectedPage>} />
+      <Route path="/estimator" element={<ProtectedPage><EstimatorPage /></ProtectedPage>} />
+      <Route path="/timeline" element={<ProtectedPage><TimelinePage /></ProtectedPage>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
-
-      <Route
-        path="/users"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <UsersPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/reports"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <ReportsPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/job-admin"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <JobAdminPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/job/:id"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <JobDetailPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/calendar"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <CalendarPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/developer-settings"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <DeveloperSettingsPage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/document-pipeline"
-        element={
-          <ProtectedRoute>
-            <div style={pageStyle}>
-              <HeaderBar />
-              <DocumentPipelinePage />
-            </div>
-          </ProtectedRoute>
-        }
-      />
-
       <Route path="/sign/:id" element={<SignDocument />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
+}
+
+const headerWrap: CSSProperties = {
+  maxWidth: "1200px",
+  margin: "0 auto 24px",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+}
+
+const headerLinks: CSSProperties = {
+  display: "flex",
+  gap: "10px",
+  flexWrap: "wrap",
+  alignItems: "center",
 }
 
 const pageStyle: CSSProperties = {

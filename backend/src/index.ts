@@ -17,6 +17,7 @@ import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
 import { startFollowupScheduler } from "./services/followupScheduler"
+import { commercialRoutes } from "./modules/commercial/routes"
 
 dotenv.config()
 
@@ -51,11 +52,16 @@ await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)
 await registerCalendarRoutes(app)
+await commercialRoutes(app)
 
 const port = Number(process.env.PORT || 8787)
 
-app.listen({ host: "0.0.0.0", port }).then(() => {
-  app.log.info(`Server listening at http://0.0.0.0:${port}`)
-  startFollowupScheduler()
-  app.log.info("Follow-up scheduler started")
-})
+app.listen({ port, host: "0.0.0.0" })
+  .then(() => {
+    console.log(`🚀 Server running on port ${port}`)
+    startFollowupScheduler()
+  })
+  .catch((err) => {
+    app.log.error(err)
+    process.exit(1)
+  })
