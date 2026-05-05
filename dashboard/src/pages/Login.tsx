@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password)
       setStatus("Login successful")
-      navigate("/job-admin")
+      navigate("/")
     } catch (err: any) {
       setError(err?.message || "Login failed")
       setStatus("Login failed")

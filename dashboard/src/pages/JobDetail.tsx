@@ -5,9 +5,9 @@ const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787"
 const TENANT = "g2g-roofing"
 
 const STAGES = [
-  "lead", "callback", "inspection", "roof_repair", "roof_replacement", "tarp",
+  "intake_pending", "lead", "callback", "inspection", "roof_repair", "roof_replacement", "tarp",
   "estimate_sent", "contract_sent", "pre_production", "in_production",
-  "completed", "tarp_complete", "invoiced", "paid", "dnc",
+  "completed", "tarp_complete", "invoiced", "paid", "disqualified", "dnc",
 ]
 
 export default function JobDetail() {
@@ -153,6 +153,34 @@ export default function JobDetail() {
     await loadJob()
   }
 
+  async function applyIntakeDecision(nextStage: string, note: string) {
+    if (!id) return
+
+    setError("")
+    setStatus("Saving intake decision...")
+
+    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stage: nextStage,
+        note,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setStatus("")
+      setError(data?.error || "Intake decision failed")
+      return
+    }
+
+    setStage(nextStage)
+    setStatus("Intake decision saved")
+    await loadJob()
+  }
+
   async function addNote() {
     if (!id) return
     if (!noteText.trim()) {
@@ -291,6 +319,53 @@ export default function JobDetail() {
               <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
               <p><strong>Job Type:</strong> {job.job_type || "—"}</p>
               <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
+
+              {(job.stage === "intake_pending" || job.stage === "lead") && (
+                <div style={decisionBox}>
+                  <div style={decisionTitle}>Intake Decision</div>
+                  <div style={decisionHelp}>
+                    Use these after a human reviews the AI voice intake.
+                  </div>
+
+                  <div style={decisionButtons}>
+                    <button
+                      style={primaryButton}
+                      onClick={() =>
+                        applyIntakeDecision(
+                          "lead",
+                          "Qualified from AI voice intake after manual review."
+                        )
+                      }
+                    >
+                      Qualify as Lead
+                    </button>
+
+                    <button
+                      style={secondaryButton}
+                      onClick={() =>
+                        applyIntakeDecision(
+                          "intake_pending",
+                          "More information requested after AI voice intake review."
+                        )
+                      }
+                    >
+                      Request More Info
+                    </button>
+
+                    <button
+                      style={dangerButton}
+                      onClick={() =>
+                        applyIntakeDecision(
+                          "disqualified",
+                          "Disqualified after AI voice intake review."
+                        )
+                      }
+                    >
+                      Disqualify
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <hr style={hr} />
 
@@ -458,3 +533,49 @@ const linkStyle: CSSProperties = { color: "#93c5fd" }
 const success: CSSProperties = { color: "#86efac" }
 const danger: CSSProperties = { color: "#fca5a5" }
 const hr: CSSProperties = { borderColor: "#374151", margin: "18px 0" }
+
+
+const decisionBox: CSSProperties = {
+  marginTop: 12,
+  padding: 14,
+  borderRadius: 14,
+  background: "rgba(255,255,255,0.07)",
+  border: "1px solid rgba(255,255,255,0.12)",
+}
+
+const decisionTitle: CSSProperties = {
+  fontWeight: 800,
+  marginBottom: 4,
+}
+
+const decisionHelp: CSSProperties = {
+  fontSize: 13,
+  opacity: 0.75,
+  marginBottom: 10,
+}
+
+const decisionButtons: CSSProperties = {
+  display: "flex",
+  gap: 10,
+  flexWrap: "wrap",
+}
+
+const primaryButton: CSSProperties = {
+  color: "#fff",
+  background: "linear-gradient(90deg, #2563eb 0%, #4aa8ff 100%)",
+  border: "none",
+  padding: "10px 14px",
+  borderRadius: 12,
+  cursor: "pointer",
+  fontWeight: 700,
+}
+
+const secondaryButton: CSSProperties = {
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  padding: "10px 14px",
+  borderRadius: 12,
+  cursor: "pointer",
+  fontWeight: 700,
+}

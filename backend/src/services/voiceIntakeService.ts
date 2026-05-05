@@ -106,6 +106,35 @@ function isEmergencyTarpReason(reason: string) {
   )
 }
 
+function isMeaningfulVoiceReason(reason: string) {
+  const text = String(reason || "").trim().toLowerCase()
+
+  if (!text) return false
+
+  const filler = [
+    "thanks for calling",
+    "thank you for calling",
+    "calling",
+    "hello",
+    "hi",
+    "test",
+  ]
+
+  return !filler.includes(text)
+}
+
+async function updateVoiceIntakeStage(tenantId: number, jobId: number, stage: string) {
+  await pool.query(
+    `
+    update jobs
+    set stage = $3, updated_at = now()
+    where tenant_id = $1
+      and id = $2
+    `,
+    [tenantId, jobId, stage]
+  )
+}
+
 async function addTimelineEvent(
   tenantId: number,
   jobId: number,
@@ -122,6 +151,30 @@ async function addTimelineEvent(
     `,
     [tenantId, jobId, kind, message, JSON.stringify(meta)]
   )
+}
+
+async function logSystemEvent(
+  eventType: string,
+  entityType: string,
+  entityId: string | number | null,
+  metadata: Record<string, unknown> = {}
+) {
+  try {
+    await pool.query(
+      `
+      insert into system_events (event_type, entity_type, entity_id, metadata)
+      values ($1, $2, $3, $4::jsonb)
+      `,
+      [
+        eventType,
+        entityType,
+        entityId ? String(entityId) : null,
+        JSON.stringify(metadata),
+      ]
+    )
+  } catch (err) {
+    console.error("voice system event log failed", err)
+  }
 }
 
 async function getJobContext(tenantSlug: string, jobId: number): Promise<JobContext> {
@@ -262,6 +315,13 @@ export async function startVoiceIntakeLead(tenantSlug: string, from: string | nu
     notes:
       "Inbound voice AI lead created. Caller reached Good2Go Roofing Team and entered the voice workflow.",
     source: "Phone Call",
+  })
+
+  await logSystemEvent("voice_intake_started", "job", created?.job_id || null, {
+    tenant_slug: tenantSlug,
+    from,
+    source: "Phone Call",
+    created,
   })
 
   return created
@@ -446,6 +506,27 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const summary = await getVoiceSummary(tenantSlug, jobId)
 
+  const qualifiesAsLead =
+    Boolean(summary.callbackNumber && summary.callbackNumber !== "No callback number captured") &&
+    isMeaningfulVoiceReason(summary.reason)
+
+  const decidedStage = qualifiesAsLead ? "lead" : "intake_pending"
+
+  await updateVoiceIntakeStage(ctx.tenant_id, ctx.job_id, decidedStage)
+
+  await addTimelineEvent(
+    ctx.tenant_id,
+    ctx.job_id,
+    "voice_intake_stage_decided",
+    `Voice intake stage decided: ${decidedStage}`,
+    {
+      channel: "voice",
+      stage: decidedStage,
+      reason: summary.reason,
+      qualifies_as_lead: qualifiesAsLead,
+    }
+  )
+
   const header = summary.emergencyTarpRequested
     ? "URGENT DISPATCH SUMMARY"
     : "VOICE LEAD DISPATCH SUMMARY"
@@ -523,29 +604,52 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     }
   )
 
+  await logSystemEvent("voice_intake_alert_sent", "job", ctx.job_id, {
+    tenant_slug: tenantSlug,
+    customer_name: summary.customerName,
+    callback_number: summary.callbackNumber,
+    property_address: summary.propertyAddress,
+    reason: summary.reason,
+    emergency_tarp_requested: summary.emergencyTarpRequested,
+    alert_email_to: alertEmailTo,
+    alert_sms_to: alertSmsTo,
+    email_result: emailResult,
+    sms_result: smsResult,
+  })
+
+  await logSystemEvent("stage_decision_needed", "job", ctx.job_id, {
+    tenant_slug: tenantSlug,
+    current_stage: decidedStage,
+    recommended_actions: ["qualify_as_lead", "request_more_info", "disqualify"],
+    customer_name: summary.customerName,
+    callback_number: summary.callbackNumber,
+  })
+
 
   try {
     const { planFollowUps } = await import("./conversationEngine")
 
-    const workflowStage = "lead"
+    const workflowStage = decidedStage
 
-    await planFollowUps({
-      tenant_id: ctx.tenant_id,
-      job_id: ctx.job_id,
-      stage: workflowStage,
-      occurred_at: new Date().toISOString(),
-    })
-
-    await addTimelineEvent(
-      ctx.tenant_id,
-      ctx.job_id,
-      "workflow_planned",
-      `follow-ups scheduled after completed voice intake for stage=${workflowStage}`,
-      {
+    if (workflowStage === "lead") {
+      await planFollowUps({
+        tenant_id: ctx.tenant_id,
+        job_id: ctx.job_id,
         stage: workflowStage,
-        source: "voice_intake_completed",
-      }
-    )
+        occurred_at: new Date().toISOString(),
+      })
+
+      await addTimelineEvent(
+        ctx.tenant_id,
+        ctx.job_id,
+        "workflow_planned",
+        `follow-ups scheduled after completed voice intake for stage=${workflowStage}`,
+        {
+          stage: workflowStage,
+          source: "voice_intake_completed",
+        }
+      )
+    }
   } catch (err: any) {
     await addTimelineEvent(
       ctx.tenant_id,
