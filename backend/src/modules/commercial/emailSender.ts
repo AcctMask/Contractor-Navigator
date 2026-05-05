@@ -40,13 +40,6 @@ export async function sendCommercialEmail(
         ${escapeHtml(safeText)}
       </div>
 
-      <p style="margin-top: 18px;">
-        Steve Pashoian<br />
-        Good2Go Roofing & Construction<br />
-        855-766-3246<br />
-        info@g2groofing.com
-      </p>
-
       <hr style="margin:20px 0; border:none; border-top:1px solid #e5e7eb;" />
 
       <p style="font-size:12px; color:#6b7280;">
