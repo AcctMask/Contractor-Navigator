@@ -9,6 +9,22 @@ import { commercialPool as pool } from "./db";
 import { calculateCommercialPriority } from "./priorityEngine";
 
 export async function commercialRoutes(app: FastifyInstance) {
+  // SYSTEM EVENTS - RECENT ACTIVITY
+  app.get("/events", async (_req, reply) => {
+    const result = await pool.query(`
+      select *
+      from system_events
+      order by created_at desc
+      limit 100
+    `);
+
+    return reply.send({
+      ok: true,
+      count: result.rowCount,
+      rows: result.rows,
+    });
+  });
+
   // HEALTH
   app.get("/commercial/health", async () => {
     return { ok: true, name: "commercial-pipeline-builder", status: "ready" };

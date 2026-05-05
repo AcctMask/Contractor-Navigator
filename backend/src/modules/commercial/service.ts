@@ -2,6 +2,30 @@ import { commercialPool as pool } from "./db";
 import { classify } from "./classifier";
 import { sendCommercialEmail } from "./emailSender";
 
+export async function logEvent({
+  event_type,
+  entity_type,
+  entity_id,
+  metadata = {},
+}: {
+  event_type: string;
+  entity_type: string;
+  entity_id?: string;
+  metadata?: any;
+}) {
+  try {
+    await pool.query(
+      `
+      insert into system_events (event_type, entity_type, entity_id, metadata)
+      values ($1,$2,$3,$4)
+      `,
+      [event_type, entity_type, entity_id || null, metadata || {}]
+    );
+  } catch (err) {
+    console.error("event log failed", err);
+  }
+}
+
 function renderTemplate(value: string, target: any) {
   return String(value || "")
     .replaceAll("{{name}}", target.business_name || "there")
@@ -207,6 +231,17 @@ const sendResult = await sendCommercialEmail(
     [queueId]
   );
 
+  await logEvent({
+    event_type: "email_sent",
+    entity_type: "contractor",
+    entity_id: target.id,
+    metadata: {
+      queue_id: queueId,
+      email: target.email,
+      business_name: target.business_name,
+    },
+  });
+
   return { ok: true, sent: true };
 }
 
@@ -253,6 +288,18 @@ export async function runCommercialEmailScheduler(maxToSend = 10) {
       ...result,
     });
   }
+
+  await logEvent({
+    event_type: "scheduler_run",
+    entity_type: "system",
+    metadata: {
+      requested_limit: safeLimit,
+      processed: pending.rowCount,
+      sent,
+      failed,
+      skipped,
+    },
+  });
 
   return {
     ok: true,
