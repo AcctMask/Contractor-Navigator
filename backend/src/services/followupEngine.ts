@@ -362,6 +362,30 @@ async function addTimelineEvent(
   )
 }
 
+async function logSystemEvent(
+  eventType: string,
+  entityType: string,
+  entityId: string | number | null,
+  metadata: Record<string, unknown> = {}
+) {
+  try {
+    await pool.query(
+      `
+      insert into system_events (event_type, entity_type, entity_id, metadata)
+      values ($1, $2, $3, $4::jsonb)
+      `,
+      [
+        eventType,
+        entityType,
+        entityId ? String(entityId) : null,
+        JSON.stringify(metadata),
+      ]
+    )
+  } catch (err) {
+    console.error("system event log failed", err)
+  }
+}
+
 function countExistingAiMessagesForStage(timeline: TimelineRow[], stage: string) {
   return timeline.filter((t) => {
     const kind = t.kind.toLowerCase()
@@ -1187,6 +1211,15 @@ export async function handleInboundMessageByTenantSlug(
     }
   )
 
+  await logSystemEvent("customer_reply_logged", "job", jobId, {
+    tenant_slug: tenantSlug,
+    from,
+    channel: "sms",
+    message: trimmed,
+    customer_name: job.customer_name || null,
+    stage: job.stage || null,
+  })
+
   const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
 
   if (latestIntakeQuestion?.meta?.missing_service_need) {
@@ -1286,6 +1319,17 @@ export async function handleInboundMessageByTenantSlug(
         sms_preview: intakeAlertText,
       }
     )
+
+    await logSystemEvent("sms_intake_completed", "job", jobId, {
+      tenant_slug: tenantSlug,
+      from,
+      channel: "sms",
+      service_need: trimmed,
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+      sms_result: intakeSmsResult,
+      email_result: intakeEmailResult,
+    })
 
     await sendSMS(
       callbackNumber,
@@ -1406,6 +1450,15 @@ export async function handleInboundMessageByTenantSlug(
       }
     )
 
+    await logSystemEvent("sales_intent_detected", "job", jobId, {
+      tenant_slug: tenantSlug,
+      intent: salesIntent,
+      from,
+      channel: "sms",
+      stage: job.stage,
+      message: trimmed,
+    })
+
     const sms = await sendSMS(callbackNumber, salesIntentReply)
 
     await addTimelineEvent(
@@ -1454,6 +1507,16 @@ export async function handleInboundMessageByTenantSlug(
           channel: "sms",
         }
       )
+
+
+      await logSystemEvent("high_intent_alert_sent", "job", jobId, {
+        tenant_slug: tenantSlug,
+        intent: salesIntent,
+        matched_signals: matchedSignals,
+        alert_result: buyingSignalAlertResult,
+        from,
+        channel: "sms",
+      })
     }
 
     if (salesIntent === "callback_request") {
@@ -1604,6 +1667,16 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
     }
   )
 
+  await logSystemEvent("sms_reply_classified", "job", jobId, {
+    tenant_slug: tenantSlug,
+    classification,
+    crm_substatus: routing.crm_substatus,
+    crm_flow_key: routing.crm_flow_key,
+    from,
+    channel: "sms",
+    matched_signals: matchedSignals,
+  })
+
   await addTimelineEvent(
     tenantId,
     jobId,
@@ -1628,6 +1701,16 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
         alert_email_to: alertTargets.alert_email_to,
       }
     )
+
+    await logSystemEvent("buying_signal_detected", "job", jobId, {
+      tenant_slug: tenantSlug,
+      from,
+      channel: "sms",
+      matched_signals: matchedSignals,
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+      message: trimmed,
+    })
 
     const alertResults = await sendBuyingSignalAlerts(
       job,
@@ -1713,6 +1796,17 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
         sms_preview: customerReplyAlertText,
       }
     )
+
+
+    await logSystemEvent("customer_reply_alert_sent", "job", jobId, {
+      tenant_slug: tenantSlug,
+      from,
+      channel: "sms",
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+      email_result: customerReplyEmailResult,
+      message: trimmed,
+    })
   }
 
   await sendAutoClassificationReply(
