@@ -512,6 +512,39 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
 
   const decidedStage = qualifiesAsLead ? "lead" : "intake_pending"
 
+  // Intake quality classification
+  let intakeSubstatus = "waiting_on_info"
+
+  const msg = String(summary.reason || "").toLowerCase()
+
+  if (!msg || msg.length < 5) {
+    intakeSubstatus = "no_response"
+  } else if (
+    (msg.includes("insurance") && !msg.includes("claim")) ||
+    msg.includes("marketing") ||
+    msg.includes("seo") ||
+    msg.includes("google ranking") ||
+    msg.includes("advertising") ||
+    msg.includes("business loan")
+  ) {
+    intakeSubstatus = "likely_solicitor"
+  }
+
+  if (decidedStage === "intake_pending") {
+    await pool.query(
+      `
+      update jobs
+      set crm_substatus = $3,
+          updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [ctx.tenant_id, ctx.job_id, intakeSubstatus]
+    )
+  }
+
+
+
   await updateVoiceIntakeStage(ctx.tenant_id, ctx.job_id, decidedStage)
 
   await addTimelineEvent(

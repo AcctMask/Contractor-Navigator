@@ -50,6 +50,15 @@ type DashboardJob = {
   customer_name?: string | null
 }
 
+type SystemEventSummary = {
+  id: string
+  event_type: string
+  entity_type: string
+  entity_id?: string | null
+  metadata?: any
+  created_at?: string | null
+}
+
 type CalendarEventSummary = {
   id: number
   title?: string | null
@@ -72,6 +81,7 @@ function fmtDate(value?: string | null) {
 export default function DashboardPage() {
   const [jobs, setJobs] = useState<DashboardJob[]>([])
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
+  const [systemEvents, setSystemEvents] = useState<SystemEventSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
@@ -85,13 +95,15 @@ export default function DashboardPage() {
       setLoading(true)
       setError("")
 
-      const [jobsRes, eventsRes] = await Promise.all([
+      const [jobsRes, eventsRes, systemEventsRes] = await Promise.all([
         fetch(`${API_BASE}/admin/jobs/${TENANT_SLUG}?limit=250`),
-        fetch(`${API_BASE}/admin/calendar/${TENANT_SLUG}?limit=20`)
+        fetch(`${API_BASE}/admin/calendar/${TENANT_SLUG}?limit=20`),
+        fetch(`${API_BASE}/events`)
       ])
 
       const jobsData = await jobsRes.json()
       const eventsData = await eventsRes.json()
+      const systemEventsData = await systemEventsRes.json().catch(() => ({ rows: [] }))
 
       if (!jobsRes.ok || !jobsData?.ok) {
         throw new Error(jobsData?.error || "Dashboard load failed")
@@ -99,6 +111,7 @@ export default function DashboardPage() {
 
       setJobs(Array.isArray(jobsData.jobs) ? jobsData.jobs : [])
       setEvents(Array.isArray(eventsData?.events) ? eventsData.events : [])
+      setSystemEvents(Array.isArray(systemEventsData?.rows) ? systemEventsData.rows : [])
     } catch (err: any) {
       setError(err?.message || "Dashboard load failed")
     } finally {
@@ -115,6 +128,7 @@ export default function DashboardPage() {
   }, [jobs])
 
   const stageOrder = [
+    "intake_pending",
     "lead",
     "estimate_sent",
     "tarp",
@@ -143,6 +157,8 @@ export default function DashboardPage() {
       return aTime - bTime
     })
     .slice(0, 6)
+
+  const recentSystemEvents = systemEvents.slice(0, 8)
 
   return (
     <div style={pageWrap}>
@@ -336,6 +352,48 @@ export default function DashboardPage() {
                 <Link to="/document-pipeline" style={primaryAction}>
                   Open Documents
                 </Link>
+              </div>
+
+              <div style={eventPanel}>
+                <h2 style={panelTitle}>Recent System Events</h2>
+                <div style={panelSub}>Live activity from GC mail, scheduler, voice, SMS, and intake workflows.</div>
+
+                <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                  {loading ? (
+                    <div style={selectedEmpty}>Loading system events…</div>
+                  ) : recentSystemEvents.length === 0 ? (
+                    <div style={selectedEmpty}>No system events logged yet.</div>
+                  ) : (
+                    recentSystemEvents.map((event) => (
+                      <div key={event.id} style={systemEventCard}>
+                        <div style={systemEventTopRow}>
+                          <span style={systemEventType}>{event.event_type.replaceAll("_", " ")}</span>
+                          <span style={systemEventTime}>{fmtDate(event.created_at)}</span>
+                        </div>
+                        <div style={systemEventMeta}>
+                          {event.entity_type}
+                          {event.entity_id ? ` #${event.entity_id}` : ""}
+                        </div>
+                        {event.metadata?.business_name ? (
+                          <div style={systemEventDetail}>{event.metadata.business_name}</div>
+                        ) : null}
+                        {event.metadata?.customer_name ? (
+                          <div style={systemEventDetail}>{event.metadata.customer_name}</div>
+                        ) : null}
+                        {event.metadata?.sent !== undefined ? (
+                          <div style={systemEventDetail}>
+                            Sent: {event.metadata.sent} • Failed: {event.metadata.failed || 0}
+                          </div>
+                        ) : null}
+                        {event.metadata?.queued !== undefined ? (
+                          <div style={systemEventDetail}>
+                            Queued: {event.metadata.queued}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </section>
@@ -667,4 +725,48 @@ const capabilityPill: CSSProperties = {
   color: "#dbeafe",
   background: "rgba(37, 99, 235, 0.22)",
   border: "1px solid rgba(147, 197, 253, 0.28)",
+}
+
+
+const eventPanel: CSSProperties = {
+  marginTop: 22,
+  paddingTop: 18,
+  borderTop: "1px solid rgba(255,255,255,0.1)",
+}
+
+const systemEventCard: CSSProperties = {
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "14px",
+  padding: "12px",
+}
+
+const systemEventTopRow: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  alignItems: "center",
+}
+
+const systemEventType: CSSProperties = {
+  fontWeight: 800,
+  textTransform: "capitalize",
+}
+
+const systemEventTime: CSSProperties = {
+  fontSize: 11,
+  opacity: 0.65,
+  whiteSpace: "nowrap",
+}
+
+const systemEventMeta: CSSProperties = {
+  fontSize: 12,
+  opacity: 0.7,
+  marginTop: 5,
+}
+
+const systemEventDetail: CSSProperties = {
+  fontSize: 12,
+  opacity: 0.86,
+  marginTop: 5,
 }
