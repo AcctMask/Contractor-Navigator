@@ -3,6 +3,7 @@ import {
   importCommercialTargets,
   sendQueuedCommercialEmail,
   runCommercialEmailScheduler,
+  logEvent,
   getPipelineView,
 } from "./service";
 import { commercialPool as pool } from "./db";
@@ -500,6 +501,104 @@ export async function commercialRoutes(app: FastifyInstance) {
       rows: result.rows,
     })
   })
+
+  // BUILD ROTATION QUEUE FROM ELIGIBLE CONTRACTORS
+  app.post("/commercial/queue/build", async (req, reply) => {
+    try {
+      const body = req.body as any;
+
+      const limit = Math.max(1, Math.min(Number(body?.limit || 25), 500));
+      const cooldownDays = Math.max(1, Math.min(Number(body?.cooldown_days || 10), 90));
+      const city = body?.city ? String(body.city).trim() : null;
+      const contractorCategory = body?.contractor_category ? String(body.contractor_category).trim() : null;
+      const priorityLevel = body?.priority_level ? String(body.priority_level).trim() : null;
+
+      const campaignId = null;
+
+      const result = await pool.query(
+        `
+        with eligible as (
+          select t.id
+          from commercial_targets t
+          where coalesce(t.do_not_contact,false) = false
+            and coalesce(t.pipeline_status,'working') <> 'opted_out'
+            and t.email is not null
+            and t.email <> ''
+            and ($2::text is null or lower(t.city) = lower($2))
+            and ($3::text is null or t.contractor_category = $3 or t.target_type = $3)
+            and ($4::text is null or t.priority_level = $4)
+            and (
+              t.last_touch_at is null
+              or t.last_touch_at < now() - ($5::int * interval '1 day')
+            )
+            and not exists (
+              select 1
+              from commercial_email_queue q
+              where q.target_id = t.id
+                and q.status = 'pending'
+            )
+          order by
+            case t.priority_level
+              when 'high' then 1
+              when 'medium' then 2
+              when 'low' then 3
+              else 4
+            end,
+            t.last_touch_at asc nulls first,
+            t.created_at desc
+          limit $1
+        )
+        insert into commercial_email_queue (
+          target_id,
+          status,
+          scheduled_at,
+          campaign_id
+        )
+        select
+          id,
+          'pending',
+          now(),
+          $6::uuid
+        from eligible
+        returning id, target_id
+        `,
+        [limit, city, contractorCategory, priorityLevel, cooldownDays, campaignId]
+      );
+
+      await logEvent({
+        event_type: "rotation_queue_built",
+        entity_type: "system",
+        metadata: {
+          campaign_id: campaignId,
+          queued: result.rowCount,
+          limit,
+          cooldown_days: cooldownDays,
+          city,
+          contractor_category: contractorCategory,
+          priority_level: priorityLevel,
+        },
+      });
+
+      return reply.send({
+        ok: true,
+        campaign_id: campaignId,
+        queued: result.rowCount,
+        limit,
+        cooldown_days: cooldownDays,
+        filters: {
+          city,
+          contractor_category: contractorCategory,
+          priority_level: priorityLevel,
+        },
+        rows: result.rows,
+      });
+    } catch (err: any) {
+      return reply.code(500).send({
+        ok: false,
+        error: err.message || "Failed to build commercial queue",
+      });
+    }
+  });
 
   // COMMERCIAL EMAIL SCHEDULER - SEND LIMITED PENDING BATCH
   app.post("/commercial/scheduler/run", async (req, reply) => {

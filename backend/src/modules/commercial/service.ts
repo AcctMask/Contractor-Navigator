@@ -70,9 +70,9 @@ Happy to take a look at anything you’re working on.
     subject: "Roofing support if needed",
     body: `Hi {{name}},
 
-Reaching out in case you ever need roofing support on a project in {{city}}, FL.
+Reaching out in case you ever need roofing support on a project in West Central Florida.
 
-We work with GCs locally and handle repairs, replacements, and storm-related work.
+We work with GCs and handle new construction, repairs, replacements, and storm-related roofing work.
 
 If it’s not relevant now, no problem — just wanted to introduce ourselves.
 
@@ -249,7 +249,8 @@ const sendResult = await sendCommercialEmail(
 // -------- COMMERCIAL EMAIL SCHEDULER --------
 
 export async function runCommercialEmailScheduler(maxToSend = 10) {
-  const safeLimit = Math.max(1, Math.min(Number(maxToSend || 10), 50));
+  const safeLimit = Math.max(1, Math.min(Number(maxToSend || 10), 100));
+  const cooldownDays = 10;
 
   const pending = await pool.query(
     `
@@ -261,10 +262,22 @@ export async function runCommercialEmailScheduler(maxToSend = 10) {
       and coalesce(t.pipeline_status,'working') <> 'opted_out'
       and t.email is not null
       and t.email <> ''
-    order by q.created_at asc
+      and (
+        t.last_touch_at is null
+        or t.last_touch_at < now() - ($2::int * interval '1 day')
+      )
+    order by
+      case t.priority_level
+        when 'high' then 1
+        when 'medium' then 2
+        when 'low' then 3
+        else 4
+      end,
+      t.last_touch_at asc nulls first,
+      q.created_at asc
     limit $1
     `,
-    [safeLimit]
+    [safeLimit, cooldownDays]
   );
 
   let sent = 0;
@@ -294,6 +307,7 @@ export async function runCommercialEmailScheduler(maxToSend = 10) {
     entity_type: "system",
     metadata: {
       requested_limit: safeLimit,
+      cooldown_days: cooldownDays,
       processed: pending.rowCount,
       sent,
       failed,
@@ -304,6 +318,7 @@ export async function runCommercialEmailScheduler(maxToSend = 10) {
   return {
     ok: true,
     requested_limit: safeLimit,
+    cooldown_days: cooldownDays,
     processed: pending.rowCount,
     sent,
     failed,
