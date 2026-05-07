@@ -18,6 +18,7 @@ import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { commercialRoutes } from "./modules/commercial/routes"
+import { startCommercialEmailScheduler } from "./modules/commercial/scheduler"
 
 dotenv.config()
 
@@ -60,6 +61,7 @@ app.listen({ port, host: "0.0.0.0" })
   .then(() => {
     console.log(`🚀 Server running on port ${port}`)
     startFollowupScheduler()
+    startCommercialEmailScheduler()
   })
   .catch((err) => {
     app.log.error(err)

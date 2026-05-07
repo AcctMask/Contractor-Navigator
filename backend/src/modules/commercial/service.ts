@@ -45,23 +45,27 @@ function getMessageByState(target: any) {
 
 Got your message — happy to take a look.
 
-If you have plans/specs, feel free to send them over and I’ll review right away. If easier, I can jump on a quick call to go through scope and timing.
+If you have plans/specs, feel free to send them over and I’ll review right away. If easier, I can jump on a quick call to go through scope, timing, and any roofing-related documentation that may be needed.
 
-– Steve
-Good2Go Roofing`,
+– Steve Pashoian
+Good2Go Roofing
+Licensed Roofing Contractor | Licensed Insurance Adjuster`,
     };
   }
 
   if (state === "active") {
     return {
-      subject: "Quick check-in",
+      subject: "Quick roofing check-in",
       body: `Hi {{name}},
 
-Just checking in — if anything comes up where you need roofing support in {{city}}, we’re available and can turn things around quickly.
+Just checking in — if anything comes up where you need roofing support in {{city}} or the surrounding area, we’re available and can turn things around quickly.
+
+Good2Go Roofing works with GCs on new construction, repairs, replacements, and storm-related roofing work. We are licensed roofing contractors, and I am also a licensed insurance adjuster, which helps when a project involves documentation, claim-related details, or storm-response work.
 
 Happy to take a look at anything you’re working on.
 
-– Steve`,
+– Steve Pashoian
+Good2Go Roofing`,
     };
   }
 
@@ -72,11 +76,11 @@ Happy to take a look at anything you’re working on.
 
 Reaching out in case you ever need roofing support on a project in West Central Florida.
 
-We work with GCs and handle new construction, repairs, replacements, and storm-related roofing work.
+Good2Go Roofing works with GCs on new construction, repairs, replacements, and storm-related roofing work. We are licensed roofing contractors, and I am also a licensed insurance adjuster, so we understand both the construction side and the documentation/insurance side when that matters.
 
-If it’s not relevant now, no problem — just wanted to introduce ourselves.
+If it’s not relevant now, no problem — I just wanted to introduce myself in case you ever need another roofing resource.
 
-– Steve
+– Steve Pashoian
 Good2Go Roofing`,
   };
 }
