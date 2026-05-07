@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 
-const API = import.meta.env.VITE_SOCIAL_API_BASE || "http://127.0.0.1:8000"
+const API = import.meta.env.VITE_SOCIAL_API_BASE || "https://g2g-weather-event-backend-1.onrender.com"
 const CONTRACTOR_ID = "g2g"
 
 export default function SocialPage() {
-  const [posts, setPosts] = useState([])
+  const [posts, setPosts] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   async function loadPosts() {
@@ -32,12 +32,12 @@ export default function SocialPage() {
     loadPosts()
   }
 
-  async function approve(id) {
+  async function approve(id: string) {
     await fetch(`${API}/social/approve/${id}`)
     loadPosts()
   }
 
-  async function reject(id) {
+  async function reject(id: string) {
     await fetch(`${API}/social/reject/${id}`)
     loadPosts()
   }

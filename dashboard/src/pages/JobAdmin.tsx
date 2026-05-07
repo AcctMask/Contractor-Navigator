@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787"
+const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
 
 export default function JobAdmin() {

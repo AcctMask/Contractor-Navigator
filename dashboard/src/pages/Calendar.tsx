@@ -8,7 +8,7 @@ import { getDay } from "date-fns/getDay"
 import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8787"
+const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
 
 const localizer = dateFnsLocalizer({

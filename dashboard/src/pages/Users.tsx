@@ -44,7 +44,7 @@ function getAppOrigin() {
   if (typeof window !== "undefined" && window.location?.origin) {
     return window.location.origin
   }
-  return "http://localhost:5173"
+  return "https://contractor-navigator.vercel.app"
 }
 
 export default function UsersPage() {
