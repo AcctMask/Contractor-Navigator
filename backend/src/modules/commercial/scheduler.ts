@@ -2,8 +2,8 @@ import { runCommercialEmailScheduler } from "./service"
 
 let commercialSchedulerStarted = false
 
-const COMMERCIAL_POLL_MS = 1000 * 60 * 60 * 6
-const DEFAULT_BATCH_SIZE = 15
+const COMMERCIAL_POLL_MS = 1000 * 60 * 60 * 24
+const DEFAULT_BATCH_SIZE = 50
 
 async function runPass() {
   try {
