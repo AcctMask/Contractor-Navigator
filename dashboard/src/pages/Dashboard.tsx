@@ -8,7 +8,7 @@ const capabilityRoutes: Record<string, string> = {
   "Storm Tracking Map": "https://g2g-weather-event-frontend.onrender.com",
   "Roof Age Targeting": "/roof-intelligence",
   "Evergreen Social": "/social",
-  "Instant Estimator": "/estimator",
+  "Instant Estimator": "https://g2g-instant-estimator.netlify.app",
   "GC Mail Engine": "/commercial",
 }
 
@@ -145,6 +145,14 @@ export default function DashboardPage() {
     count: sortedJobs.filter((j) => (j.stage || "lead") === stage).length,
   }))
 
+  const intakePendingJobs = sortedJobs.filter((j) => j.stage === "intake_pending")
+  const intakeBreakdown = {
+    waiting_on_info: intakePendingJobs.filter((j) => j.crm_substatus === "waiting_on_info").length,
+    no_response: intakePendingJobs.filter((j) => j.crm_substatus === "no_response").length,
+    likely_solicitor: intakePendingJobs.filter((j) => j.crm_substatus === "likely_solicitor").length,
+    other: intakePendingJobs.filter((j) => !["waiting_on_info", "no_response", "likely_solicitor"].includes(j.crm_substatus || "")).length,
+  }
+
   const filteredJobs = selectedStage
     ? sortedJobs.filter((j) => (j.stage || "lead") === selectedStage)
     : sortedJobs
@@ -248,6 +256,19 @@ export default function DashboardPage() {
               </button>
             ))}
           </section>
+
+          {intakePendingJobs.length > 0 ? (
+            <section style={intakePanel}>
+              <div style={panelTitle}>Intake Pending Breakdown</div>
+              <div style={panelSub}>Low-confidence calls/texts waiting for clarification or review.</div>
+              <div style={intakeBreakdownGrid}>
+                <div style={intakeBreakdownItem}>Waiting on info: <b>{intakeBreakdown.waiting_on_info}</b></div>
+                <div style={intakeBreakdownItem}>No response: <b>{intakeBreakdown.no_response}</b></div>
+                <div style={intakeBreakdownItem}>Likely solicitor: <b>{intakeBreakdown.likely_solicitor}</b></div>
+                <div style={intakeBreakdownItem}>Other: <b>{intakeBreakdown.other}</b></div>
+              </div>
+            </section>
+          ) : null}
 
           <section style={panelGrid}>
             <div style={panelCardLarge}>
@@ -769,4 +790,27 @@ const systemEventDetail: CSSProperties = {
   fontSize: 12,
   opacity: 0.86,
   marginTop: 5,
+}
+
+
+const intakePanel: CSSProperties = {
+  background: "rgba(8, 22, 59, 0.92)",
+  border: "1px solid rgba(250, 204, 21, 0.25)",
+  borderRadius: "20px",
+  padding: "18px",
+}
+
+const intakeBreakdownGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: "10px",
+  marginTop: "12px",
+}
+
+const intakeBreakdownItem: CSSProperties = {
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  borderRadius: "12px",
+  padding: "10px 12px",
+  fontSize: "13px",
 }

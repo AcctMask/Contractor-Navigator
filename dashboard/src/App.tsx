@@ -10,6 +10,7 @@ import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
 import ReportsPage from "./pages/Reports"
+import TermsPage from "./pages/Terms"
 import CommercialPipelinePage from "./pages/CommercialPipeline"
 import StormPage from "./pages/Storm"
 import RoofIntelligencePage from "./pages/RoofIntelligence"
@@ -97,6 +98,7 @@ export default function App() {
       <Route path="/commercial" element={<ProtectedPage><CommercialPipelinePage /></ProtectedPage>} />
       <Route path="/users" element={<ProtectedPage><UsersPage /></ProtectedPage>} />
       <Route path="/reports" element={<ProtectedPage><ReportsPage /></ProtectedPage>} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="/job-admin" element={<ProtectedPage><JobAdminPage /></ProtectedPage>} />
       <Route path="/job/:id" element={<ProtectedPage><JobDetailPage /></ProtectedPage>} />
       <Route path="/calendar" element={<ProtectedPage><CalendarPage /></ProtectedPage>} />

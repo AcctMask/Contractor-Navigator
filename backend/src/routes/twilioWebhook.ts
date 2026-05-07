@@ -120,9 +120,10 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
 
 function firstPrompt() {
   return (
-    "Thanks for calling Good2Go Roofing. " +
+    "Thanks for calling Good to Go Roofing. " +
     "If this is an emergency tarp request, press 1 now. " +
-    "Otherwise, in a few words, tell me whether you need an estimate, an inspection, or help with an existing project."
+    "If you are a contractor, builder, or general contractor calling about working with Good to Go Roofing, press 2 now. " +
+    "Otherwise, briefly tell me what you need help with, such as an estimate, inspection, leak, roof age, or insurance concern."
   )
 }
 
@@ -564,6 +565,29 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       return replyXml(
         reply,
         gatherSpeechXml(`${emergencyTarpSpokenResponse()} Please say your full name.`, actionUrl)
+      )
+    }
+
+    if (digits === "2") {
+      await saveVoiceReason(
+        String(tenantSlug),
+        Number(jobId),
+        from,
+        "Commercial contractor / builder relationship inquiry"
+      )
+
+      const actionUrl = buildActionUrl("/twilio/voice/name", {
+        tenantSlug,
+        jobId,
+        callSid: String(callSid || "")
+      })
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          "Thanks. I’ll route this as a contractor or builder relationship call. Please say your full name and company name.",
+          actionUrl
+        )
       )
     }
 
