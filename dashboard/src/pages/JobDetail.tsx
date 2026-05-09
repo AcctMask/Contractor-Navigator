@@ -16,6 +16,7 @@ export default function JobDetail() {
   const [job, setJob] = useState<any>(null)
   const [assets, setAssets] = useState<any[]>([])
   const [notes, setNotes] = useState<any[]>([])
+  const [timeline, setTimeline] = useState<any[]>([])
   const [files, setFiles] = useState<FileList | null>(null)
   const [noteText, setNoteText] = useState("")
   const [stage, setStage] = useState("lead")
@@ -42,6 +43,7 @@ export default function JobDetail() {
     setStage(data.job.stage || "lead")
     setCrmSubstatus(data.job.crm_substatus || "")
     setBotPaused(Boolean(data.job.bot_paused))
+    setTimeline(data.timeline || [])
   }
 
   async function loadAssets() {
@@ -466,18 +468,41 @@ export default function JobDetail() {
       <section style={card}>
         <h2>Notes</h2>
 
-        {notes.length === 0 ? (
-          <p>No notes yet.</p>
+        {[...timeline, ...notes].length === 0 ? (
+          <p>No activity yet.</p>
         ) : (
-          notes.map((note) => (
-            <div key={note.id} style={row}>
-              <div>
-                <strong>{note.created_at ? new Date(note.created_at).toLocaleString() : ""}</strong>
-                <p>{note.message || note.note || ""}</p>
+          [...timeline, ...notes]
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .map((note) => (
+              <div key={`${note.kind || "note"}-${note.id}`} style={row}>
+                <div>
+                  <strong>
+                    {note.created_at
+                      ? new Date(note.created_at).toLocaleString()
+                      : ""}
+                  </strong>
+
+                  <p>
+                    <strong>
+                      {(note.kind || "staff_note")
+                        .replaceAll("_", " ")
+                        .toUpperCase()}
+                    </strong>
+                  </p>
+
+                  <p>{note.message || note.note || ""}</p>
+                </div>
+
+                {note.kind ? null : (
+                  <button
+                    onClick={() => deleteNote(note.id)}
+                    style={dangerButton}
+                  >
+                    Delete Note
+                  </button>
+                )}
               </div>
-              <button onClick={() => deleteNote(note.id)} style={dangerButton}>Delete Note</button>
-            </div>
-          ))
+            ))
         )}
       </section>
 
