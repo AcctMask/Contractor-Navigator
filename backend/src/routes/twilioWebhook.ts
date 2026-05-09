@@ -279,6 +279,19 @@ async function getLatestJobByPhone(phone: string | null) {
 
   const result = await pool.query(
     `
+    with normalized_input as (
+      select regexp_replace($1, '\\D', '', 'g') as phone_digits
+    ),
+    latest_outbound as (
+      select
+        te.tenant_id,
+        te.job_id,
+        max(te.created_at) as last_outbound_at
+      from timeline_events te, normalized_input ni
+      where te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
+        and regexp_replace(coalesce(te.meta->>'to', ''), '\\D', '', 'g') = ni.phone_digits
+      group by te.tenant_id, te.job_id
+    )
     select
       j.id as job_id,
       j.tenant_id,
@@ -290,9 +303,14 @@ async function getLatestJobByPhone(phone: string | null) {
      and j.tenant_id = c.tenant_id
     join tenants t
       on t.id = j.tenant_id
+    left join latest_outbound lo
+      on lo.tenant_id = j.tenant_id
+     and lo.job_id = j.id
     where regexp_replace(c.phone, '\\D', '', 'g')
       = regexp_replace($1, '\\D', '', 'g')
     order by
+      case when lo.last_outbound_at is not null then 0 else 1 end,
+      lo.last_outbound_at desc nulls last,
       case when nullif(trim(j.address1), '') is not null then 0 else 1 end,
       case
         when j.stage in ('estimate_sent','contract_sent','contract_requested','lead','roof_repair','tarp') then 0
