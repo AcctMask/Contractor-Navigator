@@ -292,7 +292,16 @@ async function getLatestJobByPhone(phone: string | null) {
       on t.id = j.tenant_id
     where regexp_replace(c.phone, '\\D', '', 'g')
       = regexp_replace($1, '\\D', '', 'g')
-    order by j.created_at desc, j.id desc
+    order by
+      case when nullif(trim(j.address1), '') is not null then 0 else 1 end,
+      case
+        when j.stage in ('estimate_sent','contract_sent','contract_requested','lead','roof_repair','tarp') then 0
+        when j.job_type = 'VOICE_INTAKE' then 2
+        else 1
+      end,
+      j.updated_at desc,
+      j.created_at desc,
+      j.id desc
     limit 1
     `,
     [phone]
