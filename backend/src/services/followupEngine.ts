@@ -1,5 +1,45 @@
 import { pool } from "../db/db"
 import { sendSMS } from "./twilioService"
+import { pool } from "../db/db"
+
+async function setConversationMemory(
+  tenantId: number,
+  phone: string | null,
+  jobId: number
+) {
+  if (!phone) return
+
+  const digits = String(phone).replace(/\D/g, "")
+  if (!digits) return
+
+  await pool.query(`
+    create table if not exists conversation_memory (
+      tenant_id bigint not null,
+      phone_digits text not null,
+      active_job_id bigint not null,
+      last_activity_at timestamptz not null default now(),
+      primary key (tenant_id, phone_digits)
+    )
+  `)
+
+  await pool.query(
+    `
+    insert into conversation_memory (
+      tenant_id,
+      phone_digits,
+      active_job_id,
+      last_activity_at
+    )
+    values ($1,$2,$3,now())
+    on conflict (tenant_id, phone_digits)
+    do update set
+      active_job_id = excluded.active_job_id,
+      last_activity_at = now()
+    `,
+    [tenantId, digits, jobId]
+  )
+}
+
 import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
 import { isPhoneDnc } from "./dncService"
@@ -1130,6 +1170,12 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
 
   try {
     const sms = await sendSMS(callbackNumber, aiMessage.message)
+
+    await setConversationMemory(
+      tenantId,
+      callbackNumber,
+      jobId
+    )
 
     await addTimelineEvent(
       tenantId,

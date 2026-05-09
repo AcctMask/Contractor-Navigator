@@ -1,6 +1,76 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { sendSMS } from "../services/twilioService"
+
+
+async function ensureConversationMemoryTable() {
+  await pool.query(`
+    create table if not exists conversation_memory (
+      tenant_id bigint not null,
+      phone_digits text not null,
+      active_job_id bigint not null,
+      last_activity_at timestamptz not null default now(),
+      primary key (tenant_id, phone_digits)
+    )
+  `)
+}
+
+async function setActiveConversation(
+  tenantId: number,
+  phone: string | null,
+  jobId: number
+) {
+  if (!phone) return
+
+  const digits = String(phone).replace(/\D/g, "")
+  if (!digits) return
+
+  await ensureConversationMemoryTable()
+
+  await pool.query(
+    `
+    insert into conversation_memory (
+      tenant_id,
+      phone_digits,
+      active_job_id,
+      last_activity_at
+    )
+    values ($1,$2,$3,now())
+    on conflict (tenant_id, phone_digits)
+    do update set
+      active_job_id = excluded.active_job_id,
+      last_activity_at = now()
+    `,
+    [tenantId, digits, jobId]
+  )
+}
+
+async function getActiveConversationJob(
+  tenantId: number,
+  phone: string | null
+) {
+  if (!phone) return null
+
+  const digits = String(phone).replace(/\D/g, "")
+  if (!digits) return null
+
+  await ensureConversationMemoryTable()
+
+  const result = await pool.query(
+    `
+    select active_job_id
+    from conversation_memory
+    where tenant_id = $1
+      and phone_digits = $2
+    limit 1
+    `,
+    [tenantId, digits]
+  )
+
+  if (!result.rowCount) return null
+
+  return Number(result.rows[0].active_job_id)
+}
 import {
   clearPhoneDnc,
   detectDncOptIn,
@@ -276,6 +346,32 @@ async function hasFollowupSmsForCall(callSid: string | null | undefined) {
 
 async function getLatestJobByPhone(phone: string | null) {
   if (!phone) return null
+
+  const tenantId = 1
+
+  const activeJobId = await getActiveConversationJob(tenantId, phone)
+
+  if (activeJobId) {
+    const activeJob = await pool.query(
+      `
+      select
+        j.id as job_id,
+        j.tenant_id,
+        j.customer_id,
+        t.slug as tenant_slug
+      from jobs j
+      join tenants t
+        on t.id = j.tenant_id
+      where j.id = $1
+      limit 1
+      `,
+      [activeJobId]
+    )
+
+    if (activeJob.rowCount) {
+      return activeJob.rows[0]
+    }
+  }
 
   const result = await pool.query(
     `
