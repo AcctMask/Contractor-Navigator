@@ -290,7 +290,8 @@ async function getLatestJobByPhone(phone: string | null) {
      and j.tenant_id = c.tenant_id
     join tenants t
       on t.id = j.tenant_id
-    where c.phone = $1
+    where regexp_replace(c.phone, '\\D', '', 'g')
+      = regexp_replace($1, '\\D', '', 'g')
     order by j.created_at desc, j.id desc
     limit 1
     `,

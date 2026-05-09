@@ -1187,6 +1187,63 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
   }
 }
 
+
+async function getLatestIntakeQuestion(tenantId: number, jobId: number) {
+  const result = await pool.query(
+    `
+    select kind, message, meta, created_at
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'intake_question_sent'
+    order by created_at desc, id desc
+    limit 1
+    `,
+    [tenantId, jobId]
+  )
+
+  if (!result.rowCount) return null
+  return result.rows[0]
+}
+
+async function updateCustomerNameForIntake(
+  tenantId: number,
+  customerId: number | null,
+  fullName: string
+) {
+  if (!customerId || !fullName.trim()) return
+
+  await pool.query(
+    `
+    update customers
+       set full_name = $1,
+           updated_at = now()
+     where tenant_id = $2
+       and id = $3
+    `,
+    [fullName.trim(), tenantId, customerId]
+  )
+}
+
+async function updateJobAddressForIntake(
+  tenantId: number,
+  jobId: number,
+  address: string
+) {
+  if (!address.trim()) return
+
+  await pool.query(
+    `
+    update jobs
+       set address1 = $1,
+           updated_at = now()
+     where tenant_id = $2
+       and id = $3
+    `,
+    [address.trim(), tenantId, jobId]
+  )
+}
+
 export async function handleInboundMessageByTenantSlug(
   tenantSlug: string,
   jobId: number,
