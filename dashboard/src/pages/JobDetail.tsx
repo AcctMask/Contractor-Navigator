@@ -289,27 +289,49 @@ export default function JobDetail() {
       return
     }
 
-    setError("")
-    setStatus("Uploading files...")
+    const selectedFiles = Array.from(files)
+    const totalBytes = selectedFiles.reduce((sum, file) => sum + file.size, 0)
+    const totalMb = totalBytes / 1024 / 1024
 
-    const formData = new FormData()
-    Array.from(files).forEach((file) => formData.append("file", file))
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
-      method: "POST",
-      body: formData,
-    })
-
-    const data = await res.json()
-
-    if (!res.ok || !data.ok) {
-      setStatus("")
-      setError(data?.error || "Upload failed")
+    if (totalMb > 100) {
+      setError(`Selected files total ${totalMb.toFixed(1)} MB. Current upload limit is 100 MB per request.`)
       return
     }
 
-    setFiles(null)
-    setStatus(`Uploaded ${data.uploaded?.length || 0} file(s)`)
-    await loadAssets()
+    setError("")
+    setStatus(`Uploading ${selectedFiles.length} file(s), ${totalMb.toFixed(1)} MB total...`)
+
+    try {
+      const formData = new FormData()
+      selectedFiles.forEach((file) => formData.append("file", file))
+
+      const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
+        method: "POST",
+        body: formData,
+      })
+
+      const text = await res.text()
+      let data: any = {}
+
+      try {
+        data = text ? JSON.parse(text) : {}
+      } catch {
+        data = { error: text || "Upload failed without a readable server response" }
+      }
+
+      if (!res.ok || !data.ok) {
+        setStatus("")
+        setError(data?.error || `Upload failed with status ${res.status}`)
+        return
+      }
+
+      setFiles(null)
+      setStatus(`Uploaded ${data.uploaded?.length || 0} file(s) successfully`)
+      await loadAssets()
+    } catch (err: any) {
+      setStatus("")
+      setError(err?.message || "Upload failed. Large files may require a stronger upload path.")
+    }
   }
 
   async function deleteFile(assetId: number | string) {
