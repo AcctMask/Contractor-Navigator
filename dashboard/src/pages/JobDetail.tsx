@@ -25,6 +25,7 @@ export default function JobDetail() {
   const [error, setError] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [form, setForm] = useState<any>({})
+  const [calendarEvents, setCalendarEvents] = useState<any[]>([])
 
   async function loadJob() {
     if (!id) return
@@ -83,6 +84,72 @@ export default function JobDetail() {
 
   function setField(field: string, value: string) {
     setForm((prev: any) => ({ ...prev, [field]: value }))
+  }
+
+  function setCalendarField(eventId: number | string, field: string, value: string) {
+    setCalendarEvents((prev) =>
+      prev.map((event) =>
+        String(event.id) === String(eventId) ? { ...event, [field]: value } : event
+      )
+    )
+  }
+
+  function toDateTimeLocal(value: string | null | undefined) {
+    if (!value) return ""
+    const d = new Date(value)
+    if (Number.isNaN(d.getTime())) return ""
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  }
+
+  async function loadCalendarEvents() {
+    if (!id) return
+
+    const res = await fetch(`${API_BASE}/calendar/${TENANT}/events`)
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setError(data?.error || "Failed to load calendar events")
+      return
+    }
+
+    const linked = (data.events || [])
+      .filter((event: any) => String(event.job_id || "") === String(id))
+      .map((event: any) => ({
+        ...event,
+        start_time: toDateTimeLocal(event.start_time),
+        end_time: toDateTimeLocal(event.end_time),
+      }))
+
+    setCalendarEvents(linked)
+  }
+
+  async function saveCalendarEvent(event: any) {
+    setError("")
+    setStatus("Saving calendar event...")
+
+    const res = await fetch(`${API_BASE}/calendar/${TENANT}/events/${event.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: event.title,
+        start_time: event.start_time,
+        end_time: event.end_time,
+        location: event.location,
+        notes: event.notes,
+        event_type: event.event_type,
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setStatus("")
+      setError(data?.error || "Calendar update failed")
+      return
+    }
+
+    setStatus("Calendar event saved")
+    await loadCalendarEvents()
   }
 
   function getActivityLabel(item: any) {
@@ -356,6 +423,7 @@ export default function JobDetail() {
   useEffect(() => {
     loadJob()
     loadAssets()
+    loadCalendarEvents()
   }, [id])
 
   return (
@@ -531,6 +599,74 @@ export default function JobDetail() {
         </label>
 
         <button onClick={saveStage} style={button}>Save Stage</button>
+      </section>
+
+      <section style={card}>
+        <h2>Linked Calendar Events</h2>
+
+        {calendarEvents.length === 0 ? (
+          <p>No calendar events linked to this job yet.</p>
+        ) : (
+          calendarEvents.map((event) => (
+            <div key={event.id} style={row}>
+              <div style={{ width: "100%" }}>
+                <label style={label}>Title</label>
+                <input
+                  value={event.title || ""}
+                  onChange={(e) => setCalendarField(event.id, "title", e.target.value)}
+                  style={input}
+                />
+
+                <label style={label}>Start Time</label>
+                <input
+                  type="datetime-local"
+                  value={event.start_time || ""}
+                  onChange={(e) => setCalendarField(event.id, "start_time", e.target.value)}
+                  style={input}
+                />
+
+                <label style={label}>End Time</label>
+                <input
+                  type="datetime-local"
+                  value={event.end_time || ""}
+                  onChange={(e) => setCalendarField(event.id, "end_time", e.target.value)}
+                  style={input}
+                />
+
+                <label style={label}>Event Type</label>
+                <select
+                  value={event.event_type || "general"}
+                  onChange={(e) => setCalendarField(event.id, "event_type", e.target.value)}
+                  style={input}
+                >
+                  <option value="general">general</option>
+                  <option value="callback">callback</option>
+                  <option value="inspection">inspection</option>
+                  <option value="production">production</option>
+                  <option value="follow_up">follow_up</option>
+                </select>
+
+                <label style={label}>Location</label>
+                <input
+                  value={event.location || ""}
+                  onChange={(e) => setCalendarField(event.id, "location", e.target.value)}
+                  style={input}
+                />
+
+                <label style={label}>Notes</label>
+                <textarea
+                  value={event.notes || ""}
+                  onChange={(e) => setCalendarField(event.id, "notes", e.target.value)}
+                  style={textarea}
+                />
+
+                <button onClick={() => saveCalendarEvent(event)} style={button}>
+                  Save Calendar Event
+                </button>
+              </div>
+            </div>
+          ))
+        )}
       </section>
 
       <section style={card}>
