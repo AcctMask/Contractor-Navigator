@@ -60,8 +60,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           id,
           job_id,
           title,
-          start_at as start_time,
-          end_at as end_time,
+          start_time,
+          end_time,
           location,
           notes,
           event_type,
@@ -69,7 +69,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           updated_at
         from calendar_events
         where tenant_id = $1
-        order by start_at asc, id asc
+        order by start_time asc nulls last, id asc
         `,
         [tenantId]
       )
@@ -109,8 +109,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           tenant_id,
           job_id,
           title,
-          start_at as start_time,
-          end_at as end_time,
+          start_time,
+          end_time,
           location,
           notes,
           event_type,
@@ -124,8 +124,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           id,
           job_id,
           title,
-          start_at as start_time,
-          end_at as end_time,
+          start_time,
+          end_time,
           location,
           notes,
           event_type,
