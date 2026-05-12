@@ -58,7 +58,28 @@ export default function JobDetail() {
     }
 
     setAssets(data.assets || [])
-    setNotes(data.notes || [])
+    const timelineNotes = (data.timeline || []).filter((event: any) =>
+      [
+        "manual_note",
+        "estimate_details",
+        "lead_created",
+        "lead_intent_classified",
+        "ai_message_sent",
+        "ai_inbound_response_sent",
+        "ai_message_skipped",
+        "customer_reply",
+        "customer_reply_alert_routed",
+        "sales_intent_detected",
+        "high_intent_alert_routed",
+        "voice_intake_alert_routed",
+        "voice_ai_response_spoken",
+        "voice_followup_sms_sent",
+        "job_manually_updated",
+        "job_archived",
+      ].includes(String(event.kind || "").toLowerCase())
+    )
+
+    setNotes([...(data.notes || []), ...timelineNotes])
   }
 
   function setField(field: string, value: string) {
