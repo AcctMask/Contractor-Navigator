@@ -16,7 +16,6 @@ export default function JobDetail() {
   const [job, setJob] = useState<any>(null)
   const [assets, setAssets] = useState<any[]>([])
   const [notes, setNotes] = useState<any[]>([])
-  const [timeline, setTimeline] = useState<any[]>([])
   const [files, setFiles] = useState<FileList | null>(null)
   const [noteText, setNoteText] = useState("")
   const [stage, setStage] = useState("lead")
@@ -43,22 +42,8 @@ export default function JobDetail() {
     setStage(data.job.stage || "lead")
     setCrmSubstatus(data.job.crm_substatus || "")
     setBotPaused(Boolean(data.job.bot_paused))
-    setTimeline(data.timeline || [])
-  }
 
-  async function loadAssets() {
-    if (!id) return
-
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}`)
-    const data = await res.json()
-
-    if (!res.ok || !data.ok) {
-      setError(data?.error || "Failed to load files/notes")
-      return
-    }
-
-    setAssets(data.assets || [])
-    const timelineNotes = (data.timeline || []).filter((event: any) =>
+    const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
       [
         "manual_note",
         "estimate_details",
@@ -79,12 +64,58 @@ export default function JobDetail() {
       ].includes(String(event.kind || "").toLowerCase())
     )
 
-    setNotes([...(data.notes || []), ...timelineNotes])
+    setNotes(jobTimelineNotes)
+  }
+
+  async function loadAssets() {
+    if (!id) return
+
+    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}`)
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setError(data?.error || "Failed to load files/notes")
+      return
+    }
+
+    setAssets(data.assets || [])
   }
 
   function setField(field: string, value: string) {
     setForm((prev: any) => ({ ...prev, [field]: value }))
   }
+
+  function getActivityLabel(item: any) {
+    const kind = String(item?.kind || "").toLowerCase()
+    const meta = item?.meta || {}
+
+    if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+    if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
+    if (kind.includes("customer_reply")) return "Customer Reply"
+    if (kind.includes("estimate_details")) return "Estimate Details"
+    if (kind.includes("lead_intent")) return "Lead Qualification"
+    if (kind.includes("lead_created")) return "Lead Created"
+    if (kind.includes("voice")) return "Voice Intake"
+    if (kind.includes("job_manually_updated")) return "Manual Update"
+    if (kind.includes("job_archived")) return "Archived"
+    if (kind.includes("alert")) return "Owner Alert"
+    if (kind.includes("sales_intent")) return "Sales Intent"
+    if (kind.includes("manual_note")) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+
+    return kind.replaceAll("_", " ").toUpperCase()
+  }
+
+  function getActivityBadgeStyle(item: any): CSSProperties {
+    const label = getActivityLabel(item).toLowerCase()
+
+    if (label.includes("ai")) return { ...badge, background: "#1d4ed8" }
+    if (label.includes("customer")) return { ...badge, background: "#047857" }
+    if (label.includes("team")) return { ...badge, background: "#6d28d9" }
+    if (label.includes("estimate")) return { ...badge, background: "#b45309" }
+    if (label.includes("alert")) return { ...badge, background: "#be123c" }
+    return badge
+  }
+
 
   async function saveCustomerClaimData() {
     if (!id) return
@@ -489,10 +520,10 @@ export default function JobDetail() {
       <section style={card}>
         <h2>Notes</h2>
 
-        {[...timeline, ...notes].length === 0 ? (
+        {notes.length === 0 ? (
           <p>No activity yet.</p>
         ) : (
-          [...timeline, ...notes]
+          notes
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .map((note) => (
               <div key={`${note.kind || "note"}-${note.id}`} style={row}>
@@ -503,15 +534,13 @@ export default function JobDetail() {
                       : ""}
                   </strong>
 
-                  <p>
-                    <strong>
-                      {(note.kind || "staff_note")
-                        .replaceAll("_", " ")
-                        .toUpperCase()}
-                    </strong>
-                  </p>
+                  <div style={{ marginTop: 8, marginBottom: 8 }}>
+                    <span style={getActivityBadgeStyle(note)}>
+                      {getActivityLabel(note)}
+                    </span>
+                  </div>
 
-                  <p>{note.message || note.note || ""}</p>
+                  <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{note.message || note.note || ""}</p>
                 </div>
 
                 {note.kind ? null : (
@@ -568,6 +597,16 @@ const page: CSSProperties = { padding: 20, maxWidth: 1100, margin: "0 auto" }
 const card: CSSProperties = { background: "#111827", color: "white", borderRadius: 14, padding: 20, marginBottom: 20 }
 const sectionHeader: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }
 const row: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 20, background: "#1f2937", borderRadius: 10, padding: 14, marginBottom: 10 }
+const badge: CSSProperties = {
+  display: "inline-block",
+  padding: "4px 9px",
+  borderRadius: 999,
+  background: "#374151",
+  color: "white",
+  fontSize: 12,
+  fontWeight: 800,
+  letterSpacing: 0.3,
+}
 const input: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, marginBottom: 12 }
 const textarea: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, minHeight: 90, marginBottom: 12 }
 const label: CSSProperties = { display: "block", marginBottom: 6 }
