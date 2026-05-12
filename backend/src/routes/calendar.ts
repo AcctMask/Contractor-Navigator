@@ -153,4 +153,72 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
       return { ok: false, error: err?.message || String(err) }
     }
   })
+  app.put("/calendar/:tenantSlug/events/:eventId", async (request: any, reply) => {
+    try {
+      await ensureCalendarTable()
+
+      const { tenantSlug, eventId } = request.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const body = request.body || {}
+
+      if (!body.title) {
+        reply.code(400)
+        return { ok: false, error: "Title is required" }
+      }
+
+      if (!body.start_time) {
+        reply.code(400)
+        return { ok: false, error: "Start time is required" }
+      }
+
+      const result = await pool.query(
+        `
+        update calendar_events
+        set
+          title = $1,
+          start_time = $2,
+          end_time = $3,
+          location = $4,
+          notes = $5,
+          event_type = $6,
+          updated_at = now()
+        where tenant_id = $7
+          and id = $8
+        returning
+          id,
+          job_id,
+          title,
+          start_time,
+          end_time,
+          location,
+          notes,
+          event_type,
+          created_at,
+          updated_at
+        `,
+        [
+          String(body.title),
+          String(body.start_time),
+          body.end_time ? String(body.end_time) : null,
+          body.location || null,
+          body.notes || null,
+          body.event_type || "general",
+          tenantId,
+          Number(eventId),
+        ]
+      )
+
+      if (!result.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Calendar event not found" }
+      }
+
+      return { ok: true, event: result.rows[0] }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+
 }
