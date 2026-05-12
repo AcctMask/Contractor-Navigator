@@ -177,8 +177,8 @@ const insertedJob = await pool.query(
     $5,
     $6,
     $7,$8,$9,$10,
-    'estimator',
-    $11
+    $11,
+    $12
   )
   returning id`,
   [
@@ -195,7 +195,11 @@ const insertedJob = await pool.query(
     asString(body.state),
     asString(body.zip),
 
-    asString(body.custSource) ||
+    asString(body.lead_source) ||
+      "estimator",
+
+    asString(body.lead_source_detail) ||
+      asString(body.custSource) ||
       asString(body.source) ||
       asString(body.heardAbout) ||
       "instant_estimator",
@@ -328,7 +332,7 @@ const insertedJob = await pool.query(
     const phone = asString(body.phone);
     const email = asString(body.email);
 
-    const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email);
+    const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, asString(body.address));
 
     const insertedJob = await pool.query(
       `insert into jobs (

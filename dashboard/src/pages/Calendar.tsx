@@ -115,7 +115,7 @@ export default function CalendarPage() {
 
   function handleSelectEvent(event: CalendarEvent) {
     if (event.job_id) {
-      navigate(`/job-admin?jobId=${event.job_id}`)
+      navigate(`/job/${event.job_id}`)
       return
     }
 
