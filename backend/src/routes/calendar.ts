@@ -8,9 +8,7 @@ async function ensureCalendarTable() {
       tenant_id bigint null references tenants(id) on delete cascade,
       job_id bigint null references jobs(id) on delete set null,
       title text not null default 'Calendar Event',
-      start_at timestamptz not null,
-      end_at timestamptz not null,
-      start_time timestamptz null,
+      start_time timestamptz not null,
       end_time timestamptz null,
       location text null,
       notes text null,
@@ -25,7 +23,7 @@ async function ensureCalendarTable() {
       add column if not exists tenant_id bigint null,
       add column if not exists job_id bigint null,
       add column if not exists title text not null default 'Calendar Event',
-      add column if not exists start_time timestamptz null,
+      add column if not exists start_time timestamptz,
       add column if not exists end_time timestamptz null,
       add column if not exists location text null,
       add column if not exists notes text null,
@@ -62,8 +60,6 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           id,
           job_id,
           title,
-          start_at,
-          end_at,
           start_time,
           end_time,
           location,
@@ -73,7 +69,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           updated_at
         from calendar_events
         where tenant_id = $1
-        order by start_time asc nulls last, id asc
+        order by start_time asc, id asc
         `,
         [tenantId]
       )
@@ -122,7 +118,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           updated_at
         )
         values (
-          $1, $2, $3, $4, $5, $4, $5, $6, $7, $8, now(), now()
+          $1, $2, $3, $4, $5, $6, $7, $8, now(), now()
         )
         returning
           id,
@@ -141,7 +137,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           body.job_id ? Number(body.job_id) : null,
           String(body.title),
           String(body.start_time),
-          body.end_time ? String(body.end_time) : String(body.start_time),
+          body.end_time ? String(body.end_time) : null,
           body.location || null,
           body.notes || null,
           body.event_type || "general",
