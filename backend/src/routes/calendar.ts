@@ -8,6 +8,8 @@ async function ensureCalendarTable() {
       tenant_id bigint null references tenants(id) on delete cascade,
       job_id bigint null references jobs(id) on delete set null,
       title text not null default 'Calendar Event',
+      start_at timestamptz not null,
+      end_at timestamptz not null,
       start_time timestamptz null,
       end_time timestamptz null,
       location text null,
@@ -60,6 +62,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           id,
           job_id,
           title,
+          start_at,
+          end_at,
           start_time,
           end_time,
           location,
@@ -118,7 +122,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           updated_at
         )
         values (
-          $1, $2, $3, $4, $5, $6, $7, $8, now(), now()
+          $1, $2, $3, $4, $5, $4, $5, $6, $7, $8, now(), now()
         )
         returning
           id,
