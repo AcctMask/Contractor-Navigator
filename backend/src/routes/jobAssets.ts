@@ -21,9 +21,18 @@ function getUploadRoot() {
   return process.env.UPLOAD_ROOT || path.join(process.cwd(), "uploads")
 }
 
+async function ensureAssetCategoryColumn() {
+  await pool.query(`
+    alter table job_assets
+    add column if not exists asset_category text
+  `)
+}
+
 export async function registerJobAssetsRoutes(app: FastifyInstance) {
   app.get("/assets/:tenantSlug/job/:jobId", async (req: any, reply) => {
     try {
+      await ensureAssetCategoryColumn()
+
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
 
@@ -128,6 +137,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
   app.post("/assets/:tenantSlug/job/:jobId/upload", async (req: any, reply) => {
     try {
+      await ensureAssetCategoryColumn()
+
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
