@@ -130,14 +130,21 @@ export default function DashboardPage() {
   const stageOrder = [
     "intake_pending",
     "lead",
+    "callback",
+    "inspection",
     "estimate_sent",
-    "tarp",
+    "contract_sent",
+    "pre_production",
+    "in_production",
     "roof_repair",
     "roof_replacement",
-    "contract_sent",
-    "in_production",
+    "tarp",
+    "tarp_complete",
+    "invoiced",
     "completed",
     "paid",
+    "disqualified",
+    "dnc",
   ]
 
   const stageCounts = stageOrder.map((stage) => ({
