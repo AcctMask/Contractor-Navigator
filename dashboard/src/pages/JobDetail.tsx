@@ -497,6 +497,12 @@ export default function JobDetail() {
                   <p><strong>Customer:</strong> {job.customer_name || "—"}</p>
                   <p><strong>Phone:</strong> {job.customer_phone || "—"}</p>
                   <p><strong>Email:</strong> {job.customer_email || "—"}</p>
+
+                  <p><strong>Secondary Contact:</strong> {job.secondary_contact_name || "—"}</p>
+                  <p><strong>Secondary Type:</strong> {job.secondary_contact_type || "—"}</p>
+                  <p><strong>Secondary Phone:</strong> {job.secondary_contact_phone || "—"}</p>
+                  <p><strong>Secondary Email:</strong> {job.secondary_contact_email || "—"}</p>
+
                   <p><strong>Address:</strong> {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</p>
                   <p><strong>Source:</strong> {job.lead_source || "—"}</p>
                   <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
@@ -580,6 +586,32 @@ export default function JobDetail() {
 
               <label style={label}>Email</label>
               <input value={form.customer_email || ""} onChange={(e) => setField("customer_email", e.target.value)} style={input} />
+
+              <hr style={hr} />
+              <h3>Secondary Contact</h3>
+
+              <label style={label}>Secondary Contact Name</label>
+              <input value={form.secondary_contact_name || ""} onChange={(e) => setField("secondary_contact_name", e.target.value)} style={input} />
+
+              <label style={label}>Secondary Contact Type</label>
+              <select value={form.secondary_contact_type || ""} onChange={(e) => setField("secondary_contact_type", e.target.value)} style={input}>
+                <option value="">Select type...</option>
+                <option value="Spouse">Spouse</option>
+                <option value="Homeowner">Homeowner</option>
+                <option value="Tenant">Tenant</option>
+                <option value="Property Manager">Property Manager</option>
+                <option value="Office">Office</option>
+                <option value="Emergency Contact">Emergency Contact</option>
+                <option value="Other">Other</option>
+              </select>
+
+              <label style={label}>Secondary Phone</label>
+              <input value={form.secondary_contact_phone || ""} onChange={(e) => setField("secondary_contact_phone", e.target.value)} style={input} />
+
+              <label style={label}>Secondary Email</label>
+              <input value={form.secondary_contact_email || ""} onChange={(e) => setField("secondary_contact_email", e.target.value)} style={input} />
+
+              <hr style={hr} />
 
               <label style={label}>Address</label>
               <input value={form.address1 || ""} onChange={(e) => setField("address1", e.target.value)} style={input} />
