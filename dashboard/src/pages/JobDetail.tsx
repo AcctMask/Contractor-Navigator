@@ -329,6 +329,7 @@ export default function JobDetail() {
 
     setNoteText("")
     setStatus("Note added")
+    await loadJob()
     await loadAssets()
   }
 
