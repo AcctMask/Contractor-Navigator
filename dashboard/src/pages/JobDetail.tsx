@@ -48,6 +48,7 @@ export default function JobDetail() {
     const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
       [
         "manual_note",
+        "staff_note",
         "estimate_details",
         "lead_created",
         "lead_intent_classified",
@@ -168,7 +169,8 @@ export default function JobDetail() {
     if (kind.includes("job_archived")) return "Archived"
     if (kind.includes("alert")) return "Owner Alert"
     if (kind.includes("sales_intent")) return "Sales Intent"
-    if (kind.includes("manual_note")) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+    if (kind.includes("manual_note") || kind.includes("staff_note"))
+      return meta.author ? `Team Note — ${meta.author}` : "Team Note"
 
     return kind.replaceAll("_", " ").toUpperCase()
   }
