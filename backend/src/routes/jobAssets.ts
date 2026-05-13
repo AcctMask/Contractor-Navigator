@@ -33,6 +33,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           id,
           job_id,
           asset_type,
+          asset_category,
           bucket,
           original_name,
           stored_name,
@@ -161,6 +162,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             tenant_id,
             job_id,
             asset_type,
+            asset_category,
             bucket,
             original_name,
             stored_name,
@@ -173,11 +175,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             created_at
           )
           values
-          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
           returning
             id,
             job_id,
             asset_type,
+            asset_category,
             bucket,
             original_name,
             stored_name,
@@ -193,6 +196,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             tenantId,
             numericJobId,
             assetType,
+            String(req.body?.asset_category || "Documents"),
             "local",
             originalName,
             storedName,
@@ -224,6 +228,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               mime_type: mimetype,
               file_size_bytes: stat.size,
               uploaded_by: "Steve",
+              asset_category: String(req.body?.asset_category || "Documents"),
             }),
           ]
         )
