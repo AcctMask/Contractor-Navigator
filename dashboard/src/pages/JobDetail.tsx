@@ -90,9 +90,30 @@ export default function JobDetail() {
 
   function setCalendarField(eventId: number | string, field: string, value: string) {
     setCalendarEvents((prev) =>
-      prev.map((event) =>
-        String(event.id) === String(eventId) ? { ...event, [field]: value } : event
-      )
+      prev.map((event) => {
+        if (String(event.id) !== String(eventId)) return event
+
+        const updated = { ...event, [field]: value }
+
+        if (field === "start_time" && value) {
+          const startDate = new Date(value)
+          const currentEnd = event.end_time ? new Date(event.end_time) : null
+          const previousStart = event.start_time ? new Date(event.start_time) : null
+
+          const shouldDefaultEnd =
+            !event.end_time ||
+            (currentEnd && previousStart && currentEnd.getTime() <= previousStart.getTime())
+
+          if (!Number.isNaN(startDate.getTime()) && shouldDefaultEnd) {
+            const endDate = new Date(startDate.getTime() + 60 * 60 * 1000)
+            updated.end_time = new Date(endDate.getTime() - endDate.getTimezoneOffset() * 60000)
+              .toISOString()
+              .slice(0, 16)
+          }
+        }
+
+        return updated
+      })
     )
   }
 
@@ -682,41 +703,51 @@ export default function JobDetail() {
           calendarEvents.map((event) => (
             <div key={event.id} style={row}>
               <div style={{ width: "100%" }}>
-                <label style={label}>Title</label>
-                <input
-                  value={event.title || ""}
-                  onChange={(e) => setCalendarField(event.id, "title", e.target.value)}
-                  style={input}
-                />
+                <div style={grid2}>
+                  <div>
+                    <label style={label}>Title</label>
+                    <input
+                      value={event.title || ""}
+                      onChange={(e) => setCalendarField(event.id, "title", e.target.value)}
+                      style={input}
+                    />
+                  </div>
 
-                <label style={label}>Start Time</label>
-                <input
-                  type="datetime-local"
-                  value={event.start_time || ""}
-                  onChange={(e) => setCalendarField(event.id, "start_time", e.target.value)}
-                  style={input}
-                />
+                  <div>
+                    <label style={label}>Event Type</label>
+                    <select
+                      value={event.event_type || "general"}
+                      onChange={(e) => setCalendarField(event.id, "event_type", e.target.value)}
+                      style={input}
+                    >
+                      <option value="general">general</option>
+                      <option value="callback">callback</option>
+                      <option value="inspection">inspection</option>
+                      <option value="production">production</option>
+                      <option value="follow_up">follow_up</option>
+                    </select>
+                  </div>
 
-                <label style={label}>End Time</label>
-                <input
-                  type="datetime-local"
-                  value={event.end_time || ""}
-                  onChange={(e) => setCalendarField(event.id, "end_time", e.target.value)}
-                  style={input}
-                />
+                  <div>
+                    <label style={label}>Start Time</label>
+                    <input
+                      type="datetime-local"
+                      value={event.start_time || ""}
+                      onChange={(e) => setCalendarField(event.id, "start_time", e.target.value)}
+                      style={input}
+                    />
+                  </div>
 
-                <label style={label}>Event Type</label>
-                <select
-                  value={event.event_type || "general"}
-                  onChange={(e) => setCalendarField(event.id, "event_type", e.target.value)}
-                  style={input}
-                >
-                  <option value="general">general</option>
-                  <option value="callback">callback</option>
-                  <option value="inspection">inspection</option>
-                  <option value="production">production</option>
-                  <option value="follow_up">follow_up</option>
-                </select>
+                  <div>
+                    <label style={label}>End Time</label>
+                    <input
+                      type="datetime-local"
+                      value={event.end_time || ""}
+                      onChange={(e) => setCalendarField(event.id, "end_time", e.target.value)}
+                      style={input}
+                    />
+                  </div>
+                </div>
 
                 <label style={label}>Location</label>
                 <input
