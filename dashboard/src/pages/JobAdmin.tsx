@@ -138,59 +138,61 @@ export default function JobAdmin() {
       <div style={card}>
         <h2>Create Job</h2>
 
-        <input
-          placeholder="Customer Name"
-          value={form.customer_name}
-          onChange={(e) =>
-            setForm({ ...form, customer_name: e.target.value })
-          }
-          style={input}
-        />
+        <div style={grid2}>
+          <input
+            placeholder="Customer Name"
+            value={form.customer_name}
+            onChange={(e) =>
+              setForm({ ...form, customer_name: e.target.value })
+            }
+            style={input}
+          />
 
-        <input
-          placeholder="Phone"
-          value={form.customer_phone}
-          onChange={(e) =>
-            setForm({ ...form, customer_phone: e.target.value })
-          }
-          style={input}
-        />
+          <input
+            placeholder="Phone"
+            value={form.customer_phone}
+            onChange={(e) =>
+              setForm({ ...form, customer_phone: e.target.value })
+            }
+            style={input}
+          />
 
-        <input
-          placeholder="Email"
-          value={form.customer_email}
-          onChange={(e) =>
-            setForm({ ...form, customer_email: e.target.value })
-          }
-          style={input}
-        />
+          <input
+            placeholder="Email"
+            value={form.customer_email}
+            onChange={(e) =>
+              setForm({ ...form, customer_email: e.target.value })
+            }
+            style={input}
+          />
 
-        <input
-          placeholder="Address"
-          value={form.address1}
-          onChange={(e) =>
-            setForm({ ...form, address1: e.target.value })
-          }
-          style={input}
-        />
+          <input
+            placeholder="Address"
+            value={form.address1}
+            onChange={(e) =>
+              setForm({ ...form, address1: e.target.value })
+            }
+            style={input}
+          />
 
-        <input
-          placeholder="City"
-          value={form.city}
-          onChange={(e) =>
-            setForm({ ...form, city: e.target.value })
-          }
-          style={input}
-        />
+          <input
+            placeholder="City"
+            value={form.city}
+            onChange={(e) =>
+              setForm({ ...form, city: e.target.value })
+            }
+            style={input}
+          />
 
-        <input
-          placeholder="Zip"
-          value={form.zip}
-          onChange={(e) =>
-            setForm({ ...form, zip: e.target.value })
-          }
-          style={input}
-        />
+          <input
+            placeholder="Zip"
+            value={form.zip}
+            onChange={(e) =>
+              setForm({ ...form, zip: e.target.value })
+            }
+            style={input}
+          />
+        </div>
 
         <button onClick={createJob} style={button}>
           Create Job
@@ -240,6 +242,12 @@ const button: React.CSSProperties = {
   marginTop: 5,
   padding: "10px 14px",
   cursor: "pointer",
+}
+
+const grid2: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 12,
 }
 
 const jobRow: React.CSSProperties = {
