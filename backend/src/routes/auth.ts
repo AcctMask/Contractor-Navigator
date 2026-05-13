@@ -7,6 +7,7 @@ import {
   listInvitationsByTenantSlug,
   listUsersByTenantSlug,
   loginUserByTenantSlug,
+  changePasswordForUser,
 } from "../services/authService"
 
 const APP_BASE_URL =
@@ -110,6 +111,33 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+
+  app.post("/auth/change-password", async (request: any, reply) => {
+    try {
+      const token = getBearerToken(request)
+
+      if (!token) {
+        reply.code(401)
+        return { ok: false, error: "Unauthorized" }
+      }
+
+      const { currentPassword, newPassword } = request.body || {}
+
+      const result = await changePasswordForUser(token, {
+        currentPassword,
+        newPassword,
+      })
+
+      return { ok: true, ...result }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || String(err),
+      }
     }
   })
 

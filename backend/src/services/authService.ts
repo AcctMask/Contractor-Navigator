@@ -428,3 +428,69 @@ export async function listInvitationsByTenantSlug(tenantSlug: string) {
 
   return result.rows
 }
+
+
+export async function changePasswordForUser(
+  token: string,
+  input: {
+    currentPassword: string
+    newPassword: string
+  }
+) {
+  await ensureAuthTables()
+
+  const decoded = verifyToken(token)
+
+  const currentPassword = String(input.currentPassword || "")
+  const newPassword = String(input.newPassword || "")
+
+  if (!currentPassword) {
+    throw new Error("Current password required")
+  }
+
+  if (!newPassword || newPassword.length < 6) {
+    throw new Error("New password must be at least 6 characters")
+  }
+
+  const result = await pool.query(
+    `
+    select
+      id,
+      password_hash
+    from app_users
+    where id = $1
+    limit 1
+    `,
+    [decoded.sub]
+  )
+
+  if (!result.rowCount) {
+    throw new Error("User not found")
+  }
+
+  const user = result.rows[0]
+
+  const valid = await bcrypt.compare(
+    currentPassword,
+    user.password_hash
+  )
+
+  if (!valid) {
+    throw new Error("Current password incorrect")
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10)
+
+  await pool.query(
+    `
+    update app_users
+    set
+      password_hash = $1,
+      updated_at = now()
+    where id = $2
+    `,
+    [passwordHash, user.id]
+  )
+
+  return { ok: true }
+}
