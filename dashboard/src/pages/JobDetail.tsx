@@ -637,22 +637,28 @@ export default function JobDetail() {
       <section style={card}>
         <h2>Stage / Bot Controls</h2>
 
-        <label style={label}>Stage</label>
-        <select value={stage} onChange={(e) => setStage(e.target.value)} style={input}>
-          {STAGES.map((item) => (
-            <option key={item} value={item}>{item}</option>
-          ))}
-        </select>
+        <div style={grid2}>
+          <div>
+            <label style={label}>Stage</label>
+            <select value={stage} onChange={(e) => setStage(e.target.value)} style={input}>
+              {STAGES.map((item) => (
+                <option key={item} value={item}>{item}</option>
+              ))}
+            </select>
+          </div>
 
-        <label style={label}>CRM Substatus</label>
-        <input value={crmSubstatus} onChange={(e) => setCrmSubstatus(e.target.value)} style={input} />
+          <div>
+            <label style={label}>CRM Substatus</label>
+            <input value={crmSubstatus} onChange={(e) => setCrmSubstatus(e.target.value)} style={input} />
 
-        <label style={checkRow}>
-          <input type="checkbox" checked={botPaused} onChange={(e) => setBotPaused(e.target.checked)} />
-          Pause bot for this job
-        </label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={botPaused} onChange={(e) => setBotPaused(e.target.checked)} />
+              Pause bot for this job
+            </label>
 
-        <button onClick={saveStage} style={button}>Save Stage</button>
+            <button onClick={saveStage} style={button}>Save Stage</button>
+          </div>
+        </div>
       </section>
 
       <section style={card}>
@@ -855,6 +861,14 @@ const label: CSSProperties = { display: "block", marginBottom: 6 }
 const checkRow: CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }
 const buttonRow: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap" }
 const button: CSSProperties = { padding: "10px 14px", cursor: "pointer" }
+
+const grid2: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 16,
+  alignItems: "start",
+}
+
 const dangerButton: CSSProperties = { padding: "10px 14px", cursor: "pointer", background: "#7f1d1d", color: "white", border: "none", borderRadius: 8 }
 const linkStyle: CSSProperties = { color: "#93c5fd" }
 const success: CSSProperties = { color: "#86efac" }
