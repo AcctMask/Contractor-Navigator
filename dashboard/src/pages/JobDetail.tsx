@@ -849,8 +849,8 @@ const badge: CSSProperties = {
   fontWeight: 800,
   letterSpacing: 0.3,
 }
-const input: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, marginBottom: 12 }
-const textarea: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, minHeight: 90, marginBottom: 12 }
+const input: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, marginBottom: 12, fontSize: 16 }
+const textarea: CSSProperties = { display: "block", width: "100%", boxSizing: "border-box", padding: 10, minHeight: 90, marginBottom: 12, fontSize: 16, lineHeight: 1.45 }
 const label: CSSProperties = { display: "block", marginBottom: 6 }
 const checkRow: CSSProperties = { display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }
 const buttonRow: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap" }
