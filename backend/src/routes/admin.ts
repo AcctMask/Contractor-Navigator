@@ -665,13 +665,21 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       update jobs
          set customer_phone = coalesce($1, customer_phone),
              customer_email = coalesce($2, customer_email),
+             secondary_contact_name = coalesce($3, secondary_contact_name),
+             secondary_contact_phone = coalesce($4, secondary_contact_phone),
+             secondary_contact_email = coalesce($5, secondary_contact_email),
+             secondary_contact_type = coalesce($6, secondary_contact_type),
              updated_at = now()
-       where tenant_id = $3
-         and id = $4
+       where tenant_id = $7
+         and id = $8
       `,
       [
         body.customer_phone ?? null,
         body.customer_email ?? null,
+        body.secondary_contact_name ?? null,
+        body.secondary_contact_phone ?? null,
+        body.secondary_contact_email ?? null,
+        body.secondary_contact_type ?? null,
         tenantId,
         jobId
       ]
