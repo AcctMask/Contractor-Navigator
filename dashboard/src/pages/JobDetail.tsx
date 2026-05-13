@@ -548,6 +548,55 @@ export default function JobDetail() {
 
               <hr style={hr} />
 
+              <h3>Lead Source</h3>
+
+              <label style={label}>Lead Source</label>
+              <select
+                value={form.lead_source || ""}
+                onChange={(e) => setField("lead_source", e.target.value)}
+                style={input}
+              >
+                <option value="">Select source...</option>
+                <option value="Alacrity">Alacrity</option>
+                <option value="Hancock">Hancock</option>
+                <option value="Heritage">Heritage</option>
+                <option value="TPA">TPA</option>
+                <option value="Referral">Referral</option>
+                <option value="Storm">Storm</option>
+                <option value="SEO">SEO</option>
+                <option value="Estimator">Estimator</option>
+                <option value="GC Outreach">GC Outreach</option>
+                <option value="Phone Call">Phone Call</option>
+                <option value="Website">Website</option>
+                <option value="Facebook">Facebook</option>
+                <option value="Google">Google</option>
+                <option value="Other">Other</option>
+              </select>
+
+              {form.lead_source === "Other" ? (
+                <>
+                  <label style={label}>Custom Lead Source</label>
+                  <input
+                    value={form.lead_source_detail || ""}
+                    onChange={(e) => setField("lead_source_detail", e.target.value)}
+                    placeholder="Enter custom source..."
+                    style={input}
+                  />
+                </>
+              ) : (
+                <>
+                  <label style={label}>Lead Source Detail</label>
+                  <input
+                    value={form.lead_source_detail || ""}
+                    onChange={(e) => setField("lead_source_detail", e.target.value)}
+                    placeholder="Optional detail, campaign, company, or note..."
+                    style={input}
+                  />
+                </>
+              )}
+
+              <hr style={hr} />
+
               <h3>Claim / Insurance Info</h3>
 
               <label style={label}>Carrier</label>
