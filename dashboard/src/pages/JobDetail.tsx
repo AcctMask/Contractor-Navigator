@@ -17,6 +17,7 @@ export default function JobDetail() {
   const [assets, setAssets] = useState<any[]>([])
   const [notes, setNotes] = useState<any[]>([])
   const [files, setFiles] = useState<FileList | null>(null)
+  const [uploadCategory, setUploadCategory] = useState("Documents")
   const [noteText, setNoteText] = useState("")
   const [stage, setStage] = useState("lead")
   const [crmSubstatus, setCrmSubstatus] = useState("")
@@ -370,6 +371,7 @@ export default function JobDetail() {
 
     try {
       const formData = new FormData()
+      formData.append("asset_category", uploadCategory)
       selectedFiles.forEach((file) => formData.append("file", file))
 
       const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
@@ -765,9 +767,35 @@ export default function JobDetail() {
 
       <section style={card}>
         <h2>Upload Files / Photos</h2>
-        <input type="file" multiple onChange={(e) => setFiles(e.target.files)} style={input} />
-        <button onClick={uploadFiles} style={button}>Upload Selected Files</button>
-        {files && files.length > 0 ? <p>{files.length} file(s) selected.</p> : null}
+
+        <label style={label}>Upload Category</label>
+        <select
+          value={uploadCategory}
+          onChange={(e) => setUploadCategory(e.target.value)}
+          style={input}
+        >
+          <option value="Documents">Documents</option>
+          <option value="Roof">Roof</option>
+          <option value="Tarp">Tarp</option>
+          <option value="Repairs">Repairs</option>
+        </select>
+
+        <input
+          type="file"
+          multiple
+          onChange={(e) => setFiles(e.target.files)}
+          style={input}
+        />
+
+        <button onClick={uploadFiles} style={button}>
+          Upload Selected Files
+        </button>
+
+        {files && files.length > 0 ? (
+          <p>
+            {files.length} file(s) selected for {uploadCategory}
+          </p>
+        ) : null}
       </section>
 
       <section style={card}>
@@ -780,6 +808,10 @@ export default function JobDetail() {
             <div key={asset.id} style={row}>
               <div>
                 <strong>{asset.original_name || asset.file_name || "File"}</strong>
+                <p>
+                  <strong>Category:</strong> {asset.asset_category || "Documents"}
+                </p>
+
                 <p>
                   {asset.mime_type || "file"} —{" "}
                   {asset.size_bytes ? `${Math.round(Number(asset.size_bytes) / 1024)} KB` : "unknown size"}
