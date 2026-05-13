@@ -66,6 +66,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         select
           id,
           message,
+          meta,
           created_at
         from timeline_events
         where tenant_id = $1
@@ -298,7 +299,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
-      const { message } = req.body || {}
+      const { message, author } = req.body || {}
+      const noteAuthor = String(author || "Team").trim() || "Team"
 
       if (!String(message || "").trim()) {
         throw new Error("Note is required")
@@ -307,15 +309,21 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const result = await pool.query(
         `
         insert into timeline_events
-          (tenant_id, job_id, kind, message, created_at)
+          (tenant_id, job_id, kind, message, meta, created_at)
         values
-          ($1,$2,'staff_note',$3,now())
+          ($1,$2,'staff_note',$3,$4::jsonb,now())
         returning
           id,
           message,
+          meta,
           created_at
         `,
-        [tenantId, Number(jobId), String(message).trim()]
+        [
+          tenantId,
+          Number(jobId),
+          String(message).trim(),
+          JSON.stringify({ author: noteAuthor }),
+        ]
       )
 
       return { ok: true, note: result.rows[0] }
