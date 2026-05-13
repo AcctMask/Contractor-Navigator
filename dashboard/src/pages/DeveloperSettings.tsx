@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { getToken } from "../lib/auth"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 
@@ -16,6 +17,11 @@ type DevSettings = {
 
 export default function DeveloperSettings() {
   const [settings, setSettings] = useState<DevSettings | null>(null)
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordStatus, setPasswordStatus] = useState("")
+  const [passwordError, setPasswordError] = useState("")
 
   useEffect(() => {
     fetch(`${API_BASE}/admin/dev-settings/g2g-roofing`)
@@ -51,6 +57,42 @@ export default function DeveloperSettings() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     })
+  }
+
+  async function changePassword() {
+    setPasswordError("")
+    setPasswordStatus("")
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError("All password fields are required")
+      return
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New passwords do not match")
+      return
+    }
+
+    const res = await fetch(`${API_BASE}/auth/change-password`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setPasswordError(data?.error || "Password change failed")
+      return
+    }
+
+    setPasswordStatus("Password updated successfully")
+    setCurrentPassword("")
+    setNewPassword("")
+    setConfirmPassword("")
   }
 
   if (!settings) return <div style={{ padding: 20 }}>Loading...</div>
@@ -92,6 +134,23 @@ export default function DeveloperSettings() {
 
   return (
     <div style={{ padding: 40 }}>
+      <div style={card}>
+        <h2>Change Password</h2>
+
+        <label style={label}>Current Password</label>
+        <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={input} />
+
+        <label style={label}>New Password</label>
+        <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={input} />
+
+        <label style={label}>Confirm New Password</label>
+        <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={input} />
+
+        <button onClick={changePassword}>Update Password</button>
+
+        {passwordStatus ? <p style={{ color: "#4ade80" }}>{passwordStatus}</p> : null}
+        {passwordError ? <p style={{ color: "#f87171" }}>{passwordError}</p> : null}
+      </div>
 
       {renderTiming("lead_timings_minutes", "Lead")}
       {renderMessages("lead_messages", "Lead")}
@@ -109,4 +168,27 @@ export default function DeveloperSettings() {
 
     </div>
   )
+}
+
+
+const card: React.CSSProperties = {
+  background: "#111827",
+  color: "white",
+  borderRadius: 14,
+  padding: 20,
+  marginBottom: 30,
+}
+
+const label: React.CSSProperties = {
+  display: "block",
+  marginBottom: 6,
+}
+
+const input: React.CSSProperties = {
+  display: "block",
+  width: "100%",
+  boxSizing: "border-box",
+  padding: 10,
+  marginBottom: 12,
+  fontSize: 16,
 }
