@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
+import { getMe, type AuthUser } from "../lib/auth"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
@@ -26,6 +27,7 @@ export default function JobDetail() {
   const [error, setError] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [form, setForm] = useState<any>({})
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [calendarEvents, setCalendarEvents] = useState<any[]>([])
 
   async function loadJob() {
@@ -339,7 +341,10 @@ export default function JobDetail() {
     const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: noteText }),
+      body: JSON.stringify({
+        message: noteText,
+        author: currentUser?.full_name || currentUser?.email || "Team",
+      }),
     })
 
     const data = await res.json()
@@ -445,6 +450,10 @@ export default function JobDetail() {
     setStatus("File deleted")
     await loadAssets()
   }
+
+  useEffect(() => {
+    getMe().then(setCurrentUser).catch(() => setCurrentUser(null))
+  }, [])
 
   useEffect(() => {
     loadJob()
