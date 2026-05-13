@@ -460,73 +460,85 @@ export default function JobDetail() {
         {job ? (
           !isEditing ? (
             <>
-              <p><strong>Customer:</strong> {job.customer_name || "—"}</p>
-              <p><strong>Phone:</strong> {job.customer_phone || "—"}</p>
-              <p><strong>Email:</strong> {job.customer_email || "—"}</p>
-              <p><strong>Address:</strong> {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</p>
-              <p><strong>Source:</strong> {job.lead_source || "—"}</p>
-              <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
-              <p><strong>Job Type:</strong> {job.job_type || "—"}</p>
-              <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
+              <div style={grid2}>
+                <div>
+                  <h3 style={{ marginTop: 0 }}>Job / Customer Details</h3>
+
+                  <p><strong>Customer:</strong> {job.customer_name || "—"}</p>
+                  <p><strong>Phone:</strong> {job.customer_phone || "—"}</p>
+                  <p><strong>Email:</strong> {job.customer_email || "—"}</p>
+                  <p><strong>Address:</strong> {[job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"}</p>
+                  <p><strong>Source:</strong> {job.lead_source || "—"}</p>
+                  <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
+                  <p><strong>Job Type:</strong> {job.job_type || "—"}</p>
+                  <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
+                </div>
+
+                <div>
+                  <h3 style={{ marginTop: 0 }}>Claim / Insurance Info</h3>
+
+                  <p><strong>Carrier:</strong> {job.carrier || "—"}</p>
+                  <p><strong>Claim #:</strong> {job.claim_number || "—"}</p>
+                  <p><strong>Policy Holder:</strong> {job.policy_holder || "—"}</p>
+                  <p><strong>Adjuster:</strong> {job.adjuster_name || "—"}</p>
+                  <p><strong>Adjuster Phone:</strong> {job.adjuster_phone || "—"}</p>
+                  <p><strong>Adjuster Email:</strong> {job.adjuster_email || "—"}</p>
+                  <p><strong>Damage Location:</strong> {job.damage_location || "—"}</p>
+                  <p><strong>Damage Summary:</strong> {job.damage_summary || "—"}</p>
+                </div>
+              </div>
 
               {(job.stage === "intake_pending" || job.stage === "lead") && (
-                <div style={decisionBox}>
-                  <div style={decisionTitle}>Intake Decision</div>
-                  <div style={decisionHelp}>
-                    Use these after a human reviews the AI voice intake.
+                <>
+                  <hr style={hr} />
+
+                  <div style={decisionBox}>
+                    <div style={decisionTitle}>Intake Decision</div>
+
+                    <div style={decisionHelp}>
+                      Use these after a human reviews the AI voice intake.
+                    </div>
+
+                    <div style={decisionButtons}>
+                      <button
+                        style={primaryButton}
+                        onClick={() =>
+                          applyIntakeDecision(
+                            "lead",
+                            "Qualified from AI voice intake after manual review."
+                          )
+                        }
+                      >
+                        Qualify as Lead
+                      </button>
+
+                      <button
+                        style={secondaryButton}
+                        onClick={() =>
+                          applyIntakeDecision(
+                            "intake_pending",
+                            "More information requested after AI voice intake review."
+                          )
+                        }
+                      >
+                        Request More Info
+                      </button>
+
+                      <button
+                        style={dangerButton}
+                        onClick={() =>
+                          applyIntakeDecision(
+                            "disqualified",
+                            "Disqualified after AI voice intake review."
+                          )
+                        }
+                      >
+                        Disqualify
+                      </button>
+                    </div>
                   </div>
-
-                  <div style={decisionButtons}>
-                    <button
-                      style={primaryButton}
-                      onClick={() =>
-                        applyIntakeDecision(
-                          "lead",
-                          "Qualified from AI voice intake after manual review."
-                        )
-                      }
-                    >
-                      Qualify as Lead
-                    </button>
-
-                    <button
-                      style={secondaryButton}
-                      onClick={() =>
-                        applyIntakeDecision(
-                          "intake_pending",
-                          "More information requested after AI voice intake review."
-                        )
-                      }
-                    >
-                      Request More Info
-                    </button>
-
-                    <button
-                      style={dangerButton}
-                      onClick={() =>
-                        applyIntakeDecision(
-                          "disqualified",
-                          "Disqualified after AI voice intake review."
-                        )
-                      }
-                    >
-                      Disqualify
-                    </button>
-                  </div>
-                </div>
+                </>
               )}
-
-              <hr style={hr} />
-
-              <h3>Claim / Insurance Info</h3>
-              <p><strong>Carrier:</strong> {job.carrier || "—"}</p>
-              <p><strong>Claim #:</strong> {job.claim_number || "—"}</p>
-              <p><strong>Policy Holder:</strong> {job.policy_holder || "—"}</p>
-              <p><strong>Adjuster:</strong> {job.adjuster_name || "—"}</p>
-              <p><strong>Adjuster Phone:</strong> {job.adjuster_phone || "—"}</p>
-              <p><strong>Adjuster Email:</strong> {job.adjuster_email || "—"}</p>
-              <p><strong>Damage Location:</strong> {job.damage_location || "—"}</p>
-              <p><strong>Damage Summary:</strong> {job.damage_summary || "—"}</p>
             </>
           ) : (
             <>
