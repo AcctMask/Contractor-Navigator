@@ -118,20 +118,22 @@ export default function JobAdmin() {
       <div style={card}>
         <h2>Search Jobs</h2>
 
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, phone, address"
-          style={input}
-        />
+        <div style={searchRow}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name, phone, address"
+            style={{ ...input, marginBottom: 0 }}
+          />
 
-        <button onClick={searchJobs} style={button}>
-          Search
-        </button>
+          <button onClick={searchJobs} style={{ ...button, marginTop: 0 }}>
+            Search
+          </button>
 
-        <button onClick={loadAllJobs} style={button}>
-          Load All Jobs
-        </button>
+          <button onClick={loadAllJobs} style={{ ...button, marginTop: 0 }}>
+            Load All Jobs
+          </button>
+        </div>
       </div>
 
       {/* CREATE */}
@@ -248,6 +250,13 @@ const grid2: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: 12,
+}
+
+const searchRow: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+  gap: 10,
+  alignItems: "center",
 }
 
 const jobRow: React.CSSProperties = {
