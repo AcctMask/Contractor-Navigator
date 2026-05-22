@@ -314,6 +314,50 @@ const insertedJob = await pool.query(
       ]
     );
 
+
+    try {
+      await fetch(
+        process.env.AA_ACTIVITY_GATEWAY_URL ||
+          "https://actual-assistant-owner-controls.vercel.app/api/record-activity",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-aa-activity-secret":
+              process.env.AA_ACTIVITY_GATEWAY_SECRET || "",
+          },
+          body: JSON.stringify({
+            tenant_slug: tenantSlug,
+            module_id: "instant_estimator",
+            module_name: "Instant Roof Estimator",
+            activity_type: "estimate_request_created",
+            title: "New estimate request received",
+            description:
+              "Instant estimator generated a homeowner roof estimate request.",
+            source: "website_estimator",
+            metadata: {
+              customer_name: asString(body.name),
+              phone: asString(body.phone),
+              email: asString(body.email),
+              address: asString(body.address),
+              city: asString(body.city),
+              zip: asString(body.zip),
+              roof_type: asString(body.roofType),
+              estimate_low: body.estimateLow
+                ? Number(body.estimateLow)
+                : null,
+              estimate_high: body.estimateHigh
+                ? Number(body.estimateHigh)
+                : null,
+              job_id: jobId,
+            },
+          }),
+        }
+      );
+    } catch (err) {
+      console.error("Failed to report estimator activity", err);
+    }
+
     return reply.send({
       ok: true,
       job_id: jobId,
