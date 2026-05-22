@@ -81,6 +81,7 @@ import {
 import {
   getVoiceFinalConfirmation,
   getVoiceStatusResponse,
+  getVoiceSummary,
   saveVoiceAddress,
   saveVoiceCallbackNumber,
   saveVoiceCallbackTime,
@@ -859,6 +860,7 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     await saveVoiceCallbackTime(String(tenantSlug), Number(jobId), callbackTime)
     await sendVoiceIntakeAlert(String(tenantSlug), Number(jobId))
 
+    const summary = await getVoiceSummary(String(tenantSlug), Number(jobId))
     const finalMessage = await getVoiceFinalConfirmation(String(tenantSlug), Number(jobId))
     const tenantId = await getTenantIdBySlug(String(tenantSlug))
 
@@ -887,6 +889,12 @@ async function registerTwilioWebhook(app: FastifyInstance) {
         job_id: Number(jobId),
         call_sid: String(callSid || ""),
         caller: from,
+        customer_name: summary.customerName,
+        property_address: summary.propertyAddress,
+        callback_number: summary.callbackNumber,
+        callback_time: summary.callbackTime,
+        reason: summary.reason,
+        emergency_tarp_requested: summary.emergencyTarpRequested,
       },
     });
 
