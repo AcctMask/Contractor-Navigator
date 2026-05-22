@@ -44,6 +44,48 @@ import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
 import { isPhoneDnc } from "./dncService"
 
+
+
+async function reportAaCustomerActivity(payload: {
+  tenant_slug: string;
+  module_id: string;
+  module_name: string;
+  activity_type: string;
+  title: string;
+  description?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const gatewayUrl =
+    process.env.AA_ACTIVITY_GATEWAY_URL ||
+    "https://actual-assistant-owner-controls.vercel.app/api/record-activity";
+
+  const gatewaySecret = process.env.AA_ACTIVITY_GATEWAY_SECRET;
+
+  if (!gatewaySecret) {
+    console.warn("Skipping AA activity report: missing AA_ACTIVITY_GATEWAY_SECRET");
+    return;
+  }
+
+  try {
+    const response = await fetch(gatewayUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-aa-activity-secret": gatewaySecret,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      console.warn("AA activity report failed:", response.status, details);
+    }
+  } catch (err) {
+    console.warn("AA activity report error:", err);
+  }
+}
+
 type JobRow = {
   id: number
   tenant_id: number
@@ -728,6 +770,24 @@ async function sendAutoClassificationReply(
       }
     )
 
+    await reportAaCustomerActivity({
+      tenant_slug: settings.tenant_slug || "g2g-roofing",
+      module_id: "ai_followup",
+      module_name: "AI Follow-Up & After-Hours Assistant",
+      activity_type: "ai_sms_sent",
+      title: "AI follow-up text sent",
+      description: replyMessage,
+      source: "ai_followup_sms",
+      metadata: {
+        customer_name: job.customer_name || null,
+        phone,
+        job_id: jobId,
+        stage: job.stage || null,
+        classification,
+        twilio_sid: sms.sid,
+      },
+    })
+
     return { sent: true, to: phone, twilio_sid: sms.sid }
   } catch (err: any) {
     await addTimelineEvent(
@@ -1321,6 +1381,25 @@ export async function handleInboundMessageByTenantSlug(
     message: trimmed,
     customer_name: job.customer_name || null,
     stage: job.stage || null,
+  })
+
+
+  await reportAaCustomerActivity({
+    tenant_slug: tenantSlug,
+    module_id: "ai_followup",
+    module_name: "AI Follow-Up & After-Hours Assistant",
+    activity_type: "customer_sms_reply",
+    title: "Homeowner replied to AI conversation",
+    description: trimmed,
+    source: "twilio_inbound_sms",
+    metadata: {
+      customer_name: job.customer_name || null,
+      phone: callbackNumber || from || null,
+      job_id: jobId,
+      stage: job.stage || null,
+      message: trimmed,
+      needs_attention: true,
+    },
   })
 
   const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
