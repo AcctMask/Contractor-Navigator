@@ -447,6 +447,47 @@ async function getOrCreateVoiceJob(tenantSlug: string, from: string | null, call
   }
 }
 
+
+async function reportAaCustomerActivity(payload: {
+  tenant_slug: string;
+  module_id: string;
+  module_name: string;
+  activity_type: string;
+  title: string;
+  description?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const gatewayUrl =
+    process.env.AA_ACTIVITY_GATEWAY_URL ||
+    "https://actual-assistant-owner-controls.vercel.app/api/record-activity";
+
+  const gatewaySecret = process.env.AA_ACTIVITY_GATEWAY_SECRET;
+
+  if (!gatewaySecret) {
+    console.warn("Skipping AA activity report: missing AA_ACTIVITY_GATEWAY_SECRET");
+    return;
+  }
+
+  try {
+    const response = await fetch(gatewayUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-aa-activity-secret": gatewaySecret,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      console.warn("AA activity report failed:", response.status, details);
+    }
+  } catch (err) {
+    console.warn("AA activity report error:", err);
+  }
+}
+
 async function sendPostCallFollowupText(
   tenantId: number,
   jobId: number,
@@ -832,6 +873,22 @@ async function registerTwilioWebhook(app: FastifyInstance) {
         call_sid: String(callSid || ""),
       }
     )
+
+    await reportAaCustomerActivity({
+      tenant_slug: String(tenantSlug),
+      module_id: "ai_followup",
+      module_name: "AI Follow-Up & After-Hours Assistant",
+      activity_type: "voice_ai_response_spoken",
+      title: "AI completed voice intake",
+      description: "AI captured caller details and delivered the final voice response.",
+      source: "twilio_voice_intake",
+      metadata: {
+        tenant_id: tenantId,
+        job_id: Number(jobId),
+        call_sid: String(callSid || ""),
+        caller: from,
+      },
+    });
 
     await sendPostCallFollowupText(
       tenantId,
