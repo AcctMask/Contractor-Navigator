@@ -41,6 +41,33 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         where kind in ('workflow_started', 'workflow_planned', 'workflow_step')
       `)
 
+      const leadSourceResult = await pool.query(`
+        select
+          coalesce(nullif(trim(lead_source), ''), 'unknown') as source,
+          count(*)::int as total
+        from jobs
+        group by coalesce(nullif(trim(lead_source), ''), 'unknown')
+        order by total desc
+      `)
+
+      const leadSourceDetailResult = await pool.query(`
+        select
+          coalesce(nullif(trim(lead_source_detail), ''), 'unknown') as source_detail,
+          count(*)::int as total
+        from jobs
+        group by coalesce(nullif(trim(lead_source_detail), ''), 'unknown')
+        order by total desc
+      `)
+
+      const marketingCampaignResult = await pool.query(`
+        select
+          coalesce(nullif(trim(marketing_campaign), ''), 'unknown') as campaign,
+          count(*)::int as total
+        from jobs
+        group by coalesce(nullif(trim(marketing_campaign), ''), 'unknown')
+        order by total desc
+      `)
+
       return reply.send({
         ok: true,
         source: "contractor-navigator",
@@ -52,7 +79,10 @@ export async function registerReportingRoutes(app: FastifyInstance) {
           ai_activity: aiActivityResult.rows[0]?.total || 0
         },
         stage_breakdown: stagesResult.rows,
-        timeline_activity: timelineResult.rows
+        timeline_activity: timelineResult.rows,
+        lead_source_summary: leadSourceResult.rows,
+        lead_source_detail_summary: leadSourceDetailResult.rows,
+        marketing_campaign_summary: marketingCampaignResult.rows
       })
     } catch (err: any) {
       console.error("crm reporting route failed", err)
