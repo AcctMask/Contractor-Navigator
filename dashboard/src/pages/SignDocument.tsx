@@ -5,6 +5,16 @@ const API = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onren
 
 type SignStatus = "loading" | "ready" | "error" | "signed" | "submitting"
 
+function moneyDisplay(value: any) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return null
+  return num.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  })
+}
+
 export default function SignDocument() {
   const { id } = useParams()
   const [doc, setDoc] = useState<any>(null)
@@ -94,21 +104,15 @@ export default function SignDocument() {
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
+  const lineItems = Array.isArray(payload.estimate_line_items) ? payload.estimate_line_items : []
+  const termsAndConditions =
+    payload.terms_and_conditions ||
+    "Price is based on the visible scope and information available at the time of estimate. Hidden damage, rotten decking, code-required upgrades, permit requirements, material changes, customer-requested changes, or insurance scope changes may require a written change order. Work scheduling is subject to weather, material availability, and production capacity."
 
   const amountDisplay = useMemo(() => {
-    const formatMoney = (value: any) => {
-      const num = Number(value)
-      if (!Number.isFinite(num)) return null
-      return num.toLocaleString(undefined, {
-        style: "currency",
-        currency: "USD",
-        maximumFractionDigits: 0,
-      })
-    }
-
-    const agreed = formatMoney(agreedAmount)
-    const low = formatMoney(lowAmount)
-    const high = formatMoney(highAmount)
+    const agreed = moneyDisplay(agreedAmount)
+    const low = moneyDisplay(lowAmount)
+    const high = moneyDisplay(highAmount)
 
     if (agreed) return agreed
     if (low && high) return `${low} - ${high}`
@@ -177,23 +181,49 @@ export default function SignDocument() {
               <Info label="Property Address" value={propertyAddress} />
               <Info label="Roof Type" value={roofType} />
               <Info label="Roof Size" value={String(roofSquares)} />
-              <Info label="Estimated Amount" value={amountDisplay} />
+              <Info label="Price" value={amountDisplay} />
+            </div>
+
+            <div style={docBox}>
+              <h3 style={docBoxTitle}>Estimate Details</h3>
+
+              {lineItems.length ? (
+                <div style={{ display: "grid", gap: "8px", marginBottom: "18px" }}>
+                  {lineItems.map((item: any, index: number) => (
+                    <div
+                      key={index}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: "12px",
+                        borderBottom: "1px solid rgba(255,255,255,0.12)",
+                        paddingBottom: "8px",
+                      }}
+                    >
+                      <div style={docText}>{item.description || "Estimate item"}</div>
+                      <div style={{ ...docText, fontWeight: 800 }}>
+                        {moneyDisplay(item.amount) || "—"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <p style={docText}>
+                Additional remarks: {remarks}
+              </p>
+            </div>
+
+            <div style={docBox}>
+              <h3 style={docBoxTitle}>Terms and Conditions</h3>
+              <p style={docText}>{termsAndConditions}</p>
             </div>
 
             <div style={docBox}>
               <h3 style={docBoxTitle}>Authorization</h3>
               <p style={docText}>
-                By signing below, you authorize Good2Go Roofing to prepare, present,
-                and move forward with the work described for this property based on
-                the applicable document package and project details.
-              </p>
-              <p style={docText}>
-                Final scope, pricing, materials, and claim-related handling will follow
-                the terms of the selected document package and any approved insurance,
-                estimate, or project-specific information associated with this file.
-              </p>
-              <p style={docText}>
-                Additional remarks: {remarks}
+                By signing below, you authorize Good2Go Roofing to proceed with the work
+                described for this property based on this estimate and the project details shown above.
               </p>
             </div>
           </section>

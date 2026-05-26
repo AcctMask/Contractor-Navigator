@@ -63,6 +63,10 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
             : Number(body.emergency_tarp_sqft),
         callback_notes: body.callback_notes,
         estimator_remarks: body.estimator_remarks,
+        estimate_line_items: Array.isArray(body.estimate_line_items)
+          ? body.estimate_line_items
+          : [],
+        terms_and_conditions: body.terms_and_conditions,
       })
 
       return {

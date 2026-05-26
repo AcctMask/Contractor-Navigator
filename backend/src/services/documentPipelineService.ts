@@ -32,6 +32,10 @@ async function ensureDocumentTables() {
   `)
 
   await pool.query(`
+    alter table job_estimate_details
+      add column if not exists estimate_line_items jsonb,
+      add column if not exists terms_and_conditions text;
+
     create table if not exists job_document_packages (
       id bigserial primary key,
       tenant_id bigint not null references tenants(id) on delete cascade,
@@ -153,6 +157,8 @@ export async function upsertEstimateDetailsByTenantSlug(
     emergency_tarp_sqft?: number | null
     callback_notes?: string | null
     estimator_remarks?: string | null
+  estimate_line_items?: Array<{ description: string; amount: number | null }>
+  terms_and_conditions?: string | null
   }
 ) {
   await ensureDocumentTables()
@@ -195,6 +201,8 @@ export async function upsertEstimateDetailsByTenantSlug(
       emergency_tarp_sqft = excluded.emergency_tarp_sqft,
       callback_notes = excluded.callback_notes,
       estimator_remarks = excluded.estimator_remarks,
+      estimate_line_items = excluded.estimate_line_items,
+      terms_and_conditions = excluded.terms_and_conditions,
       updated_at = now()
     `,
     [
@@ -306,6 +314,8 @@ export async function createDocumentPackageByTenantSlug(
       low_amount: details?.low_amount || null,
       high_amount: details?.high_amount || null,
       agreed_amount: details?.agreed_amount || null,
+      estimate_line_items: Array.isArray(details?.estimate_line_items) ? details.estimate_line_items : [],
+      terms_and_conditions: details?.terms_and_conditions || null,
       estimator_remarks: details?.estimator_remarks || null,
       ready_for_signature: !!details?.agreed_amount,
     }

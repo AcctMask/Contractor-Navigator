@@ -16,6 +16,11 @@ type JobSummary = {
   customer_phone?: string | null
 }
 
+type EstimateLineItem = {
+  description: string
+  amount: number | null
+}
+
 type EstimateDetails = {
   roof_type?: string | null
   roof_squares?: number | null
@@ -29,6 +34,8 @@ type EstimateDetails = {
   emergency_tarp_sqft?: number | null
   callback_notes?: string | null
   estimator_remarks?: string | null
+  estimate_line_items?: EstimateLineItem[]
+  terms_and_conditions?: string | null
 }
 
 type DocumentPackage = {
@@ -45,6 +52,18 @@ function addressLine(job?: JobSummary | null) {
   if (!job) return "—"
   return [job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"
 }
+
+function defaultEstimateLineItems(): EstimateLineItem[] {
+  return [
+    { description: "Roof replacement / repair scope", amount: null },
+    { description: "Materials", amount: null },
+    { description: "Labor", amount: null },
+    { description: "Permit / disposal / misc.", amount: null },
+  ]
+}
+
+const DEFAULT_TERMS =
+  "Price is based on the visible scope and information available at the time of estimate. Hidden damage, rotten decking, code-required upgrades, permit requirements, material changes, customer-requested changes, or insurance scope changes may require a written change order. Work scheduling is subject to weather, material availability, and production capacity."
 
 export default function DocumentPipelinePage() {
   const [jobId, setJobId] = useState("")
@@ -66,6 +85,8 @@ export default function DocumentPipelinePage() {
     emergency_tarp_sqft: null,
     callback_notes: "",
     estimator_remarks: "",
+    estimate_line_items: defaultEstimateLineItems(),
+    terms_and_conditions: DEFAULT_TERMS,
   })
 
   function setField<K extends keyof EstimateDetails>(key: K, value: EstimateDetails[K]) {
@@ -101,6 +122,10 @@ export default function DocumentPipelinePage() {
         emergency_tarp_sqft: d.emergency_tarp_sqft ?? null,
         callback_notes: d.callback_notes || "",
         estimator_remarks: d.estimator_remarks || "",
+        estimate_line_items: Array.isArray(d.estimate_line_items) && d.estimate_line_items.length
+          ? d.estimate_line_items
+          : defaultEstimateLineItems(),
+        terms_and_conditions: d.terms_and_conditions || DEFAULT_TERMS,
       })
 
       setStatus("Pipeline loaded")
@@ -134,6 +159,67 @@ export default function DocumentPipelinePage() {
     } catch (err: any) {
       setError(err?.message || "Save failed")
       setStatus("Save failed")
+    }
+  }
+
+  function updateLineItem(index: number, key: keyof EstimateLineItem, value: string) {
+    setForm((prev) => {
+      const items = Array.isArray(prev.estimate_line_items)
+        ? [...prev.estimate_line_items]
+        : defaultEstimateLineItems()
+
+      items[index] = {
+        ...items[index],
+        [key]: key === "amount" ? (value === "" ? null : Number(value)) : value,
+      }
+
+      return { ...prev, estimate_line_items: items }
+    })
+  }
+
+  function addLineItem() {
+    setForm((prev) => ({
+      ...prev,
+      estimate_line_items: [
+        ...(Array.isArray(prev.estimate_line_items) ? prev.estimate_line_items : []),
+        { description: "", amount: null },
+      ],
+    }))
+  }
+
+  function removeLineItem(index: number) {
+    setForm((prev) => ({
+      ...prev,
+      estimate_line_items: (prev.estimate_line_items || []).filter((_, i) => i !== index),
+    }))
+  }
+
+  async function sendPackage(packageId: number) {
+    setError("")
+    setStatus("Sending package for signature...")
+
+    try {
+      const res = await fetch(`${API_BASE}/pipeline/${TENANT_SLUG}/job/${jobId}/send-package`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          package_id: packageId,
+        }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Send package failed")
+      }
+
+      setStatus("Package sent for signature")
+      await loadJob()
+    } catch (err: any) {
+      setError(err?.message || "Send package failed")
+      setStatus("Send package failed")
     }
   }
 
@@ -275,7 +361,7 @@ export default function DocumentPipelinePage() {
             </div>
 
             <div>
-              <label style={labelStyle}>Agreed Amount</label>
+              <label style={labelStyle}>Retail Price</label>
               <input
                 value={form.agreed_amount ?? ""}
                 onChange={(e) =>
@@ -368,6 +454,45 @@ export default function DocumentPipelinePage() {
             />
           </div>
 
+          <div style={{ display: "grid", gap: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Retail Estimate Line Items</label>
+              <button type="button" onClick={addLineItem} style={buttonStyle}>
+                Add Line Item
+              </button>
+            </div>
+
+            {(form.estimate_line_items || []).map((item, index) => (
+              <div key={index} style={{ display: "grid", gridTemplateColumns: "1fr 180px 92px", gap: "10px", alignItems: "center" }}>
+                <input
+                  value={item.description || ""}
+                  onChange={(e) => updateLineItem(index, "description", e.target.value)}
+                  placeholder="Description"
+                  style={inputStyle}
+                />
+                <input
+                  value={item.amount ?? ""}
+                  onChange={(e) => updateLineItem(index, "amount", e.target.value)}
+                  placeholder="Amount"
+                  style={inputStyle}
+                />
+                <button type="button" onClick={() => removeLineItem(index)} style={secondaryButtonStyle}>
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <label style={labelStyle}>Terms and Conditions</label>
+            <textarea
+              value={form.terms_and_conditions || ""}
+              onChange={(e) => setField("terms_and_conditions", e.target.value)}
+              placeholder={DEFAULT_TERMS}
+              style={{ ...textareaStyle, minHeight: "150px" }}
+            />
+          </div>
+
           <div>
             <button onClick={saveEstimateDetails} style={buttonStyle}>
               Save Estimator Details
@@ -405,6 +530,14 @@ export default function DocumentPipelinePage() {
                 <div style={{ opacity: 0.75 }}>Template: {doc.template_source || "—"}</div>
                 <div style={{ opacity: 0.65 }}>
                   Created: {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}
+                </div>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "10px" }}>
+                  <a href={`/sign/${doc.id}`} target="_blank" rel="noreferrer" style={linkButtonStyle}>
+                    View / Sign
+                  </a>
+                  <button type="button" onClick={() => sendPackage(doc.id)} style={buttonStyle}>
+                    Send For Signature
+                  </button>
                 </div>
               </div>
             ))}
@@ -454,6 +587,29 @@ const textareaStyle: React.CSSProperties = {
   padding: "14px 16px",
   fontSize: "16px",
   outline: "none",
+}
+
+const linkButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  textDecoration: "none",
+  color: "#fff",
+  background: "rgba(81, 133, 255, 0.35)",
+  border: "1px solid rgba(255,255,255,0.16)",
+  borderRadius: "14px",
+  padding: "12px 16px",
+  fontWeight: 800,
+}
+
+const secondaryButtonStyle: React.CSSProperties = {
+  color: "#fff",
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: "14px",
+  padding: "12px 14px",
+  fontWeight: 800,
+  cursor: "pointer",
 }
 
 const buttonStyle: React.CSSProperties = {
