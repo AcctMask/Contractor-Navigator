@@ -423,7 +423,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
        and c.tenant_id = j.tenant_id
       where j.tenant_id = $1
         and coalesce(j.stage, '') not in ('intake_pending', 'archived')
-        and coalesce(j.job_type, '') <> 'VOICE_INTAKE'
         and ($2::timestamptz is null or j.created_at >= $2::timestamptz)
         and ($3::timestamptz is null or j.created_at <= $3::timestamptz)
         and ($4::text is null or j.lead_source = $4::text)
