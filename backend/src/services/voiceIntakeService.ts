@@ -309,6 +309,8 @@ async function getLatestVoiceValue(
 }
 
 export async function startVoiceIntakeLead(tenantSlug: string, from: string | null) {
+  console.log("[VOICE_DIAG] startVoiceIntakeLead begin", { tenantSlug, from })
+
   const created = await createLeadFromInboundCallByTenantSlug(tenantSlug, {
     callerPhone: from,
     callerName: null,
@@ -316,6 +318,8 @@ export async function startVoiceIntakeLead(tenantSlug: string, from: string | nu
       "Inbound voice AI lead created. Caller reached Good2Go Roofing Team and entered the voice workflow.",
     source: "Phone Call",
   })
+
+  console.log("[VOICE_DIAG] startVoiceIntakeLead created", { tenantSlug, from, created })
 
   await logSystemEvent("voice_intake_started", "job", created?.job_id || null, {
     tenant_slug: tenantSlug,
@@ -502,6 +506,8 @@ export async function getVoiceSummary(
 }
 
 export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
+  console.log("[VOICE_DIAG] sendVoiceIntakeAlert begin", { tenantSlug, jobId })
+
   const ctx = await getJobContext(tenantSlug, jobId)
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const summary = await getVoiceSummary(tenantSlug, jobId)
@@ -511,6 +517,14 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     isMeaningfulVoiceReason(summary.reason)
 
   const decidedStage = qualifiesAsLead ? "lead" : "intake_pending"
+
+  console.log("[VOICE_DIAG] voice qualification", {
+    tenantSlug,
+    jobId,
+    summary,
+    qualifiesAsLead,
+    decidedStage,
+  })
 
   // Intake quality classification
   let intakeSubstatus = "waiting_on_info"
@@ -546,6 +560,13 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
 
 
   await updateVoiceIntakeStage(ctx.tenant_id, ctx.job_id, decidedStage)
+
+  console.log("[VOICE_DIAG] voice stage updated", {
+    tenantSlug,
+    jobId,
+    tenant_id: ctx.tenant_id,
+    decidedStage,
+  })
 
   await addTimelineEvent(
     ctx.tenant_id,
