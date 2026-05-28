@@ -192,6 +192,26 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
         ]
       )
 
+      if (stage && stage !== "tarp_complete") {
+        await pool.query(
+          `
+          update scheduled_actions
+          set
+            status = 'cancelled',
+            updated_at = now()
+          where tenant_id = $1
+            and job_id = $2
+            and status = 'pending'
+            and action_key = 'workflow_step'
+            and coalesce(payload->>'workflow_key', '') = 'tarp_complete_roof_conversion'
+          `,
+          [
+            tenantId,
+            Number(jobId),
+          ]
+        )
+      }
+
       if (stage) {
         await planFollowUps({
           tenant_id: tenantId,

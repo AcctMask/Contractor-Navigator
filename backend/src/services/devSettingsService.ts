@@ -30,17 +30,18 @@ function defaultSettings(): DevSettings {
     contract_messages: ["", "", "", "", ""],
 
     tarp_messages: [
-      "Hi {{name}}, your emergency tarp work is complete. The next step is reviewing the roof damage and options for permanent repair or replacement.",
-      "Following up after the tarp {{name}} — would you like help with the insurance process and roof replacement?",
-      "Tarps are temporary {{name}} — we can help move this toward a permanent solution before further damage occurs.",
-      "Final follow-up {{name}} — if you want help converting this into a full roof project, just reply here."
+      "Good2Go Roofing & Construction LLC has completed your emergency tarp service. Please remember coverage, cause of loss, and repair scope are determined by the carrier and desk adjuster after claim review. If you have questions in the meantime, feel free to reply here anytime.",
+      "Just checking in regarding your recent emergency tarp service. If you receive paperwork, estimates, or requests for information from your carrier and have questions about the process, feel free to send them over and we will do our best to help explain what you are seeing.",
+      "We know claim review can take time after severe weather events. Timely roof repairs are strongly recommended to help prevent additional water damage and interior discoloration once claim decisions are made.",
+      "If your claim process becomes delayed or difficult to navigate, Good2Go Roofing & Construction LLC License# CCC1331529 and Licensed Insurance Adjusters License# D076345 may be able to assist with communication and documentation related to authorized repairs.",
+      "If you would like, you can also request a free roof estimate anytime through our website or by contacting sales@g2groofing.com."
     ],
 
     lead_timings_minutes: [0, 1440, 2880, 4320],
     estimate_timings_minutes: [0, 1440, 4320, 7200],
     contract_timings_minutes: [0, 1440, 4320, 7200, 10080],
 
-    tarp_timings_minutes: [0, 1440, 2880, 4320]
+    tarp_timings_minutes: [180, 7200, 20160, 43200, 86400]
   }
 }
 
