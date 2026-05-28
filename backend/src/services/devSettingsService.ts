@@ -34,7 +34,7 @@ function defaultSettings(): DevSettings {
       "Just checking in regarding your recent emergency tarp service. If you receive paperwork, estimates, or requests for information from your carrier and have questions about the process, feel free to send them over and we will do our best to help explain what you are seeing.",
       "We know claim review can take time after severe weather events. Timely roof repairs are strongly recommended to help prevent additional water damage and interior discoloration once claim decisions are made.",
       "If your claim process becomes delayed or difficult to navigate, Good2Go Roofing & Construction LLC License# CCC1331529 and Licensed Insurance Adjusters License# D076345 may be able to assist with communication and documentation related to authorized repairs.",
-      "If you would like, you can also request a free roof estimate anytime through our website or by contacting sales@g2groofing.com."
+      "If you would like, you can also request a free roof estimate anytime through our website: https://g2g-instant-estimator.netlify.app/ or by contacting sales@g2groofing.com."
     ],
 
     lead_timings_minutes: [0, 1440, 2880, 4320],
