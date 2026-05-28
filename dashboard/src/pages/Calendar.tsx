@@ -10,6 +10,7 @@ import "react-big-calendar/lib/css/react-big-calendar.css"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
+const EASTERN_TIME_ZONE = "America/New_York"
 
 const localizer = dateFnsLocalizer({
   format,
@@ -125,7 +126,7 @@ export default function CalendarPage() {
   function tooltip(event: CalendarEvent) {
     return [
       event.title,
-      `Time: ${event.start.toLocaleString()} - ${event.end.toLocaleString()}`,
+      `Time: ${event.start.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })} - ${event.end.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })}`,
       `Location: ${event.location || "Not provided"}`,
       `Job ID: ${event.job_id || "Not linked"}`,
       `Notes: ${event.notes || "None"}`,
@@ -230,6 +231,7 @@ export default function CalendarPage() {
           tooltipAccessor={tooltip}
           onSelectEvent={handleSelectEvent}
           views={["month", "week", "day", "agenda"]}
+          culture="en-US"
           style={{ height: "100%" }}
         />
       </div>

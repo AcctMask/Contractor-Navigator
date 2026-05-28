@@ -639,6 +639,7 @@ export default function JobDetail() {
                 <option value="Alacrity">Alacrity</option>
                 <option value="Hancock">Hancock</option>
                 <option value="Heritage">Heritage</option>
+                <option value="Unique">Unique</option>
                 <option value="TPA">TPA</option>
                 <option value="Referral">Referral</option>
                 <option value="Storm">Storm</option>
