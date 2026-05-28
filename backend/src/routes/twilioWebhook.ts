@@ -181,10 +181,22 @@ function gatherSpeechXml(prompt: string, actionUrl: string) {
 }
 
 function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
+  const recordingCallback = `${buildBaseUrl()}/twilio/voice/recording-status`
+
   return twimlResponse(`
+  <Start>
+    <Recording
+      recordingStatusCallback="${xmlEscape(recordingCallback)}"
+      recordingStatusCallbackMethod="POST"
+    />
+  </Start>
+
+  ${sayBlock("This call may be recorded for quality and follow up purposes.")}
+
   <Gather input="speech dtmf" numDigits="1" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="${VOICE_LANGUAGE}">
     ${sayBlock(prompt)}
   </Gather>
+
   ${sayBlock("I didn’t catch that. Someone from our team will follow up shortly. Goodbye.")}
   <Hangup/>`)
 }
@@ -914,6 +926,21 @@ async function registerTwilioWebhook(app: FastifyInstance) {
   ${sayBlock("If you need anything else before we call, you can text this number.")}
   <Hangup/>`)
     )
+  })
+
+
+  app.post("/twilio/voice/recording-status", async (req, reply) => {
+    const body = (req as any).body || {}
+
+    console.log("Twilio recording callback:", {
+      callSid: body.CallSid,
+      recordingSid: body.RecordingSid,
+      recordingUrl: body.RecordingUrl,
+      recordingStatus: body.RecordingStatus,
+      recordingDuration: body.RecordingDuration,
+    })
+
+    return reply.send({ ok: true })
   })
 
   app.post("/twilio/voice/status", async (req, reply) => {
