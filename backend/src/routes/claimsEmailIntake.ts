@@ -114,23 +114,144 @@ function extractEmail(text: string) {
   return match ? match[0].trim() : null
 }
 
+function cleanParsedValue(value: string | null) {
+  if (!value) return null
+
+  return String(value)
+    .replace(/<mailto:[^>]+>/gi, "")
+    .replace(/mailto:/gi, "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function textLines(text: string) {
+  return String(text || "")
+    .replace(/<mailto:[^>]+>/gi, "")
+    .replace(/mailto:/gi, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function extractCarrierClaimFromSubject(text: string) {
+  const match = text.match(/(?:subject:\s*)?(?:fwd:\s*)?([A-Z][A-Z0-9 &.'-]+?)\s+claim\s+([A-Z0-9\-_.]+)/i)
+
+  if (!match) {
+    return { carrier: null, claimNumber: null }
+  }
+
+  return {
+    carrier: cleanParsedValue(match[1]),
+    claimNumber: cleanParsedValue(match[2]),
+  }
+}
+
+function extractAddressBlock(text: string) {
+  const lines = textLines(text)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const next = lines[i + 1] || ""
+
+    const looksLikeStreet = /^\d+\s+.+/.test(line)
+    const looksLikeCityStateZip = /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?/i.test(next)
+
+    if (looksLikeStreet && looksLikeCityStateZip) {
+      const customerName = i > 0 ? cleanParsedValue(lines[i - 1]) : null
+      return {
+        customerName,
+        propertyAddress: cleanParsedValue(`${line} ${next}`),
+      }
+    }
+  }
+
+  return { customerName: null, propertyAddress: null }
+}
+
+function extractAdjusterDetails(text: string) {
+  const lines = textLines(text)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    if (/(adjuster|claims examiner|claim examiner|claims rep|claim rep)/i.test(line)) {
+      const previous = lines[i - 1] || ""
+      const nextBlock = lines.slice(i, i + 6).join("\n")
+
+      return {
+        adjusterName: cleanParsedValue(previous),
+        adjusterPhone: extractPhone(nextBlock),
+        adjusterEmail: extractEmail(nextBlock),
+      }
+    }
+  }
+
+  return {
+    adjusterName: null,
+    adjusterPhone: null,
+    adjusterEmail: null,
+  }
+}
+
+function extractLossType(text: string) {
+  return firstMatch(text, [
+    /(?:loss type|type of loss|cause of loss|COL)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+}
+
+function extractNarrativeNotes(text: string) {
+  const explicit = firstMatch(text, [
+    /(?:notes|comments|loss description|damage description|description|special instructions|report|statement)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+
+  if (explicit) return explicit
+
+  const lines = textLines(text)
+  const usefulLines = lines.filter((line) => {
+    if (/^(begin forwarded message|from:|subject:|date:|to:|best regards|phone:|email:|dol:|col:)/i.test(line)) return false
+    if (/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(line)) return false
+    if (/^\d+\s+/.test(line)) return false
+    if (/,\s*[A-Z]{2}\s+\d{5}/i.test(line)) return false
+    if (/\b(license|claims examiner|adjusting)\b/i.test(line)) return false
+
+    return /(tarp|tarped|board up|board-up|water intrusion|leak|leaking|damage|emergency|immediate|immediately|wind|water|fire|storm)/i.test(line)
+  })
+
+  return cleanParsedValue(usefulLines.join(" "))
+}
+
+function extractServiceType(text: string) {
+  if (/\b(board up|board-up|boarding)\b/i.test(text)) return "Board Up"
+  if (/\b(emergency tarp|roof tarp|tarped|tarp)\b/i.test(text)) return "Emergency Tarp"
+  return null
+}
+
 function parseClaimsEmail(text: string) {
-  const carrier = firstMatch(text, [
-    /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
-    /(?:from|submitted by)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const subjectCarrierClaim = extractCarrierClaimFromSubject(text)
+  const addressBlock = extractAddressBlock(text)
+  const adjusterDetails = extractAdjusterDetails(text)
 
-  const claimNumber = firstMatch(text, [
-    /claim\s*(?:number|#|no\.?)?\s*[:#-]\s*([A-Z0-9\-_.]+)/i,
-  ])
+  const carrier =
+    firstMatch(text, [
+      /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
+      /(?:from|submitted by)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || subjectCarrierClaim.carrier
 
-  const customerName = firstMatch(text, [
-    /(?:homeowner name|homeowner|insured name|insured|customer name|customer|policyholder|policy holder)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const claimNumber =
+    firstMatch(text, [
+      /claim\s*(?:number|#|no\.?)?\s*[:#-]\s*([A-Z0-9\-_.]+)/i,
+    ]) || subjectCarrierClaim.claimNumber
 
-  const address = firstMatch(text, [
-    /(?:property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const customerName =
+    firstMatch(text, [
+      /(?:homeowner name|homeowner|insured name|insured|customer name|customer|policyholder|policy holder)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || addressBlock.customerName
+
+  const address =
+    firstMatch(text, [
+      /(?:property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || addressBlock.propertyAddress
 
   const customerPhone =
     firstMatch(text, [
@@ -142,37 +263,52 @@ function parseClaimsEmail(text: string) {
       /(?:customer email|homeowner email|insured email|email)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || extractEmail(text)
 
-  const adjusterName = firstMatch(text, [
-    /(?:adjuster name|desk adjuster|field adjuster|adjuster)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const adjusterName =
+    firstMatch(text, [
+      /(?:adjuster name|desk adjuster|field adjuster|adjuster|claims examiner|claim examiner)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || adjusterDetails.adjusterName
 
-  const adjusterPhone = firstMatch(text, [
-    /(?:adjuster phone|adjuster cell|desk adjuster phone|field adjuster phone)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const adjusterPhone =
+    firstMatch(text, [
+      /(?:adjuster phone|adjuster cell|desk adjuster phone|field adjuster phone)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || adjusterDetails.adjusterPhone
 
-  const adjusterEmail = firstMatch(text, [
-    /(?:adjuster email|desk adjuster email|field adjuster email)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
-
-  const notes = firstMatch(text, [
-    /(?:notes|comments|loss description|damage description|description|special instructions)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const adjusterEmail =
+    firstMatch(text, [
+      /(?:adjuster email|desk adjuster email|field adjuster email)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || adjusterDetails.adjusterEmail
 
   const emergencySqft = firstMatch(text, [
     /(?:tarp sqft|tarp square feet|emergency tarp sqft)\s*[:#-]\s*(\d+)/i,
   ])
 
+  const serviceType = extractServiceType(text)
+  const lossType = extractLossType(text)
+  const narrativeNotes = extractNarrativeNotes(text)
+
+  const notes = cleanParsedValue(
+    [
+      serviceType ? `Service Requested: ${serviceType}` : null,
+      lossType ? `Loss Type: ${lossType}` : null,
+      narrativeNotes ? `Notes: ${narrativeNotes}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ")
+  )
+
   return {
-    carrier,
-    claimNumber,
-    customerName,
-    propertyAddress: address,
-    customerPhone,
-    customerEmail,
-    adjusterName,
-    adjusterPhone,
-    adjusterEmail,
+    carrier: cleanParsedValue(carrier),
+    claimNumber: cleanParsedValue(claimNumber),
+    customerName: cleanParsedValue(customerName),
+    propertyAddress: cleanParsedValue(address),
+    customerPhone: cleanParsedValue(customerPhone),
+    customerEmail: cleanParsedValue(customerEmail),
+    adjusterName: cleanParsedValue(adjusterName),
+    adjusterPhone: cleanParsedValue(adjusterPhone),
+    adjusterEmail: cleanParsedValue(adjusterEmail),
     notes,
+    serviceType,
+    lossType,
     emergencySqft: emergencySqft ? Number(emergencySqft) : null,
   }
 }
