@@ -177,28 +177,28 @@ function extractAdjusterDetails(text: string) {
     const line = lines[i]
 
     if (/(adjuster|claims examiner|claim examiner|claims rep|claim rep)/i.test(line)) {
-      const nearbyBefore = lines.slice(Math.max(0, i - 4), i)
-      const nearbyAfter = lines.slice(i + 1, i + 5)
-      const nextBlock = lines.slice(Math.max(0, i - 4), i + 8).join("\n")
+      const before = lines.slice(Math.max(0, i - 6), i)
+      const after = lines.slice(i + 1, i + 6)
+      const block = lines.slice(Math.max(0, i - 6), i + 8).join("\n")
 
       const personName =
-        [...nearbyBefore].reverse().find((candidate) =>
+        [...before].reverse().find((candidate) =>
           /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(candidate) &&
-          !/license|appt|claim|examiner|adjusting|insurance/i.test(candidate)
+          !/license|appt|claim|examiner|adjusting|insurance|phone|email/i.test(candidate)
         ) || null
 
       const companyName =
-        nearbyAfter.find((candidate) =>
-          /adjusting|insurance|claims|services/i.test(candidate) &&
-          !/license|phone|email/i.test(candidate)
+        after.find((candidate) =>
+          /adjusting|claims|services/i.test(candidate) &&
+          !/license|phone|email|examiner/i.test(candidate)
         ) || null
 
       return {
         adjusterName: cleanParsedValue(
-          companyName && personName ? `${companyName} / ${personName}` : companyName || personName
+          companyName && personName ? `${companyName} / ${personName}` : personName || companyName
         ),
-        adjusterPhone: extractPhone(nextBlock),
-        adjusterEmail: cleanParsedValue(fromEmail) || extractEmail(nextBlock),
+        adjusterPhone: extractPhone(block),
+        adjusterEmail: cleanParsedValue(fromEmail) || extractEmail(block),
       }
     }
   }
@@ -259,6 +259,11 @@ function extractServiceType(text: string) {
   return null
 }
 
+function isInternalG2GEmail(value: string | null) {
+  if (!value) return false
+  return /@(g2groofing\.com)$/i.test(value)
+}
+
 function parseClaimsEmail(text: string) {
   const subjectCarrierClaim = extractCarrierClaimFromSubject(text)
   const addressBlock = extractAddressBlock(text)
@@ -290,10 +295,14 @@ function parseClaimsEmail(text: string) {
       /(?:primary phone|customer phone|homeowner phone|insured phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || extractPhone(text)
 
-  const customerEmail =
+  const foundCustomerEmail =
     firstMatch(text, [
       /(?:customer email|homeowner email|insured email|email)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || extractEmail(text)
+
+  const customerEmail = isInternalG2GEmail(cleanParsedValue(foundCustomerEmail))
+    ? null
+    : foundCustomerEmail
 
   const adjusterName =
     firstMatch(text, [
@@ -425,7 +434,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           address1 = coalesce($3, address1),
           claim_number = coalesce($4, claim_number),
           carrier = coalesce($5, carrier),
-          lead_source = $5,
+          lead_source = coalesce($5, lead_source),
           lead_source_detail = $6,
           adjuster_name = coalesce($7, adjuster_name),
           adjuster_phone = coalesce($8, adjuster_phone),
