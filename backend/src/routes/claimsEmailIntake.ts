@@ -171,18 +171,34 @@ function extractAddressBlock(text: string) {
 
 function extractAdjusterDetails(text: string) {
   const lines = textLines(text)
+  const fromEmail = firstMatch(text, [/from:\s*.*?([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i])
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
     if (/(adjuster|claims examiner|claim examiner|claims rep|claim rep)/i.test(line)) {
-      const previous = lines[i - 1] || ""
-      const nextBlock = lines.slice(i, i + 6).join("\n")
+      const nearbyBefore = lines.slice(Math.max(0, i - 4), i)
+      const nearbyAfter = lines.slice(i + 1, i + 5)
+      const nextBlock = lines.slice(Math.max(0, i - 4), i + 8).join("\n")
+
+      const personName =
+        [...nearbyBefore].reverse().find((candidate) =>
+          /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(candidate) &&
+          !/license|appt|claim|examiner|adjusting|insurance/i.test(candidate)
+        ) || null
+
+      const companyName =
+        nearbyAfter.find((candidate) =>
+          /adjusting|insurance|claims|services/i.test(candidate) &&
+          !/license|phone|email/i.test(candidate)
+        ) || null
 
       return {
-        adjusterName: cleanParsedValue(previous),
+        adjusterName: cleanParsedValue(
+          companyName && personName ? `${companyName} / ${personName}` : companyName || personName
+        ),
         adjusterPhone: extractPhone(nextBlock),
-        adjusterEmail: extractEmail(nextBlock),
+        adjusterEmail: cleanParsedValue(fromEmail) || extractEmail(nextBlock),
       }
     }
   }
@@ -190,7 +206,7 @@ function extractAdjusterDetails(text: string) {
   return {
     adjusterName: null,
     adjusterPhone: null,
-    adjusterEmail: null,
+    adjusterEmail: cleanParsedValue(fromEmail),
   }
 }
 
@@ -214,8 +230,18 @@ function extractNarrativeNotes(text: string) {
   if (explicit) return explicit
 
   const lines = textLines(text)
-  const usefulLines = lines.filter((line) => {
-    if (/^(begin forwarded message|from:|subject:|date:|to:|best regards|phone:|email:|dol:|col:)/i.test(line)) return false
+  const addressBlock = extractAddressBlock(text)
+  const customerLineIndex = addressBlock.customerName
+    ? lines.findIndex((line) => line === addressBlock.customerName)
+    : -1
+
+  const narrativeWindow =
+    customerLineIndex > 0
+      ? lines.slice(0, customerLineIndex)
+      : lines
+
+  const usefulLines = narrativeWindow.filter((line) => {
+    if (/^(begin forwarded message|from:|subject:|date:|to:|good morning|best regards|phone:|email:|dol:|col:)/i.test(line)) return false
     if (/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(line)) return false
     if (/^\d+\s+/.test(line)) return false
     if (/,\s*[A-Z]{2}\s+\d{5}/i.test(line)) return false
@@ -239,10 +265,10 @@ function parseClaimsEmail(text: string) {
   const adjusterDetails = extractAdjusterDetails(text)
 
   const carrier =
+    subjectCarrierClaim.carrier ||
     firstMatch(text, [
       /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
-      /(?:from|submitted by)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) || subjectCarrierClaim.carrier
+    ])
 
   const claimNumber =
     firstMatch(text, [
