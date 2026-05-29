@@ -367,6 +367,13 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         : initialPayload
       const parsed = parseClaimsEmail(parsedPayload.text)
 
+      console.log("EMS INTAKE PARSE DEBUG", {
+        subject: parsedPayload.subject,
+        from: parsedPayload.from,
+        text_preview: parsedPayload.text.slice(0, 2000),
+        parsed,
+      })
+
       const customerName = parsed.customerName || "EMS Tarp Customer"
       const carrier = parsed.carrier || "Unknown Carrier"
       const claimNumber = parsed.claimNumber || null
