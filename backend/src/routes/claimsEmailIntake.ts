@@ -147,6 +147,12 @@ function extractCarrierClaimFromSubject(text: string) {
   }
 }
 
+function extractCarrierFromSubjectOnly(text: string) {
+  return firstMatch(text, [
+    /subject:\s*(?:re:\s*|fwd:\s*)?([A-Z][A-Z0-9 &.'-]+?)(?:\s+claim\s+[A-Z0-9\-_.]+)?$/im,
+  ])
+}
+
 function extractAddressBlock(text: string) {
   const lines = textLines(text)
 
@@ -222,6 +228,23 @@ function extractLossDate(text: string) {
   ])
 }
 
+function extractDirectTarpNarrative(text: string) {
+  const lines = textLines(text)
+  const addressBlock = extractAddressBlock(text)
+  const customerLineIndex = addressBlock.customerName
+    ? lines.findIndex((line) => line === addressBlock.customerName)
+    : -1
+
+  const windowLines = customerLineIndex > 0 ? lines.slice(0, customerLineIndex) : lines
+
+  const useful = windowLines.filter((line) => {
+    if (/^(begin forwarded message|from:|subject:|date:|to:|good morning|best regards)/i.test(line)) return false
+    return /(tarp|tarped|board up|board-up|water intrusion|leak|leaking|damage|emergency|immediate|immediately)/i.test(line)
+  })
+
+  return cleanParsedValue(useful.join(" "))
+}
+
 function extractNarrativeNotes(text: string) {
   const explicit = firstMatch(text, [
     /(?:notes|comments|loss description|damage description|description|special instructions|report|statement)\s*[:#-]\s*([^\n\r]+)/i,
@@ -271,6 +294,7 @@ function parseClaimsEmail(text: string) {
 
   const carrier =
     subjectCarrierClaim.carrier ||
+    cleanParsedValue(extractCarrierFromSubjectOnly(text)) ||
     firstMatch(text, [
       /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
     ])
@@ -326,7 +350,7 @@ function parseClaimsEmail(text: string) {
   const serviceType = extractServiceType(text)
   const lossType = extractLossType(text)
   const lossDate = extractLossDate(text)
-  const narrativeNotes = extractNarrativeNotes(text)
+  const narrativeNotes = extractDirectTarpNarrative(text) || extractNarrativeNotes(text)
 
   const notes = cleanParsedValue(
     [
@@ -402,12 +426,12 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         : initialPayload
       const parsed = parseClaimsEmail(parsedPayload.text)
 
-      console.log("EMS INTAKE PARSE DEBUG", {
+      console.log("EMS_INTAKE_PARSE_DEBUG_JSON", JSON.stringify({
         subject: parsedPayload.subject,
         from: parsedPayload.from,
         text_preview: parsedPayload.text.slice(0, 2000),
         parsed,
-      })
+      }))
 
       const customerName = parsed.customerName || "EMS Tarp Customer"
       const carrier = parsed.carrier || "Unknown Carrier"
@@ -518,19 +542,18 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         )
       }
 
-      if (parsed.notes) {
-        await addTimelineEvent(
-          tenantId,
-          jobId,
-          "ems_tarp_intake_notes",
-          `EMS intake notes/comments: ${parsed.notes}`,
-          {
-            source: "inbound_email",
-            from: parsedPayload.from,
-            subject: parsedPayload.subject,
-          }
-        )
-      }
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "ems_tarp_intake_notes",
+        parsed.notes || `EMS tarp assessment email received from ${parsedPayload.from || "unknown sender"}.`,
+        {
+          source: "inbound_email",
+          from: parsedPayload.from,
+          subject: parsedPayload.subject,
+          parsed,
+        }
+      )
 
       await addTimelineEvent(
         tenantId,
