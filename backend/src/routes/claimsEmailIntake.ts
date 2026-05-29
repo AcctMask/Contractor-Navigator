@@ -64,6 +64,38 @@ function readTextPayload(body: any) {
   }
 }
 
+async function retrieveReceivedEmailFromResend(email: any) {
+  const emailId =
+    email?.email_id ||
+    email?.id ||
+    email?.emailId ||
+    email?.data?.email_id ||
+    email?.data?.id
+
+  if (!emailId) return null
+
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) return null
+
+  const response = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+  })
+
+  if (!response.ok) {
+    console.error("Resend received email fetch failed", {
+      emailId,
+      status: response.status,
+      statusText: response.statusText,
+    })
+    return null
+  }
+
+  return await response.json()
+}
+
 function firstMatch(text: string, patterns: RegExp[]) {
   for (const pattern of patterns) {
     const match = text.match(pattern)
@@ -84,7 +116,7 @@ function extractEmail(text: string) {
 
 function parseClaimsEmail(text: string) {
   const carrier = firstMatch(text, [
-    /(?:insurance company|insurer|carrier)\s*[:#-]\s*([^\n\r]+)/i,
+    /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
     /(?:from|submitted by)\s*[:#-]\s*([^\n\r]+)/i,
   ])
 
@@ -93,11 +125,37 @@ function parseClaimsEmail(text: string) {
   ])
 
   const customerName = firstMatch(text, [
-    /(?:homeowner|insured|customer|policyholder|policy holder|name)\s*[:#-]\s*([^\n\r]+)/i,
+    /(?:homeowner name|homeowner|insured name|insured|customer name|customer|policyholder|policy holder)\s*[:#-]\s*([^\n\r]+)/i,
   ])
 
   const address = firstMatch(text, [
-    /(?:property address|loss location|risk address|address)\s*[:#-]\s*([^\n\r]+)/i,
+    /(?:property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+
+  const customerPhone =
+    firstMatch(text, [
+      /(?:primary phone|customer phone|homeowner phone|insured phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || extractPhone(text)
+
+  const customerEmail =
+    firstMatch(text, [
+      /(?:customer email|homeowner email|insured email|email)\s*[:#-]\s*([^\n\r]+)/i,
+    ]) || extractEmail(text)
+
+  const adjusterName = firstMatch(text, [
+    /(?:adjuster name|desk adjuster|field adjuster|adjuster)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+
+  const adjusterPhone = firstMatch(text, [
+    /(?:adjuster phone|adjuster cell|desk adjuster phone|field adjuster phone)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+
+  const adjusterEmail = firstMatch(text, [
+    /(?:adjuster email|desk adjuster email|field adjuster email)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+
+  const notes = firstMatch(text, [
+    /(?:notes|comments|loss description|damage description|description|special instructions)\s*[:#-]\s*([^\n\r]+)/i,
   ])
 
   const emergencySqft = firstMatch(text, [
@@ -109,8 +167,12 @@ function parseClaimsEmail(text: string) {
     claimNumber,
     customerName,
     propertyAddress: address,
-    customerPhone: extractPhone(text),
-    customerEmail: extractEmail(text),
+    customerPhone,
+    customerEmail,
+    adjusterName,
+    adjusterPhone,
+    adjusterEmail,
+    notes,
     emergencySqft: emergencySqft ? Number(emergencySqft) : null,
   }
 }
@@ -152,7 +214,12 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
     }
 
     try {
-      const parsedPayload = readTextPayload(request.body || {})
+      const webhookPayload = request.body || {}
+      const initialPayload = readTextPayload(webhookPayload)
+      const receivedEmail = await retrieveReceivedEmailFromResend(initialPayload.raw)
+      const parsedPayload = receivedEmail
+        ? readTextPayload({ data: receivedEmail })
+        : initialPayload
       const parsed = parseClaimsEmail(parsedPayload.text)
 
       const customerName = parsed.customerName || "EMS Tarp Customer"
@@ -182,6 +249,10 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           carrier = coalesce($5, carrier),
           lead_source = $5,
           lead_source_detail = $6,
+          adjuster_name = coalesce($7, adjuster_name),
+          adjuster_phone = coalesce($8, adjuster_phone),
+          adjuster_email = coalesce($9, adjuster_email),
+          assignment_notes = coalesce($10, assignment_notes),
           updated_at = now()
         where tenant_id = $1
           and id = $2
@@ -193,6 +264,10 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           claimNumber,
           carrier,
           `${INBOUND_ADDRESS} inbound assessment email`,
+          parsed.adjusterName,
+          parsed.adjusterPhone,
+          parsed.adjusterEmail,
+          parsed.notes,
         ]
       )
 
@@ -230,6 +305,20 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         Number(documentPackage.id)
       )
 
+      if (parsed.notes) {
+        await addTimelineEvent(
+          tenantId,
+          jobId,
+          "ems_tarp_intake_notes",
+          `EMS intake notes/comments: ${parsed.notes}`,
+          {
+            source: "inbound_email",
+            from: parsedPayload.from,
+            subject: parsedPayload.subject,
+          }
+        )
+      }
+
       await addTimelineEvent(
         tenantId,
         jobId,
@@ -242,6 +331,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           parsed,
           package_id: documentPackage.id,
           send_result: sendResult,
+          received_email_id: receivedEmail?.id || initialPayload.raw?.email_id || null,
         }
       )
 
