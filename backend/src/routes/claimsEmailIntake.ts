@@ -453,11 +453,35 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         "ems_tarp"
       )
 
-      const sendResult = await sendDocumentPackage(
-        TENANT_SLUG,
-        jobId,
-        Number(documentPackage.id)
-      )
+      let sendResult: any = null
+
+      try {
+        sendResult = await sendDocumentPackage(
+          TENANT_SLUG,
+          jobId,
+          Number(documentPackage.id)
+        )
+      } catch (err: any) {
+        sendResult = {
+          ok: false,
+          error: err?.message || String(err),
+        }
+
+        await addTimelineEvent(
+          tenantId,
+          jobId,
+          "ems_tarp_package_not_sent",
+          `EMS package was created but not sent automatically: ${sendResult.error}`,
+          {
+            source: "inbound_email",
+            from: parsedPayload.from,
+            subject: parsedPayload.subject,
+            parsed,
+            package_id: documentPackage.id,
+            reason: sendResult.error,
+          }
+        )
+      }
 
       if (parsed.notes) {
         await addTimelineEvent(
@@ -495,6 +519,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         parsed,
         document_package: documentPackage,
         send_result: sendResult,
+        package_send_warning: sendResult?.ok === false ? sendResult.error : null,
       }
     } catch (err: any) {
       console.error("EMS tarp inbound email failed", err)
