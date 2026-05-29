@@ -32,7 +32,7 @@ await app.register(formbody)
 await app.register(multipart, {
   limits: {
     fileSize: 100 * 1024 * 1024,
-    files: 20,
+    files: 100,
   },
 })
 
