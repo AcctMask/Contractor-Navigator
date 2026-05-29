@@ -48,6 +48,7 @@ export default function CalendarPage() {
   const [notes, setNotes] = useState("")
   const [eventType, setEventType] = useState("inspection")
   const [message, setMessage] = useState("")
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
 
   async function loadEvents() {
     try {
@@ -72,6 +73,9 @@ export default function CalendarPage() {
       }))
 
       setEvents(mapped)
+      setSelectedEvent(current =>
+        current ? mapped.find((event: CalendarEvent) => event.id === current.id) || null : null
+      )
       setMessage("")
     } catch (err: any) {
       console.error("Calendar load failed:", err)
@@ -120,12 +124,44 @@ export default function CalendarPage() {
   }
 
   function handleSelectEvent(event: CalendarEvent) {
-    if (event.job_id) {
-      navigate(`/job/${event.job_id}`)
+    setSelectedEvent(event)
+  }
+
+  function openSelectedJob() {
+    if (!selectedEvent?.job_id) {
+      alert("This calendar event is not linked to a job yet. Add a Job ID when creating the event.")
       return
     }
 
-    alert("This calendar event is not linked to a job yet. Add a Job ID when creating the event.")
+    navigate(`/job/${selectedEvent.job_id}`)
+  }
+
+  async function deleteSelectedEvent() {
+    if (!selectedEvent) return
+
+    const confirmed = window.confirm(`Delete calendar event: ${selectedEvent.title}?`)
+    if (!confirmed) return
+
+    try {
+      setMessage("Deleting calendar event...")
+
+      const res = await fetch(`${API_BASE}/calendar/${TENANT}/events/${selectedEvent.id}`, {
+        method: "DELETE",
+      })
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Calendar delete failed")
+      }
+
+      setSelectedEvent(null)
+      setMessage("Calendar event deleted.")
+      await loadEvents()
+    } catch (err: any) {
+      console.error("Calendar delete failed:", err)
+      setMessage(err?.message || "Calendar delete failed")
+    }
   }
 
   function tooltip(event: CalendarEvent) {
@@ -226,6 +262,29 @@ export default function CalendarPage() {
 
         {message && <p style={{ color: "white" }}>{message}</p>}
       </div>
+
+      {selectedEvent && (
+        <div style={{ background: "#111827", color: "white", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h2 style={{ marginTop: 0 }}>Selected Event</h2>
+          <p><strong>Title:</strong> {selectedEvent.title}</p>
+          <p><strong>Time:</strong> {selectedEvent.start.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })} - {selectedEvent.end.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })}</p>
+          <p><strong>Job ID:</strong> {selectedEvent.job_id || "Not linked"}</p>
+          <p><strong>Location:</strong> {selectedEvent.location || "Not provided"}</p>
+          <p><strong>Notes:</strong> {selectedEvent.notes || "None"}</p>
+
+          <button onClick={openSelectedJob} style={buttonStyle}>
+            Open Job
+          </button>
+
+          <button onClick={deleteSelectedEvent} style={{ ...buttonStyle, background: "#991b1b", color: "white" }}>
+            Delete Event
+          </button>
+
+          <button onClick={() => setSelectedEvent(null)} style={buttonStyle}>
+            Clear Selection
+          </button>
+        </div>
+      )}
 
       <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
         <Calendar

@@ -220,6 +220,35 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
     }
   })
 
+  app.delete("/calendar/:tenantSlug/events/:eventId", async (request: any, reply) => {
+    try {
+      await ensureCalendarTable()
+
+      const { tenantSlug, eventId } = request.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+
+      const result = await pool.query(
+        `
+        delete from calendar_events
+        where tenant_id = $1
+          and id = $2
+        returning id
+        `,
+        [tenantId, Number(eventId)]
+      )
+
+      if (!result.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Calendar event not found" }
+      }
+
+      return { ok: true, deleted_event_id: Number(eventId) }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
 
 }
 // redeploy Wed May 13 08:39:41 EDT 2026
