@@ -12,6 +12,11 @@ const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.
 const TENANT = "g2g-roofing"
 const EASTERN_TIME_ZONE = "America/New_York"
 
+function localDateTimeToIso(value: string) {
+  if (!value) return ""
+  return new Date(value).toISOString()
+}
+
 const localizer = dateFnsLocalizer({
   format,
   parse,
@@ -84,8 +89,8 @@ export default function CalendarPage() {
         body: JSON.stringify({
           title,
           job_id: jobId ? Number(jobId) : null,
-          start_time: startTime,
-          end_time: endTime,
+          start_time: localDateTimeToIso(startTime),
+          end_time: endTime ? localDateTimeToIso(endTime) : null,
           location,
           notes,
           event_type: eventType,
