@@ -200,6 +200,12 @@ function extractLossType(text: string) {
   ])
 }
 
+function extractLossDate(text: string) {
+  return firstMatch(text, [
+    /(?:date of loss|loss date|DOL)\s*[:#-]\s*([^\n\r]+)/i,
+  ])
+}
+
 function extractNarrativeNotes(text: string) {
   const explicit = firstMatch(text, [
     /(?:notes|comments|loss description|damage description|description|special instructions|report|statement)\s*[:#-]\s*([^\n\r]+)/i,
@@ -284,12 +290,14 @@ function parseClaimsEmail(text: string) {
 
   const serviceType = extractServiceType(text)
   const lossType = extractLossType(text)
+  const lossDate = extractLossDate(text)
   const narrativeNotes = extractNarrativeNotes(text)
 
   const notes = cleanParsedValue(
     [
       serviceType ? `Service Requested: ${serviceType}` : null,
-      lossType ? `Loss Type: ${lossType}` : null,
+      lossDate ? `Date of Loss: ${lossDate}` : null,
+      lossType ? `Cause of Loss: ${lossType}` : null,
       narrativeNotes ? `Notes: ${narrativeNotes}` : null,
     ]
       .filter(Boolean)
@@ -309,6 +317,7 @@ function parseClaimsEmail(text: string) {
     notes,
     serviceType,
     lossType,
+    lossDate,
     emergencySqft: emergencySqft ? Number(emergencySqft) : null,
   }
 }
@@ -389,6 +398,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           adjuster_phone = coalesce($8, adjuster_phone),
           adjuster_email = coalesce($9, adjuster_email),
           assignment_notes = coalesce($10, assignment_notes),
+          damage_summary = coalesce($11, damage_summary),
           updated_at = now()
         where tenant_id = $1
           and id = $2
@@ -404,6 +414,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           parsed.adjusterPhone,
           parsed.adjusterEmail,
           parsed.notes,
+          parsed.lossType,
         ]
       )
 
