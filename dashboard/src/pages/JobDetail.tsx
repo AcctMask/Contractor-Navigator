@@ -654,6 +654,11 @@ export default function JobDetail() {
                 <option value="SEO">SEO</option>
                 <option value="Estimator">Estimator</option>
                 <option value="GC Outreach">GC Outreach</option>
+                <option value="Realtor Outreach">Realtor Outreach</option>
+                <option value="Legacy Tarp Recovery">Legacy Tarp Recovery</option>
+                <option value="Adjuster Outreach">Adjuster Outreach</option>
+                <option value="Property Manager Outreach">Property Manager Outreach</option>
+                <option value="HOA Outreach">HOA Outreach</option>
                 <option value="Phone Call">Phone Call</option>
                 <option value="Website">Website</option>
                 <option value="Facebook">Facebook</option>
