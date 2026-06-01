@@ -68,6 +68,18 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         order by total desc
       `)
 
+      const leadSourceStageResult = await pool.query(`
+        select
+          coalesce(nullif(trim(lead_source), ''), 'unknown') as source,
+          coalesce(nullif(trim(stage), ''), 'unknown') as stage,
+          count(*)::int as total
+        from jobs
+        group by
+          coalesce(nullif(trim(lead_source), ''), 'unknown'),
+          coalesce(nullif(trim(stage), ''), 'unknown')
+        order by source asc, total desc
+      `)
+
       return reply.send({
         ok: true,
         source: "contractor-navigator",
@@ -81,6 +93,7 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         stage_breakdown: stagesResult.rows,
         timeline_activity: timelineResult.rows,
         lead_source_summary: leadSourceResult.rows,
+        lead_source_stage_summary: leadSourceStageResult.rows,
         lead_source_detail_summary: leadSourceDetailResult.rows,
         marketing_campaign_summary: marketingCampaignResult.rows
       })
