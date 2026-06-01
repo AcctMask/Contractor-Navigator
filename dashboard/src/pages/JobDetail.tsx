@@ -87,7 +87,15 @@ export default function JobDetail() {
   }
 
   function setField(field: string, value: string) {
-    setForm((prev: any) => ({ ...prev, [field]: value }))
+    setForm((prev: any) => {
+      const next = { ...prev, [field]: value }
+
+      if (field === "address1") {
+        next.address = value
+      }
+
+      return next
+    })
   }
 
   function setCalendarField(eventId: number | string, field: string, value: string) {
