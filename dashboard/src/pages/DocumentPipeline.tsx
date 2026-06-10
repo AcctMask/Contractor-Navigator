@@ -101,6 +101,45 @@ export default function DocumentPipelinePage() {
     discount_reason: "",
   })
 
+  function cleanNumber(value: any): number | null {
+    if (value === "" || value === null || value === undefined) return null
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+
+  function cleanEstimatePayload(input: EstimateDetails): EstimateDetails {
+    const proposalAmount = cleanNumber(input.proposal_amount)
+    let contractAmount = cleanNumber(input.contract_amount)
+    let discountAmount = cleanNumber(input.discount_amount)
+
+    if (proposalAmount != null && contractAmount == null) {
+      contractAmount = proposalAmount
+    }
+
+    if (proposalAmount != null && contractAmount != null && discountAmount == null) {
+      discountAmount = proposalAmount - contractAmount
+    }
+
+    return {
+      ...input,
+      roof_squares: cleanNumber(input.roof_squares),
+      low_amount: cleanNumber(input.low_amount),
+      high_amount: cleanNumber(input.high_amount),
+      agreed_amount: cleanNumber(input.agreed_amount),
+      carrier_approved_amount: cleanNumber(input.carrier_approved_amount),
+      emergency_tarp_sqft: cleanNumber(input.emergency_tarp_sqft),
+      proposal_amount: proposalAmount,
+      contract_amount: contractAmount,
+      discount_amount: discountAmount,
+      estimate_line_items: Array.isArray(input.estimate_line_items)
+        ? input.estimate_line_items.map((item) => ({
+            description: item.description || "",
+            amount: cleanNumber(item.amount),
+          }))
+        : [],
+    }
+  }
+
   function setField<K extends keyof EstimateDetails>(key: K, value: EstimateDetails[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
@@ -175,7 +214,7 @@ export default function DocumentPipelinePage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(form),
+        body: JSON.stringify(cleanEstimatePayload(form)),
       })
 
       const json = await res.json()
@@ -200,7 +239,7 @@ export default function DocumentPipelinePage() {
 
       items[index] = {
         ...items[index],
-        [key]: key === "amount" ? (value === "" ? null : Number(value)) : value,
+[key]: key === "amount" ? cleanNumber(value) : value,
       }
 
       return { ...prev, estimate_line_items: items }
