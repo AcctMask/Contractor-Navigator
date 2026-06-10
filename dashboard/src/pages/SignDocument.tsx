@@ -108,14 +108,15 @@ export default function SignDocument() {
   const lowAmount = payload.low_amount
   const highAmount = payload.high_amount
   const agreedAmount = payload.agreed_amount
+  const proposalAmount = payload.proposal_amount
+  const contractAmount = payload.contract_amount ?? payload.proposal_amount ?? payload.agreed_amount
+  const discountAmount = payload.discount_amount
+  const discountReason = payload.discount_reason
+  const vipBenefitsIncluded = !!payload.vip_benefits_included
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
   const lineItems = Array.isArray(payload.estimate_line_items) ? payload.estimate_line_items : []
-  const termsAndConditions =
-    payload.terms_and_conditions ||
-    "Price is based on the visible scope and information available at the time of estimate. Hidden damage, rotten decking, code-required upgrades, permit requirements, material changes, customer-requested changes, or insurance scope changes may require a written change order. Work scheduling is subject to weather, material availability, and production capacity."
-
   const amountDisplay = useMemo(() => {
     const agreed = moneyDisplay(agreedAmount)
     const low = moneyDisplay(lowAmount)
@@ -188,7 +189,9 @@ export default function SignDocument() {
               <Info label="Property Address" value={propertyAddress} />
               <Info label="Roof Type" value={roofType} />
               <Info label="Roof Size" value={String(roofSquares)} />
-              <Info label="Price" value={amountDisplay} />
+              <Info label="Proposal Amount" value={moneyDisplay(proposalAmount) || amountDisplay} />
+              <Info label="Contract Amount" value={moneyDisplay(contractAmount) || amountDisplay} />
+              <Info label="Discount" value={moneyDisplay(discountAmount) || "—"} />
             </div>
 
             <div style={docBox}>
@@ -219,11 +222,28 @@ export default function SignDocument() {
               <p style={docText}>
                 Additional remarks: {remarks}
               </p>
+
+              {discountReason ? (
+                <p style={docText}>
+                  Discount / negotiation note: {discountReason}
+                </p>
+              ) : null}
             </div>
+
+            {vipBenefitsIncluded ? (
+              <div style={docBox}>
+                <h3 style={docBoxTitle}>G2G VIP Benefits</h3>
+                <p style={docText}>
+                  As a Good2Go Roofing customer, you may be eligible for benefits upon written request and subject to availability, including wind mitigation report assistance, follow-up roof inspections, priority response after significant weather events, and referral reward opportunities. Benefits are available upon written request and are not automatically scheduled.
+                </p>
+              </div>
+            ) : null}
 
             <div style={docBox}>
               <h3 style={docBoxTitle}>Terms and Conditions</h3>
-              <p style={docText}>{termsAndConditions}</p>
+              <p style={docText}>
+                The full Good2Go Roofing Terms and Conditions are available using the link in the signature section.
+              </p>
             </div>
 
             <div style={docBox}>
