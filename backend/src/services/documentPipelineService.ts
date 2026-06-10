@@ -34,7 +34,12 @@ async function ensureDocumentTables() {
   await pool.query(`
     alter table job_estimate_details
       add column if not exists estimate_line_items jsonb,
-      add column if not exists terms_and_conditions text;
+      add column if not exists terms_and_conditions text,
+      add column if not exists proposal_type text,
+      add column if not exists proposal_amount numeric(12,2),
+      add column if not exists contract_amount numeric(12,2),
+      add column if not exists discount_amount numeric(12,2),
+      add column if not exists discount_reason text;
 
     create table if not exists job_document_packages (
       id bigserial primary key,
@@ -128,6 +133,13 @@ export async function getEstimateDetailsByTenantSlug(tenantSlug: string, jobId: 
       emergency_tarp_sqft,
       callback_notes,
       estimator_remarks,
+      estimate_line_items,
+      terms_and_conditions,
+      proposal_type,
+      proposal_amount,
+      contract_amount,
+      discount_amount,
+      discount_reason,
       created_at,
       updated_at
     from job_estimate_details
@@ -157,8 +169,13 @@ export async function upsertEstimateDetailsByTenantSlug(
     emergency_tarp_sqft?: number | null
     callback_notes?: string | null
     estimator_remarks?: string | null
-  estimate_line_items?: Array<{ description: string; amount: number | null }>
-  terms_and_conditions?: string | null
+    estimate_line_items?: Array<{ description: string; amount: number | null }>
+    terms_and_conditions?: string | null
+    proposal_type?: string | null
+    proposal_amount?: number | null
+    contract_amount?: number | null
+    discount_amount?: number | null
+    discount_reason?: string | null
   }
 ) {
   await ensureDocumentTables()
@@ -181,11 +198,18 @@ export async function upsertEstimateDetailsByTenantSlug(
       emergency_tarp_sqft,
       callback_notes,
       estimator_remarks,
+      estimate_line_items,
+      terms_and_conditions,
+      proposal_type,
+      proposal_amount,
+      contract_amount,
+      discount_amount,
+      discount_reason,
       created_at,
       updated_at
     )
     values (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, false), $12, $13, $14, now(), now()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, false), $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20, $21, now(), now()
     )
     on conflict (tenant_id, job_id)
     do update set
@@ -203,6 +227,11 @@ export async function upsertEstimateDetailsByTenantSlug(
       estimator_remarks = excluded.estimator_remarks,
       estimate_line_items = excluded.estimate_line_items,
       terms_and_conditions = excluded.terms_and_conditions,
+      proposal_type = excluded.proposal_type,
+      proposal_amount = excluded.proposal_amount,
+      contract_amount = excluded.contract_amount,
+      discount_amount = excluded.discount_amount,
+      discount_reason = excluded.discount_reason,
       updated_at = now()
     `,
     [
@@ -220,6 +249,17 @@ export async function upsertEstimateDetailsByTenantSlug(
       input.emergency_tarp_sqft ?? null,
       input.callback_notes || null,
       input.estimator_remarks || null,
+      JSON.stringify(Array.isArray(input.estimate_line_items) ? input.estimate_line_items : []),
+      input.terms_and_conditions || null,
+      input.proposal_type || null,
+      input.proposal_amount ?? null,
+      input.contract_amount ?? input.proposal_amount ?? null,
+      input.discount_amount ?? (
+        input.proposal_amount != null && input.contract_amount != null
+          ? Number(input.proposal_amount) - Number(input.contract_amount)
+          : null
+      ),
+      input.discount_reason || null,
     ]
   )
 
@@ -314,6 +354,11 @@ export async function createDocumentPackageByTenantSlug(
       low_amount: details?.low_amount || null,
       high_amount: details?.high_amount || null,
       agreed_amount: details?.agreed_amount || null,
+      proposal_type: details?.proposal_type || "retail",
+      proposal_amount: details?.proposal_amount ?? details?.agreed_amount ?? null,
+      contract_amount: details?.contract_amount ?? details?.proposal_amount ?? details?.agreed_amount ?? null,
+      discount_amount: details?.discount_amount ?? null,
+      discount_reason: details?.discount_reason || null,
       estimate_line_items: Array.isArray(details?.estimate_line_items) ? details.estimate_line_items : [],
       terms_and_conditions: details?.terms_and_conditions || null,
       estimator_remarks: details?.estimator_remarks || null,
@@ -330,6 +375,12 @@ export async function createDocumentPackageByTenantSlug(
       claim_number: details?.claim_number || null,
       carrier_approved_amount: details?.carrier_approved_amount || null,
       deductible: details?.deductible || null,
+      proposal_type: details?.proposal_type || "insurance",
+      proposal_amount: details?.proposal_amount ?? details?.carrier_approved_amount ?? null,
+      contract_amount: details?.contract_amount ?? details?.proposal_amount ?? details?.carrier_approved_amount ?? null,
+      discount_amount: details?.discount_amount ?? null,
+      discount_reason: details?.discount_reason || null,
+      vip_benefits_included: true,
       estimator_remarks: details?.estimator_remarks || null,
       ready_for_signature: !!details?.claim_number,
     }

@@ -745,6 +745,23 @@ export default function JobDetail() {
             </label>
 
             <button onClick={saveStage} style={button}>Save Stage</button>
+
+            {id ? (
+              <Link
+                to={`/document-pipeline?jobId=${id}`}
+                style={{
+                  ...button,
+                  display: "inline-block",
+                  marginTop: 10,
+                  background: "#2563eb",
+                  color: "white",
+                  textDecoration: "none",
+                  borderRadius: 8,
+                }}
+              >
+                Send Proposal / Contract
+              </Link>
+            ) : null}
           </div>
         </div>
       </section>

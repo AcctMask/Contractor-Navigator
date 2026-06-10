@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
 const TENANT_SLUG = "g2g-roofing"
@@ -36,6 +37,11 @@ type EstimateDetails = {
   estimator_remarks?: string | null
   estimate_line_items?: EstimateLineItem[]
   terms_and_conditions?: string | null
+  proposal_type?: string | null
+  proposal_amount?: number | null
+  contract_amount?: number | null
+  discount_amount?: number | null
+  discount_reason?: string | null
 }
 
 type DocumentPackage = {
@@ -66,7 +72,8 @@ const DEFAULT_TERMS =
   "Price is based on the visible scope and information available at the time of estimate. Hidden damage, rotten decking, code-required upgrades, permit requirements, material changes, customer-requested changes, or insurance scope changes may require a written change order. Work scheduling is subject to weather, material availability, and production capacity."
 
 export default function DocumentPipelinePage() {
-  const [jobId, setJobId] = useState("")
+  const [searchParams] = useSearchParams()
+  const [jobId, setJobId] = useState(() => searchParams.get("jobId") || "")
   const [job, setJob] = useState<JobSummary | null>(null)
   const [documents, setDocuments] = useState<DocumentPackage[]>([])
   const [status, setStatus] = useState("")
@@ -87,11 +94,29 @@ export default function DocumentPipelinePage() {
     estimator_remarks: "",
     estimate_line_items: defaultEstimateLineItems(),
     terms_and_conditions: DEFAULT_TERMS,
+    proposal_type: "retail",
+    proposal_amount: null,
+    contract_amount: null,
+    discount_amount: null,
+    discount_reason: "",
   })
 
   function setField<K extends keyof EstimateDetails>(key: K, value: EstimateDetails[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
+
+  useEffect(() => {
+    const urlJobId = searchParams.get("jobId")
+    if (urlJobId) {
+      setJobId(urlJobId)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (jobId) {
+      void loadJob()
+    }
+  }, [jobId])
 
   async function loadJob() {
     setError("")
@@ -126,6 +151,11 @@ export default function DocumentPipelinePage() {
           ? d.estimate_line_items
           : defaultEstimateLineItems(),
         terms_and_conditions: d.terms_and_conditions || DEFAULT_TERMS,
+        proposal_type: d.proposal_type || "retail",
+        proposal_amount: d.proposal_amount ?? null,
+        contract_amount: d.contract_amount ?? d.proposal_amount ?? null,
+        discount_amount: d.discount_amount ?? null,
+        discount_reason: d.discount_reason || "",
       })
 
       setStatus("Pipeline loaded")
@@ -375,6 +405,85 @@ export default function DocumentPipelinePage() {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
             <div>
+              <label style={labelStyle}>Proposal Type</label>
+              <select
+                value={form.proposal_type || "retail"}
+                onChange={(e) => setField("proposal_type", e.target.value)}
+                style={inputStyle}
+              >
+                <option value="retail">Retail Proposal / Contract</option>
+                <option value="insurance">Insurance Proposal / Contract</option>
+              </select>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Proposal Amount</label>
+              <input
+                value={form.proposal_amount ?? ""}
+                onChange={(e) => {
+                  const proposalAmount = e.target.value === "" ? null : Number(e.target.value)
+                  setForm((prev) => ({
+                    ...prev,
+                    proposal_amount: proposalAmount,
+                    contract_amount: prev.contract_amount ?? proposalAmount,
+                    discount_amount:
+                      proposalAmount != null && prev.contract_amount != null
+                        ? Number(proposalAmount) - Number(prev.contract_amount)
+                        : prev.discount_amount ?? null,
+                  }))
+                }}
+                placeholder="18500"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Contract Amount</label>
+              <input
+                value={form.contract_amount ?? ""}
+                onChange={(e) => {
+                  const contractAmount = e.target.value === "" ? null : Number(e.target.value)
+                  setForm((prev) => ({
+                    ...prev,
+                    contract_amount: contractAmount,
+                    discount_amount:
+                      prev.proposal_amount != null && contractAmount != null
+                        ? Number(prev.proposal_amount) - Number(contractAmount)
+                        : null,
+                  }))
+                }}
+                placeholder="17500"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "14px" }}>
+            <div>
+              <label style={labelStyle}>Discount Amount</label>
+              <input
+                value={form.discount_amount ?? ""}
+                onChange={(e) =>
+                  setField("discount_amount", e.target.value === "" ? null : Number(e.target.value))
+                }
+                placeholder="1000"
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Discount Reason / Negotiation Note</label>
+              <input
+                value={form.discount_reason || ""}
+                onChange={(e) => setField("discount_reason", e.target.value)}
+                placeholder="Customer agreed to sign today if price reduced by $1,000"
+                style={inputStyle}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+            <div>
               <label style={labelStyle}>Carrier Approved Amount</label>
               <input
                 value={form.carrier_approved_amount ?? ""}
@@ -506,10 +615,10 @@ export default function DocumentPipelinePage() {
 
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
           <button onClick={() => createPackage("retail_estimate")} style={buttonStyle}>
-            Create Retail Estimate
+            Create Retail Proposal / Contract
           </button>
           <button onClick={() => createPackage("insurance_contract")} style={buttonStyle}>
-            Create Insurance Contract
+            Create Insurance Proposal / Contract
           </button>
           <button onClick={() => createPackage("ems_tarp")} style={buttonStyle}>
             Create EMS Tarp Authorization
@@ -527,6 +636,15 @@ export default function DocumentPipelinePage() {
                 <div style={{ fontWeight: 700 }}>{doc.document_title}</div>
                 <div style={{ opacity: 0.9 }}>Type: {doc.package_type}</div>
                 <div style={{ opacity: 0.9 }}>Status: {doc.status}</div>
+                <div style={{ opacity: 0.9 }}>
+                  Proposal Amount: {doc.payload?.proposal_amount ? `$${Number(doc.payload.proposal_amount).toLocaleString()}` : "—"}
+                </div>
+                <div style={{ opacity: 0.9 }}>
+                  Contract Amount: {doc.payload?.contract_amount ? `$${Number(doc.payload.contract_amount).toLocaleString()}` : "—"}
+                </div>
+                <div style={{ opacity: 0.9 }}>
+                  Discount: {doc.payload?.discount_amount ? `$${Number(doc.payload.discount_amount).toLocaleString()}` : "—"}
+                </div>
                 <div style={{ opacity: 0.75 }}>Template: {doc.template_source || "—"}</div>
                 <div style={{ opacity: 0.65 }}>
                   Created: {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}

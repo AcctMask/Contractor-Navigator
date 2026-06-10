@@ -67,6 +67,20 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
           ? body.estimate_line_items
           : [],
         terms_and_conditions: body.terms_and_conditions,
+        proposal_type: body.proposal_type,
+        proposal_amount:
+          body.proposal_amount === "" || body.proposal_amount == null
+            ? null
+            : Number(body.proposal_amount),
+        contract_amount:
+          body.contract_amount === "" || body.contract_amount == null
+            ? null
+            : Number(body.contract_amount),
+        discount_amount:
+          body.discount_amount === "" || body.discount_amount == null
+            ? null
+            : Number(body.discount_amount),
+        discount_reason: body.discount_reason,
       })
 
       return {
