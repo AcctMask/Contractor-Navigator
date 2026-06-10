@@ -324,7 +324,15 @@ export default function DocumentPipelinePage() {
       </section>
 
       <section style={cardStyle}>
-        <h2 style={{ marginTop: 0 }}>Job Summary</h2>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+          <h2 style={{ marginTop: 0, marginBottom: 0 }}>Job Summary</h2>
+          {jobId ? (
+            <a href={`/job/${jobId}`} style={linkButtonStyle}>
+              Back to Job Details
+            </a>
+          ) : null}
+        </div>
+
         {job ? (
           <div style={{ lineHeight: 1.7, fontSize: "18px" }}>
             <div><strong>Customer:</strong> {job.customer_name || "—"}</div>

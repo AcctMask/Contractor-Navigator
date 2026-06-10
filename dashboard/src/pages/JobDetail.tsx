@@ -66,6 +66,8 @@ export default function JobDetail() {
         "voice_followup_sms_sent",
         "job_manually_updated",
         "job_archived",
+        "document_package_sent",
+        "document_package_signed",
       ].includes(String(event.kind || "").toLowerCase())
     )
 

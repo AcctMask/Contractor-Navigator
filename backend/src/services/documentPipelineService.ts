@@ -475,8 +475,8 @@ export async function sendDocumentPackage(
 
   const signBaseUrl =
     process.env.PUBLIC_SIGN_BASE_URL ||
-    process.env.PUBLIC_BASE_URL ||
-    "http://localhost:5173"
+    process.env.FRONTEND_BASE_URL ||
+    "https://contractor-navigator.vercel.app"
 
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
   const message = `Good2Go Roofing: Please review and sign your document here: ${signUrl}`
