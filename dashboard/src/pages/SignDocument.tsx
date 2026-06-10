@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
 
 const API = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
+const TERMS_VERSION = "2026.1"
+const TERMS_URL = "https://www.g2groofing.com/terms-and-conditions"
 
 type SignStatus = "loading" | "ready" | "error" | "signed" | "submitting"
 
@@ -76,7 +78,12 @@ export default function SignDocument() {
       const res = await fetch(`${API}/sign/${id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ signer_name: name.trim() }),
+        body: JSON.stringify({
+          signer_name: name.trim(),
+          terms_accepted: agree,
+          terms_version: TERMS_VERSION,
+          terms_url: TERMS_URL,
+        }),
       })
 
       const data = await res.json()
@@ -246,8 +253,11 @@ export default function SignDocument() {
                 onChange={(e) => setAgree(e.target.checked)}
               />
               <span>
-                By checking this box, I authorize Good2Go Roofing to proceed in
-                accordance with this document and the related project terms.
+                I have read and agree to the Good2Go Roofing{" "}
+                <a href={TERMS_URL} target="_blank" rel="noreferrer" style={{ color: "#93c5fd", fontWeight: 800 }}>
+                  Terms and Conditions
+                </a>
+                .
               </span>
             </label>
 

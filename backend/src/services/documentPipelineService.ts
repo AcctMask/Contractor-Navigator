@@ -461,6 +461,20 @@ export async function sendDocumentPackage(
 
   await pool.query(
     `
+    update jobs
+    set
+      stage = 'contract_sent',
+      crm_substatus = 'signature_requested',
+      contract_sent_at = coalesce(contract_sent_at, now()),
+      updated_at = now()
+    where tenant_id = $1
+      and id = $2
+    `,
+    [tenantId, jobId]
+  )
+
+  await pool.query(
+    `
     insert into timeline_events
       (tenant_id, job_id, kind, message, meta, created_at)
     values
@@ -469,11 +483,18 @@ export async function sendDocumentPackage(
     [
       tenantId,
       jobId,
-      `Document sent: ${documentPackage.document_title}`,
+      `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
       JSON.stringify({
         package_id: packageId,
         package_type: documentPackage.package_type,
+        document_title: documentPackage.document_title,
         sign_url: signUrl,
+        proposal_amount: documentPackage.payload?.proposal_amount ?? documentPackage.payload?.agreed_amount ?? null,
+        contract_amount: documentPackage.payload?.contract_amount ?? documentPackage.payload?.agreed_amount ?? null,
+        discount_amount: documentPackage.payload?.discount_amount ?? null,
+        discount_reason: documentPackage.payload?.discount_reason ?? null,
+        crm_stage: "contract_sent",
+        crm_substatus: "signature_requested",
         sms: smsResult,
         email: emailResult,
       }),
@@ -491,7 +512,12 @@ export async function sendDocumentPackage(
 
 export async function signDocumentPackage(
   packageId: number,
-  signerName: string
+  signerName: string,
+  options: {
+    terms_accepted?: boolean
+    terms_version?: string | null
+    terms_url?: string | null
+  } = {}
 ) {
   await ensureDocumentTables()
 
@@ -505,6 +531,9 @@ export async function signDocumentPackage(
     ...(doc.payload || {}),
     signed_by: signerName,
     signed_at: new Date().toISOString(),
+    terms_accepted: options.terms_accepted ?? false,
+    terms_version: options.terms_version || doc.payload?.terms_version || null,
+    terms_url: options.terms_url || doc.payload?.terms_url || null,
   }
 
   const result = await pool.query(
@@ -549,10 +578,19 @@ export async function signDocumentPackage(
     [
       Number(doc.tenant_id),
       Number(doc.job_id),
-      `Document signed: ${doc.document_title}`,
+      `Proposal/Contract electronically signed: ${doc.document_title}`,
       JSON.stringify({
         package_id: packageId,
+        package_type: doc.package_type,
+        document_title: doc.document_title,
         signer_name: signerName,
+        proposal_amount: updatedPayload.proposal_amount ?? updatedPayload.agreed_amount ?? null,
+        contract_amount: updatedPayload.contract_amount ?? updatedPayload.agreed_amount ?? null,
+        discount_amount: updatedPayload.discount_amount ?? null,
+        discount_reason: updatedPayload.discount_reason ?? null,
+        terms_accepted: updatedPayload.terms_accepted ?? null,
+        terms_version: updatedPayload.terms_version ?? null,
+        terms_url: updatedPayload.terms_url ?? null,
       }),
     ]
   )

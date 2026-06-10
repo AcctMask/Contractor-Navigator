@@ -37,6 +37,32 @@ function renderTemplate(value: string, target: any) {
 
 function getMessageByState(target: any) {
   const state = target.pipeline_status;
+  const hasPriorTouch = Boolean(target.last_touch_at);
+
+  if (state === "working" && hasPriorTouch) {
+    return {
+      subject: "Need an immediate roof replacement estimate?",
+      body: `Hi {{name}},
+
+Need an immediate roof replacement estimate?
+
+Visit here:
+
+https://www.g2groofing.com/instant-estimate
+
+With storm season underway, I also wanted to follow up in case you need a Florida roofing resource for emergency tarping, residential roofing, commercial roofing, multifamily projects, HOA communities, or condo properties.
+
+Good2Go Roofing is a licensed Florida Roofing Contractor, and I am also a licensed Insurance Adjuster. That combination helps when projects involve storm damage, documentation, insurance-related details, or fast response requirements.
+
+When we mobilize, we can typically bring 10+ roofing crews, and more with a little lead time. We work throughout Florida for volume projects and handle all major roof types.
+
+If you have an upcoming project, emergency tarp need, storm-related roofing issue, or a scope you would like reviewed, feel free to send it over.
+
+– Steve Pashoian
+Good2Go Roofing
+Licensed Roofing Contractor | Licensed Insurance Adjuster`,
+    };
+  }
 
   if (state === "on_hook") {
     return {

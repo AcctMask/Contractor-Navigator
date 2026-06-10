@@ -140,9 +140,18 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
   app.post("/sign/:id", async (request: any, reply) => {
     try {
       const { id } = request.params
-      const { signer_name } = request.body || {}
+      const {
+        signer_name,
+        terms_accepted,
+        terms_version,
+        terms_url,
+      } = request.body || {}
 
-      const result = await signDocumentPackage(Number(id), signer_name)
+      const result = await signDocumentPackage(Number(id), signer_name, {
+        terms_accepted: !!terms_accepted,
+        terms_version: terms_version || null,
+        terms_url: terms_url || null,
+      })
 
       return {
         ok: true,
