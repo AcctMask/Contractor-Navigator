@@ -103,8 +103,6 @@ export default function SignDocument() {
 
   const customerName = payload.customer_name || "Customer"
   const propertyAddress = payload.job_address || "Address to be confirmed"
-  const roofType = payload.roof_type || "To be determined"
-  const roofSquares = payload.roof_squares || "To be determined"
   const lowAmount = payload.low_amount
   const highAmount = payload.high_amount
   const agreedAmount = payload.agreed_amount
@@ -116,7 +114,6 @@ export default function SignDocument() {
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
-  const lineItems = Array.isArray(payload.estimate_line_items) ? payload.estimate_line_items : []
   const termsAndConditions = payload.terms_and_conditions || "Terms and conditions were included with the agreement at the time of signing."
   const amountDisplay = useMemo(() => {
     const agreed = moneyDisplay(agreedAmount)
