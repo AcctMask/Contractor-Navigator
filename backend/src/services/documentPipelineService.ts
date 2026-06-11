@@ -590,7 +590,7 @@ export async function sendDocumentPackage(
     "https://contractor-navigator.vercel.app"
 
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
-  const message = `Good2Go Roofing: Please review and sign your document here: ${signUrl}`
+  const message = `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature. Please review the project details, terms, and authorization language here: ${signUrl}`
 
   let smsResult: any = null
   let emailResult: any = null

@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom"
 
 const API = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TERMS_VERSION = "2026.1"
-const TERMS_URL = "https://www.g2groofing.com/terms-and-conditions"
+const TERMS_URL = "included-in-proposal-contract"
 
 type SignStatus = "loading" | "ready" | "error" | "signed" | "submitting"
 
@@ -242,7 +242,7 @@ export default function SignDocument() {
             <div style={docBox}>
               <h3 style={docBoxTitle}>Terms and Conditions</h3>
               <p style={docText}>
-                The full Good2Go Roofing Terms and Conditions are available using the link in the signature section.
+                The terms and conditions are included as part of this Proposal / Contract and are acknowledged by electronic signature below.
               </p>
             </div>
 
@@ -273,11 +273,7 @@ export default function SignDocument() {
                 onChange={(e) => setAgree(e.target.checked)}
               />
               <span>
-                I have read and agree to the Good2Go Roofing{" "}
-                <a href={TERMS_URL} target="_blank" rel="noreferrer" style={{ color: "#93c5fd", fontWeight: 800 }}>
-                  Terms and Conditions
-                </a>
-                .
+                I have read, understand, and agree to the Proposal / Contract terms and conditions included with this agreement.
               </span>
             </label>
 
