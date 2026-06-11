@@ -67,10 +67,16 @@ function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: string) 
   <table>
     ${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value || "—")}</td></tr>`).join("\n")}
   </table>
+  <section>
+    <h2>Terms and Conditions</h2>
+    <div style="white-space: pre-wrap;">${escapeHtml(payload.terms_and_conditions || "Terms and conditions were included with the agreement at the time of signing.")}</div>
+  </section>
+
   <div class="signature">
     <strong>Electronic Signature:</strong> ${escapeHtml(payload.signed_by || "Not signed yet")}<br />
     <strong>Signed At:</strong> ${escapeHtml(payload.signed_at || "—")}<br />
-    <strong>Terms Accepted:</strong> ${payload.terms_accepted === true ? "Yes" : "No / Not signed yet"}
+    <strong>Terms Accepted:</strong> ${payload.terms_accepted === true ? "Yes" : "No / Not signed yet"}<br />
+    <strong>Electronic Signature Statement:</strong> Typed signature accepted as electronic signature.
   </div>
 </body>
 </html>`

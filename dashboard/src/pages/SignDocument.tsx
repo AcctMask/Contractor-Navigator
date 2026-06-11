@@ -117,6 +117,7 @@ export default function SignDocument() {
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
   const lineItems = Array.isArray(payload.estimate_line_items) ? payload.estimate_line_items : []
+  const termsAndConditions = payload.terms_and_conditions || "Terms and conditions were included with the agreement at the time of signing."
   const amountDisplay = useMemo(() => {
     const agreed = moneyDisplay(agreedAmount)
     const low = moneyDisplay(lowAmount)
@@ -241,9 +242,9 @@ export default function SignDocument() {
 
             <div style={docBox}>
               <h3 style={docBoxTitle}>Terms and Conditions</h3>
-              <p style={docText}>
-                The terms and conditions are included as part of this Proposal / Contract and are acknowledged by electronic signature below.
-              </p>
+              <div style={{ ...docText, whiteSpace: "pre-wrap" }}>
+                {String(termsAndConditions)}
+              </div>
             </div>
 
             <div style={docBox}>

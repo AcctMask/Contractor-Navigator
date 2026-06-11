@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
+import { G2G_TERMS_AND_CONDITIONS } from "../lib/g2gTerms"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
 const TENANT_SLUG = "g2g-roofing"
@@ -68,8 +69,7 @@ function defaultEstimateLineItems(): EstimateLineItem[] {
   ]
 }
 
-const DEFAULT_TERMS =
-  "Price is based on the visible scope and information available at the time of estimate. Hidden damage, rotten decking, code-required upgrades, permit requirements, material changes, customer-requested changes, or insurance scope changes may require a written change order. Work scheduling is subject to weather, material availability, and production capacity."
+const DEFAULT_TERMS = G2G_TERMS_AND_CONDITIONS
 
 export default function DocumentPipelinePage() {
   const [searchParams] = useSearchParams()
