@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
+import { G2G_TERMS_AND_CONDITIONS } from "../lib/g2gTerms"
 
 const API = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TERMS_VERSION = "2026.1"
@@ -114,7 +115,9 @@ export default function SignDocument() {
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
-  const termsAndConditions = payload.terms_and_conditions || "Terms and conditions were included with the agreement at the time of signing."
+  const payloadTerms = String(payload.terms_and_conditions || "")
+  const termsAndConditions =
+    payloadTerms.length > 500 ? payloadTerms : G2G_TERMS_AND_CONDITIONS
   const amountDisplay = useMemo(() => {
     const agreed = moneyDisplay(agreedAmount)
     const low = moneyDisplay(lowAmount)

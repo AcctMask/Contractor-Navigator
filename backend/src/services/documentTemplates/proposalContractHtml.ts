@@ -1,3 +1,5 @@
+import { G2G_TERMS_AND_CONDITIONS } from "./g2gTerms"
+
 function moneyValue(value: any) {
   if (value === null || value === undefined || value === "") return "—"
   const n = Number(value)
@@ -60,17 +62,17 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     ${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value || "—")}</td></tr>`).join("\n")}
   </table>
 
-  <section>
-    <h2>Terms and Conditions</h2>
-    <div class="terms">${escapeHtml(payload.terms_and_conditions || "Terms and conditions were included with the agreement at the time of signing.")}</div>
-  </section>
-
   <div class="signature">
     <strong>Electronic Signature:</strong> ${escapeHtml(payload.signed_by || "Not signed yet")}<br />
     <strong>Signed At:</strong> ${escapeHtml(payload.signed_at || "—")}<br />
     <strong>Terms Accepted:</strong> ${payload.terms_accepted === true ? "Yes" : "No / Not signed yet"}<br />
     <strong>Electronic Signature Statement:</strong> Typed signature accepted as electronic signature.
   </div>
+
+  <section>
+    <h2>Terms and Conditions</h2>
+    <div class="terms">${escapeHtml(G2G_TERMS_AND_CONDITIONS)}</div>
+  </section>
 </body>
 </html>`
 }

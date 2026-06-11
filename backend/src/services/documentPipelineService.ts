@@ -523,7 +523,11 @@ export async function sendDocumentPackage(
     "https://contractor-navigator.vercel.app"
 
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
-  const message = `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature. Please review the project details, terms, and authorization language here: ${signUrl}`
+  const message = `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
+
+Please review the project details, pricing, authorization language, and terms and conditions before signing.
+
+Sign here: ${signUrl}`
 
   let smsResult: any = null
   let emailResult: any = null
@@ -659,6 +663,8 @@ export async function signDocumentPackage(
 
   const alertMsg = `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
 
+  const customerAckMsg = `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
+
   try {
     if (process.env.ALERT_SMS_TO) {
       await sendSMS(process.env.ALERT_SMS_TO, alertMsg)
@@ -670,6 +676,18 @@ export async function signDocumentPackage(
         "Document Signed",
         alertMsg
       )
+    }
+
+    if (updatedPayload.customer_email) {
+      await sendAlertEmail(
+        String(updatedPayload.customer_email),
+        "Good2Go Roofing received your signed Proposal / Contract",
+        customerAckMsg
+      )
+    }
+
+    if (updatedPayload.customer_phone) {
+      await sendSMS(String(updatedPayload.customer_phone), customerAckMsg)
     }
   } catch (err) {
     console.error("Notification failed:", err)
