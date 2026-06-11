@@ -188,47 +188,41 @@ export default function SignDocument() {
               <Info label="Phone" value={phone} />
               <Info label="Email" value={email} />
               <Info label="Property Address" value={propertyAddress} />
-              <Info label="Roof Type" value={roofType} />
-              <Info label="Roof Size" value={String(roofSquares)} />
               <Info label="Proposal Amount" value={moneyDisplay(proposalAmount) || amountDisplay} />
               <Info label="Contract Amount" value={moneyDisplay(contractAmount) || amountDisplay} />
               <Info label="Discount" value={moneyDisplay(discountAmount) || "—"} />
             </div>
 
             <div style={docBox}>
-              <h3 style={docBoxTitle}>Estimate Details</h3>
-
-              {lineItems.length ? (
-                <div style={{ display: "grid", gap: "8px", marginBottom: "18px" }}>
-                  {lineItems.map((item: any, index: number) => (
-                    <div
-                      key={index}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        gap: "12px",
-                        borderBottom: "1px solid rgba(255,255,255,0.12)",
-                        paddingBottom: "8px",
-                      }}
-                    >
-                      <div style={docText}>{item.description || "Estimate item"}</div>
-                      <div style={{ ...docText, fontWeight: 800 }}>
-                        {moneyDisplay(item.amount) || "—"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              <h3 style={docBoxTitle}>Project Details</h3>
 
               <p style={docText}>
-                Additional remarks: {remarks}
+                Property: {String(propertyAddress)}
               </p>
+
+              <p style={docText}>
+                Proposal Amount: {moneyDisplay(proposalAmount) || amountDisplay}
+              </p>
+
+              <p style={docText}>
+                Contract Amount: {moneyDisplay(contractAmount) || amountDisplay}
+              </p>
+
+              {discountAmount ? (
+                <p style={docText}>
+                  Discount: {moneyDisplay(discountAmount)}
+                </p>
+              ) : null}
 
               {discountReason ? (
                 <p style={docText}>
                   Discount / negotiation note: {discountReason}
                 </p>
               ) : null}
+
+              <p style={docText}>
+                Additional remarks: {remarks}
+              </p>
             </div>
 
             {vipBenefitsIncluded ? (
@@ -242,21 +236,30 @@ export default function SignDocument() {
 
             <div style={docBox}>
               <h3 style={docBoxTitle}>Terms and Conditions</h3>
-              <div style={{ ...docText, whiteSpace: "pre-wrap" }}>
+              <div
+                style={{
+                  ...docText,
+                  whiteSpace: "pre-wrap",
+                  maxHeight: "260px",
+                  overflowY: "auto",
+                  paddingRight: "8px",
+                }}
+              >
                 {String(termsAndConditions)}
               </div>
-            </div>
-
-            <div style={docBox}>
-              <h3 style={docBoxTitle}>Authorization</h3>
-              <p style={docText}>
-                By signing below, you authorize Good2Go Roofing to proceed with the work
-                described for this property based on this estimate and the project details shown above.
-              </p>
             </div>
           </section>
 
           <section style={rightCard}>
+            <div style={docBox}>
+              <h3 style={docBoxTitle}>Authorization</h3>
+              <p style={docText}>
+                By signing below, you authorize Good2Go Roofing to proceed with the work
+                described for this property based on the Project Details, Proposal / Contract terms,
+                and any written changes or approved insurance scope that may apply.
+              </p>
+            </div>
+
             <h2 style={sectionTitle}>Customer Signature</h2>
 
             <label style={label}>Full Legal Name</label>
