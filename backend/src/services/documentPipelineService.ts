@@ -670,9 +670,14 @@ export async function signDocumentPackage(
       await sendSMS(process.env.ALERT_SMS_TO, alertMsg)
     }
 
-    if (process.env.ALERT_EMAIL_TO) {
+    const signedNotificationEmail =
+      process.env.SIGNED_DOCUMENT_EMAIL_TO ||
+      process.env.G2G_GMAIL_TO ||
+      "good2goroofingandconstruction@gmail.com"
+
+    if (signedNotificationEmail) {
       await sendAlertEmail(
-        process.env.ALERT_EMAIL_TO,
+        signedNotificationEmail,
         "Document Signed",
         alertMsg
       )
