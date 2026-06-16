@@ -625,10 +625,12 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     ""
 
   const alertEmailTo =
+    process.env.VOICE_INTAKE_EMAIL_TO ||
+    process.env.G2G_GMAIL_TO ||
     settings.alert_email_to ||
     process.env.ALERT_EMAIL_TO ||
     process.env.ESCALATION_EMAIL_TO ||
-    ""
+    "good2goroofingandconstruction@gmail.com"
 
   try {
     smsResult = await sendSMS(alertSmsTo, smsBody)
