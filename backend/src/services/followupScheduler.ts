@@ -8,6 +8,9 @@ type SchedJob = {
   stage: string | null
   bot_paused: boolean
   created_at: string
+  updated_at: string | null
+  estimate_sent_at: string | null
+  contract_sent_at: string | null
 }
 
 type StageStats = {
@@ -77,7 +80,10 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
       t.slug as tenant_slug,
       j.stage,
       j.bot_paused,
-      j.created_at
+      j.created_at,
+      j.updated_at,
+      j.estimate_sent_at,
+      j.contract_sent_at
     from jobs j
     join tenants t
       on t.id = j.tenant_id
@@ -110,10 +116,22 @@ async function getStageStats(jobId: number, stage: string): Promise<StageStats> 
   }
 }
 
-function isRecentEnough(createdAt: string) {
-  const createdMs = new Date(createdAt).getTime()
+function getStageClockAt(job: SchedJob) {
+  if (job.stage === "contract_sent") {
+    return job.contract_sent_at || job.updated_at || job.created_at
+  }
+
+  if (job.stage === "estimate_sent") {
+    return job.estimate_sent_at || job.updated_at || job.created_at
+  }
+
+  return job.created_at
+}
+
+function isRecentEnough(stageClockAt: string) {
+  const stageClockMs = new Date(stageClockAt).getTime()
   const nowMs = Date.now()
-  return nowMs - createdMs <= MAX_AUTOMATION_JOB_AGE_MS
+  return nowMs - stageClockMs <= MAX_AUTOMATION_JOB_AGE_MS
 }
 
 async function processJob(job: SchedJob) {
@@ -123,7 +141,8 @@ async function processJob(job: SchedJob) {
   const delays = await stageDelaysForTenant(job.tenant_slug, job.stage)
   if (!delays.length) return
 
-  if (!isRecentEnough(job.created_at)) return
+  const stageClockAt = getStageClockAt(job)
+  if (!isRecentEnough(stageClockAt)) return
 
   const stats = await getStageStats(job.id, job.stage)
   if (stats.count >= delays.length) return
@@ -134,8 +153,8 @@ async function processJob(job: SchedJob) {
   const nowMs = Date.now()
 
   if (stats.count === 0) {
-    const createdMs = new Date(job.created_at).getTime()
-    if (nowMs - createdMs < gapMs) return
+    const stageClockMs = new Date(stageClockAt).getTime()
+    if (nowMs - stageClockMs < gapMs) return
 
     await queueAiFollowupByTenantSlug(job.tenant_slug, job.id)
     return
