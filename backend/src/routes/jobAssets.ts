@@ -354,7 +354,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         insert into timeline_events
           (tenant_id, job_id, kind, message, meta, created_at)
         values
-          ($1,$2,'manual_sms_sent',$3,$4::jsonb,now())
+          ($1,$2,'staff_note',$3,$4::jsonb,now())
         returning
           id,
           message,
@@ -367,6 +367,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           smsMessage,
           JSON.stringify({
             author: smsAuthor,
+            note_type: "manual_sms_sent",
+            channel: "sms",
             to: customerPhone,
             sms_result: smsResult,
           }),

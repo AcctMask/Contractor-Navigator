@@ -193,6 +193,7 @@ export default function JobDetail() {
     const meta = item?.meta || {}
 
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+    if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
     if (kind.includes("manual_sms")) return "Staff SMS"
     if (kind.includes("staff_note")) return "Staff Note"
     if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
