@@ -5,6 +5,7 @@ import fs from "fs"
 import path from "path"
 import { pipeline } from "stream/promises"
 import { randomUUID } from "crypto"
+import { sendSMS } from "../services/twilioService"
 
 async function ensureJobExists(tenantId: number, jobId: number) {
   const result = await pool.query(
@@ -71,7 +72,22 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         from timeline_events
         where tenant_id = $1
           and job_id = $2
-          and kind in ('staff_note', 'job_asset_uploaded', 'estimate_details', 'lead_created')
+          and kind in (
+            'staff_note',
+            'manual_sms_sent',
+            'job_asset_uploaded',
+            'estimate_details',
+            'lead_created',
+            'ai_message_generated',
+            'ai_message_sent',
+            'ai_message_send_failed',
+            'customer_reply',
+            'voice_intake_started',
+            'voice_intake_alert_routed',
+            'voice_intake_alert_sent',
+            'document_package_sent',
+            'document_package_signed'
+          )
         order by created_at desc, id desc
         `,
         [tenantId, Number(jobId)]
@@ -292,6 +308,75 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || "Delete file failed" }
+    }
+  })
+
+  app.post("/assets/:tenantSlug/job/:jobId/send-sms", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const { message, author } = req.body || {}
+      const smsAuthor = String(author || "Team").trim() || "Team"
+      const smsMessage = String(message || "").trim()
+
+      if (!smsMessage) {
+        throw new Error("SMS message is required")
+      }
+
+      const jobResult = await pool.query(
+        `
+        select
+          j.id,
+          c.phone as customer_phone
+        from jobs j
+        left join customers c on c.id = j.customer_id
+        where j.tenant_id = $1
+          and j.id = $2
+        limit 1
+        `,
+        [tenantId, Number(jobId)]
+      )
+
+      if (!jobResult.rowCount) {
+        throw new Error("Job not found")
+      }
+
+      const customerPhone = jobResult.rows[0].customer_phone
+
+      if (!customerPhone) {
+        throw new Error("Customer phone is missing")
+      }
+
+      const smsResult = await sendSMS(String(customerPhone), smsMessage)
+
+      const result = await pool.query(
+        `
+        insert into timeline_events
+          (tenant_id, job_id, kind, message, meta, created_at)
+        values
+          ($1,$2,'manual_sms_sent',$3,$4::jsonb,now())
+        returning
+          id,
+          message,
+          meta,
+          created_at
+        `,
+        [
+          tenantId,
+          Number(jobId),
+          smsMessage,
+          JSON.stringify({
+            author: smsAuthor,
+            to: customerPhone,
+            sms_result: smsResult,
+          }),
+        ]
+      )
+
+      return { ok: true, sms: smsResult, note: result.rows[0] }
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Send SMS failed" }
     }
   })
 

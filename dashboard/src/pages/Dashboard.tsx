@@ -78,6 +78,18 @@ function fmtDate(value?: string | null) {
   return d.toLocaleString()
 }
 
+function fmtLeadDate(value?: string | null) {
+  if (!value) return "—"
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString([], {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
 export default function DashboardPage() {
   const [jobs, setJobs] = useState<DashboardJob[]>([])
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
@@ -302,8 +314,8 @@ export default function DashboardPage() {
                     <div>CUSTOMER</div>
                     <div>STAGE</div>
                     <div>ZIP</div>
-                    <div>CARRIER</div>
-                    <div>CLAIM</div>
+                    <div>{selectedStage === "lead" ? "RECEIVED" : "CARRIER"}</div>
+                    <div>{selectedStage === "lead" ? "LAST ACTIVITY" : "CLAIM"}</div>
                     <div>SOURCE</div>
                     <div>BOT</div>
                   </div>
@@ -319,8 +331,8 @@ export default function DashboardPage() {
                           <div>{job.customer_name || "Unknown"}</div>
                           <div>{job.stage || "-"}</div>
                           <div>{job.zip || "-"}</div>
-                          <div>{job.carrier || "-"}</div>
-                          <div>{job.claim_number || "-"}</div>
+                          <div>{selectedStage === "lead" ? fmtLeadDate(job.created_at) : (job.carrier || "-")}</div>
+                          <div>{selectedStage === "lead" ? fmtLeadDate(job.updated_at || job.created_at) : (job.claim_number || "-")}</div>
                           <div>{job.lead_source || job.lead_source_detail || "-"}</div>
                           <div>{job.bot_paused ? "Paused" : "On"}</div>
                         </div>

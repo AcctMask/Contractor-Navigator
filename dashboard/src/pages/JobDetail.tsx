@@ -20,6 +20,7 @@ export default function JobDetail() {
   const [files, setFiles] = useState<FileList | null>(null)
   const [uploadCategory, setUploadCategory] = useState("Documents")
   const [noteText, setNoteText] = useState("")
+  const [smsText, setSmsText] = useState("")
   const [stage, setStage] = useState("lead")
   const [crmSubstatus, setCrmSubstatus] = useState("")
   const [botPaused, setBotPaused] = useState(false)
@@ -192,6 +193,8 @@ export default function JobDetail() {
     const meta = item?.meta || {}
 
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+    if (kind.includes("manual_sms")) return "Staff SMS"
+    if (kind.includes("staff_note")) return "Staff Note"
     if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
     if (kind.includes("customer_reply")) return "Customer Reply"
     if (kind.includes("estimate_details")) return "Estimate Details"
@@ -335,6 +338,38 @@ export default function JobDetail() {
 
     setStage(nextStage)
     setStatus("Intake decision saved")
+    await loadJob()
+  }
+
+  async function sendManualSms() {
+    if (!id) return
+    if (!smsText.trim()) {
+      setError("Type a text message first")
+      return
+    }
+
+    setError("")
+    setStatus("Sending text...")
+
+    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/send-sms`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: smsText,
+        author: currentUser?.full_name || currentUser?.email || "Team",
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      setStatus("")
+      setError(data?.error || "Send text failed")
+      return
+    }
+
+    setSmsText("")
+    setStatus("Text sent")
     await loadJob()
   }
 
@@ -844,6 +879,17 @@ export default function JobDetail() {
             </div>
           ))
         )}
+      </section>
+
+      <section style={card}>
+        <h2>Send SMS</h2>
+        <textarea
+          value={smsText}
+          onChange={(e) => setSmsText(e.target.value)}
+          placeholder="Type a text message to the customer..."
+          style={textarea}
+        />
+        <button onClick={sendManualSms} style={button}>Send Text</button>
       </section>
 
       <section style={card}>
