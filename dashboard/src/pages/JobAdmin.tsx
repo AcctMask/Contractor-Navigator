@@ -11,6 +11,23 @@ export default function JobAdmin() {
   const [jobs, setJobs] = useState<any[]>([])
   const [error, setError] = useState("")
   const [status, setStatus] = useState("")
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
+
+  function showToast(type: "success" | "error", message: string) {
+    setToast({ type, message })
+    window.setTimeout(() => setToast(null), 2600)
+  }
+
+  function successToast(message: string) {
+    setStatus(message)
+    showToast("success", message)
+  }
+
+  function errorToast(message: string) {
+    setStatus("")
+    setError(message)
+    showToast("error", message)
+  }
 
   const [form, setForm] = useState({
     customer_name: "",
@@ -41,7 +58,7 @@ export default function JobAdmin() {
       setStatus(`Found ${data.results?.length || 0} job(s)`)
     } catch (err: any) {
       setStatus("")
-      setError(err.message || "Search failed")
+      errorToast(err.message || "Search failed")
     }
   }
 
@@ -61,7 +78,7 @@ export default function JobAdmin() {
       setStatus(`Loaded ${data.jobs?.length || 0} job(s)`)
     } catch (err: any) {
       setStatus("")
-      setError(err.message || "Load all failed")
+      errorToast(err.message || "Load all failed")
     }
   }
 
@@ -86,7 +103,7 @@ export default function JobAdmin() {
         throw new Error(data.error || "Create failed")
       }
 
-      setStatus(`Job created: #${data.job?.id || data.job_id}`)
+      successToast(`Job created: #${data.job?.id || data.job_id}`)
 
       setForm({
         customer_name: "",
@@ -102,7 +119,7 @@ export default function JobAdmin() {
       loadAllJobs()
     } catch (err: any) {
       setStatus("")
-      setError(err.message || "Create failed")
+      errorToast(err.message || "Create failed")
     }
   }
 
@@ -112,6 +129,22 @@ export default function JobAdmin() {
 
   return (
     <div style={{ padding: 20 }}>
+      {toast ? (
+        <div style={{
+          position: "fixed",
+          top: 18,
+          right: 18,
+          zIndex: 9999,
+          padding: "12px 16px",
+          borderRadius: 12,
+          fontWeight: 900,
+          color: "#ffffff",
+          background: toast.type === "success" ? "#16a34a" : "#dc2626",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+        }}>
+          {toast.type === "success" ? "✓ " : "✕ "}{toast.message}
+        </div>
+      ) : null}
       <h1 style={{ color: "white" }}>Job Admin</h1>
 
       {/* SEARCH */}

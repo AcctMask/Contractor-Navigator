@@ -26,6 +26,23 @@ export default function JobDetail() {
   const [botPaused, setBotPaused] = useState(false)
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
+
+  function showToast(type: "success" | "error", message: string) {
+    setToast({ type, message })
+    window.setTimeout(() => setToast(null), 2600)
+  }
+
+  function successToast(message: string) {
+    setStatus(message)
+    showToast("success", message)
+  }
+
+  function errorToast(message: string) {
+    setStatus("")
+    setError(message)
+    showToast("error", message)
+  }
   const [isEditing, setIsEditing] = useState(false)
   const [form, setForm] = useState<any>({})
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
@@ -180,11 +197,11 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Calendar update failed")
+      errorToast(data?.error || "Calendar update failed")
       return
     }
 
-    setStatus("Calendar event saved")
+    successToast("Calendar event saved")
     await loadCalendarEvents()
   }
 
@@ -240,11 +257,11 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Save failed")
+      errorToast(data?.error || "Save failed")
       return
     }
 
-    setStatus("Customer / claim data saved")
+    successToast("Customer / claim data saved")
     setIsEditing(false)
     await loadJob()
   }
@@ -271,11 +288,11 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Archive failed")
+      errorToast(data?.error || "Archive failed")
       return
     }
 
-    setStatus("Customer file archived and follow-ups cancelled")
+    successToast("Customer file archived and follow-ups cancelled")
     await loadJob()
   }
 
@@ -306,11 +323,11 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Save stage failed")
+      errorToast(data?.error || "Save stage failed")
       return
     }
 
-    setStatus("Stage saved")
+    successToast("Stage saved")
     await loadJob()
   }
 
@@ -333,19 +350,19 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Intake decision failed")
+      errorToast(data?.error || "Intake decision failed")
       return
     }
 
     setStage(nextStage)
-    setStatus("Intake decision saved")
+    successToast("Intake decision saved")
     await loadJob()
   }
 
   async function sendManualSms() {
     if (!id) return
     if (!smsText.trim()) {
-      setError("Type a text message first")
+      errorToast("Type a text message first")
       return
     }
 
@@ -365,19 +382,19 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Send text failed")
+      errorToast(data?.error || "Send text failed")
       return
     }
 
     setSmsText("")
-    setStatus("Text sent")
+    successToast("Text sent")
     await loadJob()
   }
 
   async function addNote() {
     if (!id) return
     if (!noteText.trim()) {
-      setError("Type a note first")
+      errorToast("Type a note first")
       return
     }
 
@@ -397,12 +414,12 @@ export default function JobDetail() {
 
     if (!res.ok || !data.ok) {
       setStatus("")
-      setError(data?.error || "Add note failed")
+      errorToast(data?.error || "Add note failed")
       return
     }
 
     setNoteText("")
-    setStatus("Note added")
+    successToast("Note added")
     await loadJob()
     await loadAssets()
   }
@@ -418,17 +435,17 @@ export default function JobDetail() {
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
-      setError(data?.error || "Delete note failed")
+      errorToast(data?.error || "Delete note failed")
       return
     }
 
-    setStatus("Note deleted")
+    successToast("Note deleted")
     await loadAssets()
   }
 
   async function uploadFiles() {
     if (!id || !files || files.length === 0) {
-      setError("Choose one or more files first")
+      errorToast("Choose one or more files first")
       return
     }
 
@@ -437,7 +454,7 @@ export default function JobDetail() {
     const totalMb = totalBytes / 1024 / 1024
 
     if (totalMb > 100) {
-      setError(`Selected files total ${totalMb.toFixed(1)} MB. Current upload limit is 100 MB per request.`)
+      errorToast(`Selected files total ${totalMb.toFixed(1)} MB. Current upload limit is 100 MB per request.`)
       return
     }
 
@@ -465,16 +482,16 @@ export default function JobDetail() {
 
       if (!res.ok || !data.ok) {
         setStatus("")
-        setError(data?.error || `Upload failed with status ${res.status}`)
+        errorToast(data?.error || `Upload failed with status ${res.status}`)
         return
       }
 
       setFiles(null)
-      setStatus(`Uploaded ${data.uploaded?.length || 0} file(s) successfully`)
+      successToast(`Uploaded ${data.uploaded?.length || 0} file(s) successfully`)
       await loadAssets()
     } catch (err: any) {
       setStatus("")
-      setError(err?.message || "Upload failed. Large files may require a stronger upload path.")
+      errorToast(err?.message || "Upload failed. Large files may require a stronger upload path.")
     }
   }
 
@@ -489,11 +506,11 @@ export default function JobDetail() {
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
-      setError(data?.error || "Delete file failed")
+      errorToast(data?.error || "Delete file failed")
       return
     }
 
-    setStatus("File deleted")
+    successToast("File deleted")
     await loadAssets()
   }
 
@@ -509,6 +526,22 @@ export default function JobDetail() {
 
   return (
     <div style={page}>
+      {toast ? (
+        <div style={{
+          position: "fixed",
+          top: 18,
+          right: 18,
+          zIndex: 9999,
+          padding: "12px 16px",
+          borderRadius: 12,
+          fontWeight: 900,
+          color: "#ffffff",
+          background: toast.type === "success" ? "#16a34a" : "#dc2626",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+        }}>
+          {toast.type === "success" ? "✓ " : "✕ "}{toast.message}
+        </div>
+      ) : null}
       <Link to="/job-admin" style={linkStyle}>← Back to Job Admin</Link>
 
       <h1 style={{ color: "white" }}>Job #{id}</h1>
