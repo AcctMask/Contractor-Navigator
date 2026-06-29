@@ -8,11 +8,13 @@ type DevSettings = {
   estimate_messages: string[]
   contract_messages: string[]
   tarp_messages: string[]
+  weather_report_messages: string[]
 
   lead_timings_minutes: number[]
   estimate_timings_minutes: number[]
   contract_timings_minutes: number[]
   tarp_timings_minutes: number[]
+  weather_report_timings_minutes: number[]
 }
 
 export default function DeveloperSettings() {
@@ -154,6 +156,9 @@ export default function DeveloperSettings() {
 
       {renderTiming("lead_timings_minutes", "Lead")}
       {renderMessages("lead_messages", "Lead")}
+
+      {renderTiming("weather_report_timings_minutes", "Weather Evidence Report")}
+      {renderMessages("weather_report_messages", "Weather Evidence Report")}
 
       {renderTiming("estimate_timings_minutes", "Estimate")}
       {renderMessages("estimate_messages", "Estimate")}
