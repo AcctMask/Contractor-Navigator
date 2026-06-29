@@ -366,6 +366,103 @@ const insertedJob = await pool.query(
     });
   });
 
+
+  app.post("/lead/weather-evidence", async (req, reply) => {
+    const body: any = (req as any).body || {};
+
+    const tenantSlug = asString(body.tenant_slug) || DEFAULT_TENANT;
+    const tenantId = await getTenantIdBySlug(tenantSlug);
+
+    const fullName = asString(body.name) || "Unknown Lead";
+    const phone = asString(body.phone);
+    const email = asString(body.email);
+    const address = asString(body.address);
+
+    const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, address);
+
+    const insertedJob = await pool.query(
+      `insert into jobs (
+        tenant_id,
+        customer_id,
+        external_crm,
+        external_job_id,
+        job_type,
+        stage,
+        crm_substatus,
+        crm_flow_key,
+        address1,
+        city,
+        state,
+        zip,
+        lead_source,
+        lead_source_detail
+      )
+      values (
+        $1,$2,
+        'storm_verification',
+        $3,
+        'ROOF_REPLACEMENT',
+        'lead',
+        'weather_evidence_report_generated',
+        'weather_evidence_report',
+        $4,$5,$6,$7,
+        'Storm Verification',
+        'weather_evidence_report'
+      )
+      returning id`,
+      [
+        tenantId,
+        customerId,
+        `weather-${Date.now()}`,
+        address,
+        asString(body.city),
+        asString(body.state),
+        asString(body.zip),
+      ]
+    );
+
+    const jobId = Number(insertedJob.rows[0].id);
+
+    const reportMeta = {
+      source: "storm_verification",
+      report_id: asString(body.report_id),
+      report_generated_at: asString(body.report_generated_at),
+      report_type: asString(body.report_type) || "Weather Evidence Report",
+      property_address: address,
+      property_county: asString(body.property_county),
+      property_zip: asString(body.zip),
+      search_start: asString(body.search_start),
+      search_end: asString(body.search_end),
+      search_radius_miles: body.search_radius_miles ? Number(body.search_radius_miles) : null,
+      events_within_radius: body.events_within_radius ? Number(body.events_within_radius) : null,
+      hail_observations: body.hail_observations ? Number(body.hail_observations) : null,
+      wind_observations: body.wind_observations ? Number(body.wind_observations) : null,
+      highest_wind_mph: body.highest_wind_mph ? Number(body.highest_wind_mph) : null,
+      largest_hail_in: body.largest_hail_in ? Number(body.largest_hail_in) : null,
+    };
+
+    await pool.query(
+      `insert into timeline_events (
+        tenant_id, job_id, kind, message, meta
+      )
+      values ($1,$2,'weather_evidence_report_generated',$3,$4)`,
+      [
+        tenantId,
+        jobId,
+        `Weather Evidence Report generated and added to ECO${reportMeta.report_id ? `: ${reportMeta.report_id}` : ""}`,
+        JSON.stringify(reportMeta)
+      ]
+    );
+
+    return reply.send({
+      ok: true,
+      job_id: jobId,
+      crm_flow_key: "weather_evidence_report",
+      stage: "lead"
+    });
+  });
+
+
   app.post("/lead/contract-click", async (req, reply) => {
     const body: any = (req as any).body || {};
 
