@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
+import { sendSMS } from "../services/twilioService";
+import { sendAlertEmail } from "../services/emailService";
 
 const DEFAULT_TENANT = "g2g-roofing";
 
@@ -220,6 +222,63 @@ async function registerLeadRoutes(app: FastifyInstance) {
 
       const jobId = Number(insertedJob.rows[0].id)
 
+      let customerSmsResult: any = null
+      let customerEmailResult: any = null
+      let ownerSmsResult: any = null
+      let ownerEmailResult: any = null
+
+      const customerAck =
+        `Good2Go Roofing: Thank you for contacting us. We received your request about ${product}. A team member will follow up with you soon. Reply STOP to opt out.`
+
+      const ownerAlert =
+        `NEW WEBSITE CONTACT\n\n` +
+        `Customer: ${fullName}\n` +
+        `Job ID: ${jobId}\n` +
+        `Phone: ${phone || "Unknown"}\n` +
+        `Email: ${email || "Unknown"}\n` +
+        `ZIP: ${zip || "Unknown"}\n` +
+        `Requested Service: ${product}\n\n` +
+        `Source: Website Contact Form`
+
+      try {
+        if (phone) {
+          customerSmsResult = await sendSMS(phone, customerAck)
+        } else {
+          customerSmsResult = { skipped: true, reason: "missing_phone" }
+        }
+
+        if (email) {
+          customerEmailResult = await sendAlertEmail(
+            email,
+            "Good2Go Roofing received your request",
+            customerAck
+          )
+        } else {
+          customerEmailResult = { skipped: true, reason: "missing_email" }
+        }
+
+        if (process.env.ALERT_SMS_TO) {
+          ownerSmsResult = await sendSMS(process.env.ALERT_SMS_TO, ownerAlert)
+        } else {
+          ownerSmsResult = { skipped: true, reason: "missing_alert_sms_to" }
+        }
+
+        const ownerEmailTo =
+          process.env.G2G_GMAIL_TO ||
+          process.env.ALERT_EMAIL_TO ||
+          "good2goroofingandconstruction@gmail.com"
+
+        if (ownerEmailTo) {
+          ownerEmailResult = await sendAlertEmail(
+            ownerEmailTo,
+            `New website contact: ${fullName}`,
+            ownerAlert
+          )
+        }
+      } catch (err: any) {
+        ownerEmailResult = ownerEmailResult || { error: err?.message || String(err) }
+      }
+
       await pool.query(
         `
         insert into timeline_events (
@@ -235,6 +294,10 @@ async function registerLeadRoutes(app: FastifyInstance) {
             source: "wordpress_contact_form",
             product,
             raw_payload: body,
+            customer_sms: customerSmsResult,
+            customer_email: customerEmailResult,
+            owner_sms: ownerSmsResult,
+            owner_email: ownerEmailResult,
           }),
         ]
       )
