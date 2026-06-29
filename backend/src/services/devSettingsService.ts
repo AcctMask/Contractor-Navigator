@@ -25,9 +25,9 @@ function defaultSettings(): DevSettings {
     alert_email_to: "",
     alert_sms_to: "",
 
-    lead_messages: ["", "", "", ""],
-    estimate_messages: ["", "", "", ""],
-    contract_messages: ["", "", "", "", ""],
+    lead_messages: ["", "", "", "", "", "", "", "", "", ""],
+    estimate_messages: ["", "", "", "", "", "", "", "", "", ""],
+    contract_messages: ["", "", "", "", "", "", "", "", "", ""],
 
     tarp_messages: [
       "Good2Go Roofing & Construction LLC has completed your emergency tarp service. Please remember coverage, cause of loss, and repair scope are determined by the carrier and desk adjuster after claim review. If you have questions in the meantime, feel free to reply here anytime.",
@@ -37,9 +37,9 @@ function defaultSettings(): DevSettings {
       "If you would like, you can also request a free roof estimate anytime through our website: https://g2g-instant-estimator.netlify.app/ or by contacting sales@g2groofing.com."
     ],
 
-    lead_timings_minutes: [0, 1440, 2880, 4320],
-    estimate_timings_minutes: [0, 1440, 4320, 7200],
-    contract_timings_minutes: [0, 1440, 4320, 7200, 10080],
+    lead_timings_minutes: [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
+    estimate_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
+    contract_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
 
     tarp_timings_minutes: [180, 7200, 20160, 43200, 86400]
   }
