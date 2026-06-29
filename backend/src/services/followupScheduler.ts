@@ -134,6 +134,14 @@ function getStageClockAt(job: SchedJob) {
   return job.created_at
 }
 
+function getAutomationKey(job: SchedJob) {
+  if (job.crm_flow_key === "weather_evidence_report") {
+    return "weather_evidence_report"
+  }
+
+  return job.stage || "unknown"
+}
+
 function isRecentEnough(stageClockAt: string) {
   const stageClockMs = new Date(stageClockAt).getTime()
   const nowMs = Date.now()
@@ -150,7 +158,8 @@ async function processJob(job: SchedJob) {
   const stageClockAt = getStageClockAt(job)
   if (!isRecentEnough(stageClockAt)) return
 
-  const stats = await getStageStats(job.id, job.stage)
+  const automationKey = getAutomationKey(job)
+  const stats = await getStageStats(job.id, automationKey)
   if (stats.count >= delays.length) return
 
   const gapMs = nextGapMs(delays, stats.count)
