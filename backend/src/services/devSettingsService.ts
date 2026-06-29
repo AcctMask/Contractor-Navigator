@@ -13,11 +13,13 @@ export type DevSettings = {
   estimate_messages: string[]
   contract_messages: string[]
   tarp_messages: string[]
+  weather_report_messages: string[]
 
   lead_timings_minutes: number[]
   estimate_timings_minutes: number[]
   contract_timings_minutes: number[]
   tarp_timings_minutes: number[]
+  weather_report_timings_minutes: number[]
 }
 
 function defaultSettings(): DevSettings {
@@ -37,11 +39,25 @@ function defaultSettings(): DevSettings {
       "If you would like, you can also request a free roof estimate anytime through our website: https://g2g-instant-estimator.netlify.app/ or by contacting sales@g2groofing.com."
     ],
 
+    weather_report_messages: [
+      "Hi {{name}}, your Weather Evidence Report has been generated. If you have questions about the report, reply here and we can help.",
+      "Hi {{name}}, just confirming you received your Weather Evidence Report. We are happy to answer questions about the weather data shown.",
+      "Hi {{name}}, your report summarizes documented weather observations near the property. If you would like help understanding the report, reply here anytime.",
+      "Hi {{name}}, if you have questions about what the weather evidence may mean for your roof, we can help review the next steps.",
+      "Hi {{name}}, if you would like, Good2Go Roofing can provide a complimentary roof inspection based on the property and report information.",
+      "Hi {{name}}, you can also request a free roof estimate anytime here: https://g2g-instant-estimator.netlify.app/",
+      "Hi {{name}}, insurance timing and documentation can matter after storm activity. If you have questions about the process, we can help explain what to expect.",
+      "Hi {{name}}, storm season is a good time to make sure your roof is ready. If you would like a roof check or estimate, reply here anytime.",
+      "Hi {{name}}, just checking in to see if you had any remaining questions about your Weather Evidence Report or roof options.",
+      "Hi {{name}}, final courtesy follow-up. If you need help with your roof, inspection, or estimate, reply here anytime."
+    ],
+
     lead_timings_minutes: [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
     estimate_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
     contract_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
 
-    tarp_timings_minutes: [180, 7200, 20160, 43200, 86400]
+    tarp_timings_minutes: [180, 7200, 20160, 43200, 86400],
+    weather_report_timings_minutes: [0, 1440, 4320, 10080, 20160, 30240, 43200, 64800, 86400, 129600]
   }
 }
 
@@ -79,6 +95,8 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
     lead_timings_minutes: [...(merged.lead_timings_minutes || []), ...defaults.lead_timings_minutes].slice(0, 10),
     estimate_timings_minutes: [...(merged.estimate_timings_minutes || []), ...defaults.estimate_timings_minutes].slice(0, 10),
     contract_timings_minutes: [...(merged.contract_timings_minutes || []), ...defaults.contract_timings_minutes].slice(0, 10),
+    weather_report_messages: [...(merged.weather_report_messages || []), ...defaults.weather_report_messages].slice(0, 10),
+    weather_report_timings_minutes: [...(merged.weather_report_timings_minutes || []), ...defaults.weather_report_timings_minutes].slice(0, 10),
   }
 }
 
