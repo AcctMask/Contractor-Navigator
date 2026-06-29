@@ -484,24 +484,53 @@ function hasTimelineKind(timeline: TimelineRow[], kind: string) {
   return timeline.some((t) => String(t.kind || "").toLowerCase() === target)
 }
 
-function getStageMessages(settings: DevSettings, stage: string | null) {
-  if (stage === "lead") return settings.lead_messages
-  if (stage === "estimate_sent") return settings.estimate_messages
-  if (stage === "contract_sent") return settings.contract_messages
-  return []
+function getWorkflowMessages(settings: DevSettings, job: JobRow) {
+  if (job.crm_flow_key === "weather_evidence_report") {
+    return {
+      workflowKey: "weather_evidence_report",
+      messages: settings.weather_report_messages || []
+    }
+  }
+
+  if (job.stage === "lead") {
+    return {
+      workflowKey: "lead",
+      messages: settings.lead_messages
+    }
+  }
+
+  if (job.stage === "estimate_sent") {
+    return {
+      workflowKey: "estimate_sent",
+      messages: settings.estimate_messages
+    }
+  }
+
+  if (job.stage === "contract_sent") {
+    return {
+      workflowKey: "contract_sent",
+      messages: settings.contract_messages
+    }
+  }
+
+  return {
+    workflowKey: job.stage || "unknown",
+    messages: []
+  }
 }
 
 function buildAiMessage(job: JobRow, timeline: TimelineRow[], settings: DevSettings) {
   if (!job.stage) return null
 
-  const stageMessages = getStageMessages(settings, job.stage)
+  const workflow = getWorkflowMessages(settings, job)
+  const stageMessages = workflow.messages.filter((m) => String(m || "").trim().length > 0)
   if (!stageMessages.length) return null
 
-  const count = countExistingAiMessagesForStage(timeline, job.stage)
+  const count = countExistingAiMessagesForStage(timeline, workflow.workflowKey)
   const rawMessage = stageMessages[Math.min(count, stageMessages.length - 1)]
 
   return {
-    stage: job.stage,
+    stage: workflow.workflowKey,
     order: count + 1,
     message: fillTemplate(rawMessage, job.customer_name),
   }
