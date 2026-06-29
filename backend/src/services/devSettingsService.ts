@@ -65,9 +65,20 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
 
   const existing = result.rows[0].settings || {}
 
-  return {
-    ...defaultSettings(),
+  const defaults = defaultSettings()
+  const merged = {
+    ...defaults,
     ...existing
+  }
+
+  return {
+    ...merged,
+    lead_messages: [...(merged.lead_messages || []), ...defaults.lead_messages].slice(0, 10),
+    estimate_messages: [...(merged.estimate_messages || []), ...defaults.estimate_messages].slice(0, 10),
+    contract_messages: [...(merged.contract_messages || []), ...defaults.contract_messages].slice(0, 10),
+    lead_timings_minutes: [...(merged.lead_timings_minutes || []), ...defaults.lead_timings_minutes].slice(0, 10),
+    estimate_timings_minutes: [...(merged.estimate_timings_minutes || []), ...defaults.estimate_timings_minutes].slice(0, 10),
+    contract_timings_minutes: [...(merged.contract_timings_minutes || []), ...defaults.contract_timings_minutes].slice(0, 10),
   }
 }
 
