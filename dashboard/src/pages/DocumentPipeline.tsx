@@ -78,6 +78,23 @@ export default function DocumentPipelinePage() {
   const [documents, setDocuments] = useState<DocumentPackage[]>([])
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
+
+  function showToast(type: "success" | "error", message: string) {
+    setToast({ type, message })
+    window.setTimeout(() => setToast(null), 2600)
+  }
+
+  function successToast(message: string) {
+    setStatus(message)
+    showToast("success", message)
+  }
+
+  function errorToast(message: string) {
+    setStatus("")
+    setError(message)
+    showToast("error", message)
+  }
 
   const [form, setForm] = useState<EstimateDetails>({
     roof_type: "",
@@ -223,10 +240,10 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Save failed")
       }
 
-      setStatus("Estimate details saved")
+      successToast("Estimate details saved")
       await loadJob()
     } catch (err: any) {
-      setError(err?.message || "Save failed")
+      errorToast(err?.message || "Save failed")
       setStatus("Save failed")
     }
   }
@@ -284,10 +301,10 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Send package failed")
       }
 
-      setStatus("Package sent for signature")
+      successToast("Package sent for signature")
       await loadJob()
     } catch (err: any) {
-      setError(err?.message || "Send package failed")
+      errorToast(err?.message || "Send package failed")
       setStatus("Send package failed")
     }
   }
@@ -313,10 +330,10 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Create package failed")
       }
 
-      setStatus(`${packageType} package created`)
+      successToast(`${packageType} package created`)
       await loadJob()
     } catch (err: any) {
-      setError(err?.message || "Create package failed")
+      errorToast(err?.message || "Create package failed")
       setStatus("Create package failed")
     }
   }
@@ -330,6 +347,23 @@ export default function DocumentPipelinePage() {
         gap: "24px",
       }}
     >
+      {toast ? (
+        <div style={{
+          position: "fixed",
+          top: 18,
+          right: 18,
+          zIndex: 9999,
+          padding: "12px 16px",
+          borderRadius: 12,
+          fontWeight: 900,
+          color: "#ffffff",
+          background: toast.type === "success" ? "#16a34a" : "#dc2626",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.28)",
+        }}>
+          {toast.type === "success" ? "✓ " : "✕ "}{toast.message}
+        </div>
+      ) : null}
+
       <section style={cardStyle}>
         <h1 style={{ marginTop: 0, fontSize: "42px", lineHeight: 1.1 }}>Document Pipeline</h1>
         <p style={{ marginTop: "12px", fontSize: "18px", opacity: 0.88 }}>
