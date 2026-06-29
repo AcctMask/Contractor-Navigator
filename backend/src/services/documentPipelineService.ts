@@ -531,6 +531,8 @@ Sign here: ${signUrl}`
 
   let smsResult: any = null
   let emailResult: any = null
+  let internalSmsResult: any = null
+  let internalEmailResult: any = null
 
   if (job.customer_phone) {
     smsResult = await sendSMS(job.customer_phone, message)
@@ -557,6 +559,38 @@ Sign here: ${signUrl}`
     `,
     [tenantId, jobId, packageId]
   )
+
+  const internalNotificationEmail =
+    process.env.SIGNED_DOCUMENT_EMAIL_TO ||
+    process.env.G2G_GMAIL_TO ||
+    "good2goroofingandconstruction@gmail.com"
+
+  const internalAlertMsg =
+    `CONTRACT SENT\n` +
+    `${documentPackage.document_title}\n` +
+    `Job ID: ${jobId}\n` +
+    `Customer: ${job.customer_name || "Unknown"}\n` +
+    `Phone: ${job.customer_phone || "Unknown"}\n` +
+    `Email: ${job.customer_email || "Unknown"}\n` +
+    `Amount: ${documentPackage.payload?.contract_amount ?? documentPackage.payload?.proposal_amount ?? documentPackage.payload?.agreed_amount ?? "Unknown"}\n` +
+    `Sign Link: ${signUrl}\n\n` +
+    `Status: Waiting on customer signature.`
+
+  try {
+    if (process.env.ALERT_SMS_TO) {
+      internalSmsResult = await sendSMS(process.env.ALERT_SMS_TO, internalAlertMsg)
+    }
+
+    if (internalNotificationEmail) {
+      internalEmailResult = await sendAlertEmail(
+        internalNotificationEmail,
+        `Contract Sent: ${job.customer_name || `Job #${jobId}`}`,
+        internalAlertMsg
+      )
+    }
+  } catch (err: any) {
+    internalEmailResult = internalEmailResult || { error: err?.message || String(err) }
+  }
 
   await pool.query(
     `
@@ -596,6 +630,8 @@ Sign here: ${signUrl}`
         crm_substatus: "signature_requested",
         sms: smsResult,
         email: emailResult,
+        internal_sms: internalSmsResult,
+        internal_email: internalEmailResult,
       }),
     ]
   )
