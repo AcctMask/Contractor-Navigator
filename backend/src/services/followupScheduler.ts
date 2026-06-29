@@ -11,6 +11,7 @@ type SchedJob = {
   updated_at: string | null
   estimate_sent_at: string | null
   contract_sent_at: string | null
+  crm_flow_key: string | null
 }
 
 type StageStats = {
@@ -43,8 +44,12 @@ function timingsToMs(values: number[]) {
   return values.map((n) => Number(n) * 60 * 1000)
 }
 
-async function stageDelaysForTenant(tenantSlug: string, stage: string | null) {
+async function stageDelaysForTenant(tenantSlug: string, stage: string | null, crmFlowKey?: string | null) {
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
+
+  if (crmFlowKey === "weather_evidence_report") {
+    return timingsToMs(settings.weather_report_timings_minutes || [])
+  }
 
   if (stage === "lead") {
     return timingsToMs(settings.lead_timings_minutes)
@@ -83,7 +88,8 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
       j.created_at,
       j.updated_at,
       j.estimate_sent_at,
-      j.contract_sent_at
+      j.contract_sent_at,
+      j.crm_flow_key
     from jobs j
     join tenants t
       on t.id = j.tenant_id
@@ -138,7 +144,7 @@ async function processJob(job: SchedJob) {
   if (isQuietHoursNow()) return
   if (job.bot_paused || !job.stage) return
 
-  const delays = await stageDelaysForTenant(job.tenant_slug, job.stage)
+  const delays = await stageDelaysForTenant(job.tenant_slug, job.stage, job.crm_flow_key)
   if (!delays.length) return
 
   const stageClockAt = getStageClockAt(job)
