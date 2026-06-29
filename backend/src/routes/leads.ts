@@ -139,6 +139,134 @@ async function findOrCreateCustomer(
 
 async function registerLeadRoutes(app: FastifyInstance) {
 
+  app.post("/lead/contact", async (req, reply) => {
+    try {
+      const body: any = (req as any).body || {}
+
+      const tenantSlug = asString(body.tenant_slug) || DEFAULT_TENANT
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+
+      const fullName =
+        asString(body.name) ||
+        asString(body.Field1) ||
+        "Unknown Lead"
+
+      const email =
+        asString(body.email) ||
+        asString(body.Field2)
+
+      const phone =
+        asString(body.phone) ||
+        asString(body.Field3)
+
+      const zip =
+        asString(body.zip) ||
+        asString(body.Field4)
+
+      const product =
+        asString(body.product) ||
+        asString(body.Field5) ||
+        "Website Contact"
+
+      const customerId = await findOrCreateCustomer(
+        tenantId,
+        fullName,
+        phone,
+        email,
+        null
+      )
+
+      const insertedJob = await pool.query(
+        `
+        insert into jobs (
+          tenant_id,
+          customer_id,
+          external_crm,
+          external_job_id,
+          job_type,
+          stage,
+          crm_substatus,
+          address1,
+          city,
+          state,
+          zip,
+          lead_source,
+          lead_source_detail
+        )
+        values (
+          $1,$2,
+          'website_contact_form',
+          $3,
+          $4,
+          'lead',
+          null,
+          null,
+          null,
+          'FL',
+          $5,
+          'Website',
+          'Contact Form'
+        )
+        returning id
+        `,
+        [
+          tenantId,
+          customerId,
+          `contact-${Date.now()}`,
+          product,
+          zip,
+        ]
+      )
+
+      const jobId = Number(insertedJob.rows[0].id)
+
+      await pool.query(
+        `
+        insert into timeline_events (
+          tenant_id, job_id, kind, message, meta, created_at
+        )
+        values ($1,$2,'lead_created',$3,$4::jsonb,now())
+        `,
+        [
+          tenantId,
+          jobId,
+          `Website contact form received: ${product}`,
+          JSON.stringify({
+            source: "wordpress_contact_form",
+            product,
+            raw_payload: body,
+          }),
+        ]
+      )
+
+      reply.header("Content-Type", "text/html; charset=utf-8")
+      return reply.send(`
+        <!doctype html>
+        <html>
+          <head>
+            <title>Thank you</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <style>
+              body { font-family: Arial, sans-serif; padding: 40px; text-align: center; }
+              .box { max-width: 640px; margin: 0 auto; }
+              h1 { color: #166534; }
+            </style>
+          </head>
+          <body>
+            <div class="box">
+              <h1>Thank you for contacting Good2Go Roofing.</h1>
+              <p>We received your request and a team member will be in touch soon.</p>
+              <p>You may close this page.</p>
+            </div>
+          </body>
+        </html>
+      `)
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Contact form intake failed" }
+    }
+  })
+
   app.post("/lead/new", async (req, reply) => {
     const body: any = (req as any).body || {};
 
