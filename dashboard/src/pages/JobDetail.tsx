@@ -212,7 +212,7 @@ export default function JobDetail() {
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
     if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
     if (kind.includes("manual_sms")) return "Staff SMS"
-    if (kind.includes("staff_note")) return "Staff Note"
+    if (kind.includes("staff_note")) return meta.author ? `Staff Note — ${meta.author}` : "Staff Note"
     if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
     if (kind.includes("customer_reply")) return "Customer Reply"
     if (kind.includes("estimate_details")) return "Estimate Details"
