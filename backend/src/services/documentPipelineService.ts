@@ -618,6 +618,7 @@ Sign here: ${signUrl}`
       jobId,
       `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
       JSON.stringify({
+        author: "ECO Document Pipeline",
         package_id: packageId,
         package_type: documentPackage.package_type,
         document_title: documentPackage.document_title,
@@ -746,6 +747,7 @@ export async function signDocumentPackage(
       Number(doc.job_id),
       `Proposal/Contract electronically signed: ${doc.document_title}`,
       JSON.stringify({
+        author: signerName || "Customer",
         package_id: packageId,
         package_type: doc.package_type,
         document_title: doc.document_title,
