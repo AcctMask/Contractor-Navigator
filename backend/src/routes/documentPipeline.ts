@@ -5,6 +5,7 @@ import {
   getEstimateDetailsByTenantSlug,
   getJobSummaryByTenantSlug,
   listDocumentPackagesByTenantSlug,
+  regenerateDocumentSnapshotAsset,
   sendDocumentPackage,
   signDocumentPackage,
   upsertEstimateDetailsByTenantSlug,
@@ -126,6 +127,19 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
         numericJobId,
         Number(package_id)
       )
+
+      return result
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.post("/pipeline/:tenantSlug/package/:packageId/regenerate-snapshot", async (request: any, reply) => {
+    try {
+      const { packageId } = request.params
+
+      const result = await regenerateDocumentSnapshotAsset(Number(packageId))
 
       return result
     } catch (err: any) {

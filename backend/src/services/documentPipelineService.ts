@@ -354,6 +354,62 @@ export async function getDocumentPackageById(packageId: number) {
   return result.rowCount ? result.rows[0] : null
 }
 
+export async function regenerateDocumentSnapshotAsset(packageId: number) {
+  await ensureDocumentTables()
+
+  const doc = await getDocumentPackageById(packageId)
+
+  if (!doc) {
+    throw new Error("Document package not found")
+  }
+
+  const statusLabel =
+    doc.status === "signed"
+      ? "Signed Proposal Contract"
+      : doc.status === "sent"
+        ? "Sent Proposal Contract"
+        : "Draft Proposal Contract"
+
+  await saveDocumentSnapshotAsset({
+    tenantSlug: String(doc.tenant_slug || "g2g-roofing"),
+    jobId: Number(doc.job_id),
+    doc,
+    payload: doc.payload || {},
+    statusLabel,
+  })
+
+  await pool.query(
+    `
+    insert into timeline_events
+      (tenant_id, job_id, kind, message, meta, created_at)
+    values
+      ($1, $2, 'document_snapshot_regenerated', $3, $4::jsonb, now())
+    `,
+    [
+      Number(doc.tenant_id),
+      Number(doc.job_id),
+      `Document snapshot regenerated from stored package payload: ${doc.document_title}`,
+      JSON.stringify({
+        author: "ECO Document Pipeline",
+        package_id: packageId,
+        package_type: doc.package_type,
+        document_title: doc.document_title,
+        package_status: doc.status,
+        signed_at: doc.signed_at || null,
+      }),
+    ]
+  )
+
+  return {
+    ok: true,
+    package_id: packageId,
+    job_id: Number(doc.job_id),
+    status: doc.status,
+    document_title: doc.document_title,
+    status_label: statusLabel,
+  }
+}
+
 export async function createDocumentPackageByTenantSlug(
   tenantSlug: string,
   jobId: number,
