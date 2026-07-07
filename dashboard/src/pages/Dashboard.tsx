@@ -159,9 +159,12 @@ export default function DashboardPage() {
     "dnc",
   ]
 
+  const buyingSignalJobs = sortedJobs.filter((j) => j.crm_substatus === "buying_signal_received")
+
   const stageCounts = stageOrder.map((stage) => ({
     stage,
     count: sortedJobs.filter((j) => (j.stage || "lead") === stage).length,
+    attention: stage === "contract_sent",
   }))
 
   const intakePendingJobs = sortedJobs.filter((j) => j.stage === "intake_pending")
@@ -172,9 +175,11 @@ export default function DashboardPage() {
     other: intakePendingJobs.filter((j) => !["waiting_on_info", "no_response", "likely_solicitor"].includes(j.crm_substatus || "")).length,
   }
 
-  const filteredJobs = selectedStage
-    ? sortedJobs.filter((j) => (j.stage || "lead") === selectedStage)
-    : sortedJobs
+  const filteredJobs = selectedStage === "__buying_signals"
+    ? buyingSignalJobs
+    : selectedStage
+      ? sortedJobs.filter((j) => (j.stage || "lead") === selectedStage)
+      : sortedJobs
 
   const newestJobs = filteredJobs.slice(0, 10)
   const upcomingEvents = [...events]
@@ -256,12 +261,13 @@ export default function DashboardPage() {
           </section>
 
           <section style={statsGrid}>
-            {stageCounts.map(({ stage, count }) => (
+            {stageCounts.map(({ stage, count, attention }) => (
               <button
                 key={stage}
                 onClick={() => setSelectedStage(selectedStage === stage ? null : stage)}
                 style={{
                   ...statCard,
+                  ...(attention ? statCardAttention : {}),
                   ...(selectedStage === stage ? statCardActive : {}),
                   cursor: "pointer",
                   textAlign: "left",
@@ -274,6 +280,23 @@ export default function DashboardPage() {
                 </div>
               </button>
             ))}
+
+            <button
+              onClick={() => setSelectedStage(selectedStage === "__buying_signals" ? null : "__buying_signals")}
+              style={{
+                ...statCard,
+                ...statCardAttention,
+                ...(selectedStage === "__buying_signals" ? statCardActive : {}),
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              <div style={statNumber}>{loading ? "…" : buyingSignalJobs.length}</div>
+              <div style={statLabel}>Buying Signals</div>
+              <div style={statSub}>
+                {selectedStage === "__buying_signals" ? "Showing below" : "Click to filter"}
+              </div>
+            </button>
           </section>
 
           {intakePendingJobs.length > 0 ? (
@@ -295,9 +318,11 @@ export default function DashboardPage() {
                 <div>
                   <h2 style={panelTitle}>Job Command Center</h2>
                   <div style={panelSub}>
-                    {selectedStage
-                      ? `Showing ${selectedStage.replaceAll("_", " ")} jobs. Click the same stage again to clear.`
-                      : "Search and open jobs, then review the record from the job detail view."}
+                    {selectedStage === "__buying_signals"
+                      ? "Showing jobs with buying signals. Click Buying Signals again to clear."
+                      : selectedStage
+                        ? `Showing ${selectedStage.replaceAll("_", " ")} jobs. Click the same stage again to clear.`
+                        : "Search and open jobs, then review the record from the job detail view."}
                   </div>
                 </div>
 
@@ -599,6 +624,12 @@ const statCardActive: CSSProperties = {
   border: "1px solid rgba(191, 219, 254, 0.95)",
   background: "rgba(59, 130, 246, 0.78)",
   boxShadow: "0 0 0 1px rgba(147, 197, 253, 0.45), 0 12px 28px rgba(37, 99, 235, 0.28)",
+}
+
+const statCardAttention: CSSProperties = {
+  background: "rgba(180, 83, 9, 0.62)",
+  border: "1px solid rgba(251, 191, 36, 0.62)",
+  boxShadow: "0 12px 28px rgba(180, 83, 9, 0.18)",
 }
 
 const statNumber: CSSProperties = {
