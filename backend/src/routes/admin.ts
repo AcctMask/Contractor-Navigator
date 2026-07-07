@@ -416,6 +416,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         j.marketing_campaign,
         j.created_at,
         j.updated_at,
+        exists (
+          select 1
+          from timeline_events te
+          where te.tenant_id = j.tenant_id
+            and te.job_id = j.id
+            and te.kind = 'buying_signal_detected'
+        ) as has_buying_signal,
         c.full_name as customer_name
       from jobs j
       left join customers c

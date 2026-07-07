@@ -48,6 +48,7 @@ type DashboardJob = {
   created_at?: string | null
   updated_at?: string | null
   customer_name?: string | null
+  has_buying_signal?: boolean | null
 }
 
 type SystemEventSummary = {
@@ -159,7 +160,7 @@ export default function DashboardPage() {
     "dnc",
   ]
 
-  const buyingSignalJobs = sortedJobs.filter((j) => j.crm_substatus === "buying_signal_received")
+  const buyingSignalJobs = sortedJobs.filter((j) => !!j.has_buying_signal)
 
   const stageCounts = stageOrder.map((stage) => ({
     stage,
