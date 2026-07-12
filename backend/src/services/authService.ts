@@ -100,7 +100,7 @@ function cleanName(value: unknown) {
 
 function cleanRole(value: unknown) {
   const raw = String(value || "staff").trim().toLowerCase()
-  if (["admin", "sales", "manager", "staff"].includes(raw)) return raw
+  if (["admin", "sales", "manager", "staff", "subcontractor"].includes(raw)) return raw
   return "staff"
 }
 
