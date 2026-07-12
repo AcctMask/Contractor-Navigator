@@ -4,9 +4,10 @@ import { getMe, type AuthUser } from "../lib/auth"
 
 type Props = {
   children: React.ReactNode
+  roles?: string[]
 }
 
-export default function ProtectedRoute({ children }: Props) {
+export default function ProtectedRoute({ children, roles }: Props) {
   const [loading, setLoading] = useState(true)
   const [user, setUser] = useState<AuthUser | null>(null)
 
@@ -50,6 +51,10 @@ export default function ProtectedRoute({ children }: Props) {
 
   if (!user) {
     return <Navigate to="/login" replace />
+  }
+
+  if (roles && roles.length && !roles.includes(user.role)) {
+    return <Navigate to="/" replace />
   }
 
   return <>{children}</>
