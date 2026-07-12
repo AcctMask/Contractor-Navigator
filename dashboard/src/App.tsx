@@ -20,6 +20,7 @@ import TimelinePage from "./pages/Timeline"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
 import SignDocument from "./pages/SignDocument"
+import FieldPortalPage from "./pages/FieldPortal"
 
 function HeaderBar() {
   const location = useLocation()
@@ -80,13 +81,23 @@ function HeaderBar() {
   )
 }
 
+const CRM_ROLES = ["platform_owner", "tenant_admin", "admin", "manager", "sales", "staff"]
+
 function ProtectedPage({ children }: { children: ReactNode }) {
   return (
-    <ProtectedRoute>
+    <ProtectedRoute roles={CRM_ROLES} unauthorizedTo="/field">
       <div style={pageStyle}>
         <HeaderBar />
         {children}
       </div>
+    </ProtectedRoute>
+  )
+}
+
+function FieldProtectedPage({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedRoute roles={["subcontractor"]} unauthorizedTo="/">
+      {children}
     </ProtectedRoute>
   )
 }
@@ -112,6 +123,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
       <Route path="/sign/:id" element={<SignDocument />} />
+      <Route path="/field" element={<FieldProtectedPage><FieldPortalPage /></FieldProtectedPage>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
