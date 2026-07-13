@@ -94,6 +94,20 @@ function ProtectedPage({ children }: { children: ReactNode }) {
   )
 }
 
+function JobDetailProtectedPage({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedRoute
+      roles={[...CRM_ROLES, "subcontractor"]}
+      unauthorizedTo="/"
+    >
+      <div style={pageStyle}>
+        <HeaderBar />
+        {children}
+      </div>
+    </ProtectedRoute>
+  )
+}
+
 function FieldProtectedPage({ children }: { children: ReactNode }) {
   return (
     <ProtectedRoute roles={["subcontractor"]} unauthorizedTo="/">
@@ -111,7 +125,14 @@ export default function App() {
       <Route path="/reports" element={<ProtectedPage><ReportsPage /></ProtectedPage>} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/job-admin" element={<ProtectedPage><JobAdminPage /></ProtectedPage>} />
-      <Route path="/job/:id" element={<ProtectedPage><JobDetailPage /></ProtectedPage>} />
+      <Route
+        path="/job/:id"
+        element={
+          <JobDetailProtectedPage>
+            <JobDetailPage />
+          </JobDetailProtectedPage>
+        }
+      />
       <Route path="/calendar" element={<ProtectedPage><CalendarPage /></ProtectedPage>} />
       <Route path="/developer-settings" element={<ProtectedPage><DeveloperSettingsPage /></ProtectedPage>} />
       <Route path="/document-pipeline" element={<ProtectedPage><DocumentPipelinePage /></ProtectedPage>} />

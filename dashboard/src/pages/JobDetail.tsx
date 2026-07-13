@@ -597,9 +597,125 @@ export default function JobDetail() {
 
   useEffect(() => {
     loadJob()
+  }, [id])
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role === "subcontractor") {
+      return
+    }
+
     loadAssets()
     loadCalendarEvents()
-  }, [id])
+  }, [id, currentUser])
+
+  if (currentUser?.role === "subcontractor") {
+    return (
+      <div style={page}>
+        <Link to="/field" style={linkStyle}>
+          ← Back to My Assigned Jobs
+        </Link>
+
+        <h1 style={{ color: "white" }}>Job #{id}</h1>
+
+        {error ? <p style={danger}>{error}</p> : null}
+
+        {!job ? (
+          <section style={card}>
+            <p>Loading assigned job...</p>
+          </section>
+        ) : (
+          <>
+            <section style={card}>
+              <h2>Job Details</h2>
+
+              <p>
+                <strong>Customer:</strong> {job.customer_name || "—"}
+              </p>
+
+              <p>
+                <strong>Address:</strong>{" "}
+                {[job.address1, job.city, job.state, job.zip]
+                  .filter(Boolean)
+                  .join(", ") || "—"}
+              </p>
+
+              <p>
+                <strong>Job Type:</strong> {job.job_type || "—"}
+              </p>
+
+              <p>
+                <strong>Current Stage:</strong> {job.stage || "—"}
+              </p>
+
+              <p>
+                <strong>Assignment:</strong>{" "}
+                {job.assignment_subject || "—"}
+              </p>
+
+              <p style={{ whiteSpace: "pre-wrap" }}>
+                <strong>Assignment Notes:</strong>{" "}
+                {job.assignment_notes || "—"}
+              </p>
+
+              <p>
+                <strong>Damage Location:</strong>{" "}
+                {job.damage_location || "—"}
+              </p>
+
+              <p style={{ whiteSpace: "pre-wrap" }}>
+                <strong>Damage Summary:</strong>{" "}
+                {job.damage_summary || "—"}
+              </p>
+            </section>
+
+            <section style={card}>
+              <h2>Job Activity</h2>
+
+              {notes.length === 0 ? (
+                <p>No activity available.</p>
+              ) : (
+                notes
+                  .sort(
+                    (a, b) =>
+                      new Date(b.created_at).getTime() -
+                      new Date(a.created_at).getTime()
+                  )
+                  .map((note) => (
+                    <div
+                      key={`${note.kind || "note"}-${note.id}`}
+                      style={row}
+                    >
+                      <div>
+                        <strong>
+                          {note.created_at
+                            ? new Date(note.created_at).toLocaleString()
+                            : ""}
+                        </strong>
+
+                        <div style={{ marginTop: 8, marginBottom: 8 }}>
+                          <span style={getActivityBadgeStyle(note)}>
+                            {getActivityLabel(note)}
+                          </span>
+                        </div>
+
+                        <p
+                          style={{
+                            whiteSpace: "pre-wrap",
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          {note.message || note.note || ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </section>
+          </>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={page}>
