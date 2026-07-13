@@ -46,6 +46,46 @@ async function requireAssignmentManager(request: any, reply: any) {
   return user;
 }
 
+async function requireJobReadUser(
+  request: any,
+  reply: any,
+  tenantId: number
+) {
+  const token = getBearerToken(request);
+
+  if (!token) {
+    return reply.code(401).send({
+      ok: false,
+      error: "Authentication required"
+    });
+  }
+
+  try {
+    const user = await getCurrentUserFromToken(token);
+
+    if (!user?.is_active) {
+      return reply.code(401).send({
+        ok: false,
+        error: "Authentication required"
+      });
+    }
+
+    if (Number(user.tenant_id) !== tenantId) {
+      return reply.code(403).send({
+        ok: false,
+        error: "Tenant access denied"
+      });
+    }
+
+    return user;
+  } catch {
+    return reply.code(401).send({
+      ok: false,
+      error: "Authentication required"
+    });
+  }
+}
+
 async function ensureCrewAssignmentUserColumn() {
   await pool.query(`
     alter table crew_assignments
@@ -494,6 +534,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
     const jobId = Number((req.params as any).job_id);
+    const user = await requireJobReadUser(req, reply, tenantId);
+
+    if (!user || !("id" in user)) {
+      return;
+    }
+
+    await ensureCrewAssignmentUserColumn();
 
     const job = await pool.query(
       `
@@ -509,10 +556,39 @@ export async function registerAdminRoutes(app: FastifyInstance) {
        and c.tenant_id = j.tenant_id
       where j.tenant_id = $1
         and j.id = $2
+        and (
+          $3::text <> 'subcontractor'
+          or exists (
+            select 1
+            from crew_assignments ca
+            where ca.tenant_id = j.tenant_id
+              and ca.job_id = j.id
+              and ca.app_user_id = $4
+          )
+        )
       limit 1
       `,
-      [tenantId, jobId]
+      [
+        tenantId,
+        jobId,
+        String(user.role),
+        Number(user.id)
+      ]
     );
+
+    if (!job.rowCount) {
+      if (String(user.role) === "subcontractor") {
+        return reply.code(403).send({
+          ok: false,
+          error: "Job access denied"
+        });
+      }
+
+      return reply.code(404).send({
+        ok: false,
+        error: "Job not found"
+      });
+    }
 
     const contacts = await pool.query(
       `

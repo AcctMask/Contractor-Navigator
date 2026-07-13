@@ -54,7 +54,12 @@ export default function JobDetail() {
   async function loadJob() {
     if (!id) return
 
-    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}`)
+    const token = getToken()
+    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
