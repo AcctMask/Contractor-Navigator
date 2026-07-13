@@ -2,10 +2,60 @@ import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
 import { planFollowUps } from "../services/conversationEngine"
+import { getCurrentUserFromToken } from "../services/authService"
 
 // helper
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "")
+}
+
+function getBearerToken(request: any) {
+  const auth = String(request.headers.authorization || "")
+  return auth.startsWith("Bearer ") ? auth.slice(7) : ""
+}
+
+async function requireJobReadUser(
+  request: any,
+  reply: any,
+  tenantId: number
+) {
+  const token = getBearerToken(request)
+
+  if (!token) {
+    reply.code(401)
+    return null
+  }
+
+  try {
+    const user = await getCurrentUserFromToken(token)
+
+    if (!user?.is_active) {
+      reply.code(401)
+      return null
+    }
+
+    if (Number(user.tenant_id) !== tenantId) {
+      reply.code(403)
+      return null
+    }
+
+    return user
+  } catch {
+    reply.code(401)
+    return null
+  }
+}
+
+async function ensureCrewAssignmentUserColumn() {
+  await pool.query(`
+    alter table crew_assignments
+    add column if not exists app_user_id bigint null
+  `)
+
+  await pool.query(`
+    create index if not exists idx_crew_assignments_tenant_user
+    on crew_assignments (tenant_id, app_user_id)
+  `)
 }
 
 export async function registerJobSearchRoutes(app: FastifyInstance) {
@@ -15,6 +65,13 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const user = await requireJobReadUser(request, reply, tenantId)
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      await ensureCrewAssignmentUserColumn()
 
       const q = String(request.query.q || "").trim()
       const digitQ = digitsOnly(q)
@@ -40,6 +97,16 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
          and c.tenant_id = j.tenant_id
         where j.tenant_id = $1
           and (
+            $5::text <> 'subcontractor'
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = j.tenant_id
+                and ca.job_id = j.id
+                and ca.app_user_id = $6
+            )
+          )
+          and (
             coalesce(c.full_name, '') ilike '%' || $2 || '%'
             or coalesce(c.email, '') ilike '%' || $2 || '%'
             or coalesce(c.phone, '') ilike '%' || $2 || '%'
@@ -53,7 +120,14 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
         order by j.id desc
         limit 50
         `,
-        [tenantId, q, digitQ, numericId]
+        [
+          tenantId,
+          q,
+          digitQ,
+          numericId,
+          String(user.role),
+          Number(user.id)
+        ]
       )
 
       return { ok: true, results: result.rows }
@@ -70,6 +144,13 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const user = await requireJobReadUser(request, reply, tenantId)
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      await ensureCrewAssignmentUserColumn()
 
       const result = await pool.query(
         `
@@ -88,10 +169,24 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           on c.id = j.customer_id
          and c.tenant_id = j.tenant_id
         where j.tenant_id = $1
+          and (
+            $2::text <> 'subcontractor'
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = j.tenant_id
+                and ca.job_id = j.id
+                and ca.app_user_id = $3
+            )
+          )
         order by j.id desc
         limit 200
         `,
-        [tenantId]
+        [
+          tenantId,
+          String(user.role),
+          Number(user.id)
+        ]
       )
 
       return { ok: true, jobs: result.rows }
@@ -108,6 +203,13 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const user = await requireJobReadUser(request, reply, tenantId)
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      await ensureCrewAssignmentUserColumn()
 
       const result = await pool.query(
         `
@@ -146,13 +248,34 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
          and c.tenant_id = j.tenant_id
         where j.tenant_id = $1
           and j.id = $2
+          and (
+            $3::text <> 'subcontractor'
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = j.tenant_id
+                and ca.job_id = j.id
+                and ca.app_user_id = $4
+            )
+          )
         limit 1
         `,
-        [tenantId, Number(jobId)]
+        [
+          tenantId,
+          Number(jobId),
+          String(user.role),
+          Number(user.id)
+        ]
       )
 
       if (!result.rowCount) {
-        throw new Error("Job not found")
+        if (String(user.role) === "subcontractor") {
+          reply.code(403)
+          return { ok: false, error: "Job access denied" }
+        }
+
+        reply.code(404)
+        return { ok: false, error: "Job not found" }
       }
 
       return { ok: true, job: result.rows[0] }

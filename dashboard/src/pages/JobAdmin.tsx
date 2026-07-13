@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { getToken } from "../lib/auth"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
@@ -45,8 +46,14 @@ export default function JobAdmin() {
       setError("")
       setStatus("Searching...")
 
+      const token = getToken()
       const res = await fetch(
-        `${API_BASE}/admin/${TENANT}/job-search?q=${encodeURIComponent(query.trim())}`
+        `${API_BASE}/admin/${TENANT}/job-search?q=${encodeURIComponent(query.trim())}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
       )
       const data = await res.json()
 
@@ -67,7 +74,12 @@ export default function JobAdmin() {
       setError("")
       setStatus("Loading all jobs...")
 
-      const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs-all`)
+      const token = getToken()
+      const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs-all`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
