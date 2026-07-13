@@ -6,6 +6,80 @@ import path from "path"
 import { pipeline } from "stream/promises"
 import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
+import { getCurrentUserFromToken } from "../services/authService"
+
+function getBearerToken(request: any) {
+  const auth = String(request.headers.authorization || "")
+  return auth.startsWith("Bearer ") ? auth.slice(7) : ""
+}
+
+async function ensureCrewAssignmentUserColumn() {
+  await pool.query(`
+    alter table crew_assignments
+    add column if not exists app_user_id bigint null
+  `)
+
+  await pool.query(`
+    create index if not exists idx_crew_assignments_tenant_user
+    on crew_assignments (tenant_id, app_user_id)
+  `)
+}
+
+async function requireAssignedJobAccess(
+  request: any,
+  reply: any,
+  tenantId: number,
+  jobId: number
+) {
+  const token = getBearerToken(request)
+
+  if (!token) {
+    reply.code(401)
+    return null
+  }
+
+  try {
+    const user = await getCurrentUserFromToken(token)
+
+    if (!user?.is_active) {
+      reply.code(401)
+      return null
+    }
+
+    if (Number(user.tenant_id) !== tenantId) {
+      reply.code(403)
+      return null
+    }
+
+    if (String(user.role) !== "subcontractor") {
+      return user
+    }
+
+    await ensureCrewAssignmentUserColumn()
+
+    const assignment = await pool.query(
+      `
+      select id
+      from crew_assignments
+      where tenant_id = $1
+        and job_id = $2
+        and app_user_id = $3
+      limit 1
+      `,
+      [tenantId, jobId, Number(user.id)]
+    )
+
+    if (!assignment.rowCount) {
+      reply.code(403)
+      return null
+    }
+
+    return user
+  } catch {
+    reply.code(401)
+    return null
+  }
+}
 
 async function ensureJobExists(tenantId: number, jobId: number) {
   const result = await pool.query(
@@ -36,6 +110,17 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
 
       const assetsResult = await pool.query(
         `
@@ -59,7 +144,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           and job_id = $2
         order by created_at desc, id desc
         `,
-        [tenantId, Number(jobId)]
+        [tenantId, numericJobId]
       )
 
       const notesResult = await pool.query(
@@ -90,7 +175,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           )
         order by created_at desc, id desc
         `,
-        [tenantId, Number(jobId)]
+        [tenantId, numericJobId]
       )
 
       return {
@@ -118,6 +203,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const result = await pool.query(
         `
         select
+          job_id,
           original_name,
           stored_path,
           mime_type
@@ -135,6 +221,17 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       }
 
       const asset = result.rows[0]
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        Number(asset.job_id)
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
       const resolvedPath = asset.stored_path
 
       if (!resolvedPath || !fs.existsSync(resolvedPath)) {
@@ -159,6 +256,16 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
 
       await ensureJobExists(tenantId, numericJobId)
 
@@ -233,7 +340,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             mimetype,
             stat.size,
             null,
-            "Steve",
+            String(user.full_name || user.email || "Team"),
           ]
         )
 
@@ -255,7 +362,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               relative_path: relativePath,
               mime_type: mimetype,
               file_size_bytes: stat.size,
-              uploaded_by: "Steve",
+              uploaded_by: String(user.full_name || user.email || "Team"),
               asset_category: String(req.body?.asset_category || "Documents"),
             }),
           ]
@@ -386,8 +493,22 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
-      const { message, author } = req.body || {}
-      const noteAuthor = String(author || "Team").trim() || "Team"
+      const numericJobId = Number(jobId)
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const { message } = req.body || {}
+      const noteAuthor = String(
+        user.full_name || user.email || "Team"
+      ).trim() || "Team"
 
       if (!String(message || "").trim()) {
         throw new Error("Note is required")
@@ -407,7 +528,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         `,
         [
           tenantId,
-          Number(jobId),
+          numericJobId,
           String(message).trim(),
           JSON.stringify({ author: noteAuthor }),
         ]

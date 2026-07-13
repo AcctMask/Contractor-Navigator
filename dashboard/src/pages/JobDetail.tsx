@@ -161,7 +161,12 @@ export default function JobDetail() {
   async function loadAssets() {
     if (!id) return
 
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}`)
+    const token = getToken()
+    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -467,12 +472,15 @@ export default function JobDetail() {
     setError("")
     setStatus("Adding note...")
 
+    const token = getToken()
     const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/notes`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         message: noteText,
-        author: currentUser?.full_name || currentUser?.email || "Team",
       }),
     })
 
@@ -532,8 +540,12 @@ export default function JobDetail() {
       formData.append("asset_category", uploadCategory)
       selectedFiles.forEach((file) => formData.append("file", file))
 
+      const token = getToken()
       const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
         body: formData,
       })
 
@@ -558,6 +570,58 @@ export default function JobDetail() {
     } catch (err: any) {
       setStatus("")
       errorToast(err?.message || "Upload failed. Large files may require a stronger upload path.")
+    }
+  }
+
+  async function openFile(asset: any) {
+    try {
+      const token = getToken()
+      const assetUrl = asset.download_url
+        ? `${API_BASE}${asset.download_url}`
+        : asset.url
+
+      if (!assetUrl) {
+        errorToast("File URL is unavailable")
+        return
+      }
+
+      const res = await fetch(assetUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        let message = "Open file failed"
+
+        try {
+          const data = await res.json()
+          message = data?.error || message
+        } catch {
+          // Preserve the generic error when the response is not JSON.
+        }
+
+        errorToast(message)
+        return
+      }
+
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const opened = window.open(objectUrl, "_blank", "noopener,noreferrer")
+
+      if (!opened) {
+        const link = document.createElement("a")
+        link.href = objectUrl
+        link.download =
+          asset.original_name || asset.file_name || "job-file"
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+      }
+
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000)
+    } catch (err: any) {
+      errorToast(err?.message || "Open file failed")
     }
   }
 
@@ -600,12 +664,15 @@ export default function JobDetail() {
   }, [id])
 
   useEffect(() => {
-    if (!currentUser || currentUser.role === "subcontractor") {
+    if (!currentUser) {
       return
     }
 
     loadAssets()
-    loadCalendarEvents()
+
+    if (currentUser.role !== "subcontractor") {
+      loadCalendarEvents()
+    }
   }, [id, currentUser])
 
   if (currentUser?.role === "subcontractor") {
@@ -669,6 +736,21 @@ export default function JobDetail() {
             </section>
 
             <section style={card}>
+              <h2>Add Job Note</h2>
+
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Add a note for the office..."
+                style={textarea}
+              />
+
+              <button onClick={addNote} style={button}>
+                Add Note
+              </button>
+            </section>
+
+            <section style={card}>
               <h2>Job Activity</h2>
 
               {notes.length === 0 ? (
@@ -709,6 +791,80 @@ export default function JobDetail() {
                       </div>
                     </div>
                   ))
+              )}
+            </section>
+
+            <section style={card}>
+              <h2>Upload Files / Photos</h2>
+
+              <label style={label}>Upload Category</label>
+              <select
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
+                style={input}
+              >
+                <option value="Documents">Documents</option>
+                <option value="Roof">Roof</option>
+                <option value="Tarp">Tarp</option>
+                <option value="Repairs">Repairs</option>
+              </select>
+
+              <input
+                type="file"
+                multiple
+                onChange={(e) => setFiles(e.target.files)}
+                style={input}
+              />
+
+              <button onClick={uploadFiles} style={button}>
+                Upload Selected Files
+              </button>
+
+              {files && files.length > 0 ? (
+                <p>
+                  {files.length} file(s) selected for {uploadCategory}
+                </p>
+              ) : null}
+            </section>
+
+            <section style={card}>
+              <h2>Files / Photos</h2>
+
+              {assets.length === 0 ? (
+                <p>No files uploaded yet.</p>
+              ) : (
+                assets.map((asset) => (
+                  <div key={asset.id} style={row}>
+                    <div>
+                      <strong>
+                        {asset.original_name ||
+                          asset.file_name ||
+                          "File"}
+                      </strong>
+
+                      <p>
+                        <strong>Category:</strong>{" "}
+                        {asset.asset_category || "Documents"}
+                      </p>
+
+                      <p>
+                        {asset.mime_type || "file"} —{" "}
+                        {asset.size_bytes
+                          ? `${Math.round(
+                              Number(asset.size_bytes) / 1024
+                            )} KB`
+                          : "unknown size"}
+                      </p>
+
+                      <button
+                        onClick={() => openFile(asset)}
+                        style={button}
+                      >
+                        Open File
+                      </button>
+                    </div>
+                  </div>
+                ))
               )}
             </section>
           </>
@@ -1274,10 +1430,13 @@ export default function JobDetail() {
                   {asset.mime_type || "file"} —{" "}
                   {asset.size_bytes ? `${Math.round(Number(asset.size_bytes) / 1024)} KB` : "unknown size"}
                 </p>
-                {asset.download_url ? (
-                  <a href={`${API_BASE}${asset.download_url}`} target="_blank" rel="noreferrer" style={linkStyle}>Open File</a>
-                ) : asset.url ? (
-                  <a href={asset.url} target="_blank" rel="noreferrer" style={linkStyle}>Open File</a>
+                {asset.download_url || asset.url ? (
+                  <button
+                    onClick={() => openFile(asset)}
+                    style={button}
+                  >
+                    Open File
+                  </button>
                 ) : null}
               </div>
 
