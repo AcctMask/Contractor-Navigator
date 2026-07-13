@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
-import { getMe, type AuthUser } from "../lib/auth"
+import { getMe, getToken, type AuthUser } from "../lib/auth"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const TENANT = "g2g-roofing"
@@ -47,6 +47,9 @@ export default function JobDetail() {
   const [form, setForm] = useState<any>({})
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [calendarEvents, setCalendarEvents] = useState<any[]>([])
+  const [subcontractors, setSubcontractors] = useState<any[]>([])
+  const [crewAssignments, setCrewAssignments] = useState<any[]>([])
+  const [selectedSubcontractorId, setSelectedSubcontractorId] = useState("")
 
   async function loadJob() {
     if (!id) return
@@ -64,6 +67,7 @@ export default function JobDetail() {
     setStage(data.job.stage || "lead")
     setCrmSubstatus(data.job.crm_substatus || "")
     setBotPaused(Boolean(data.job.bot_paused))
+    setCrewAssignments(Array.isArray(data.crew_assignments) ? data.crew_assignments : [])
 
     const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
       [
@@ -90,6 +94,63 @@ export default function JobDetail() {
     )
 
     setNotes(jobTimelineNotes)
+  }
+
+  async function loadSubcontractors() {
+    const token = getToken()
+
+    const res = await fetch(`${API_BASE}/admin/${TENANT}/subcontractors`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      errorToast(data?.error || "Failed to load subcontractors")
+      return
+    }
+
+    setSubcontractors(
+      Array.isArray(data.subcontractors) ? data.subcontractors : []
+    )
+  }
+
+  async function assignSubcontractor() {
+    if (!id) return
+
+    if (!selectedSubcontractorId) {
+      errorToast("Select a subcontractor")
+      return
+    }
+
+    const token = getToken()
+
+    const res = await fetch(
+      `${API_BASE}/admin/job/${TENANT}/${id}/assign-subcontractor`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          app_user_id: Number(selectedSubcontractorId),
+        }),
+      }
+    )
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      errorToast(data?.error || "Assignment failed")
+      return
+    }
+
+    successToast("Subcontractor assigned")
+    setSelectedSubcontractorId("")
+    await loadJob()
   }
 
   async function loadAssets() {
@@ -515,7 +576,18 @@ export default function JobDetail() {
   }
 
   useEffect(() => {
-    getMe().then(setCurrentUser).catch(() => setCurrentUser(null))
+    getMe()
+      .then((user) => {
+        setCurrentUser(user)
+
+        if (
+          user &&
+          ["platform_owner", "tenant_admin", "admin", "manager"].includes(user.role)
+        ) {
+          void loadSubcontractors()
+        }
+      })
+      .catch(() => setCurrentUser(null))
   }, [])
 
   useEffect(() => {
@@ -792,6 +864,65 @@ export default function JobDetail() {
           <p>Loading job...</p>
         )}
       </section>
+
+      {currentUser &&
+      ["platform_owner", "tenant_admin", "admin", "manager"].includes(currentUser.role) ? (
+        <section style={card}>
+          <h2>Subcontractor Assignment</h2>
+
+          <div style={grid2}>
+            <div>
+              <label style={label}>Assign Subcontractor</label>
+              <select
+                value={selectedSubcontractorId}
+                onChange={(e) => setSelectedSubcontractorId(e.target.value)}
+                style={input}
+              >
+                <option value="">Select subcontractor...</option>
+                {subcontractors.map((subcontractor) => (
+                  <option key={subcontractor.id} value={subcontractor.id}>
+                    {subcontractor.full_name} — {subcontractor.email}
+                  </option>
+                ))}
+              </select>
+
+              <button onClick={assignSubcontractor} style={button}>
+                Assign Subcontractor
+              </button>
+            </div>
+
+            <div>
+              <h3 style={{ marginTop: 0 }}>Current Assignments</h3>
+
+              {crewAssignments.length === 0 ? (
+                <p>No subcontractor assignments.</p>
+              ) : (
+                crewAssignments.map((assignment) => (
+                  <div key={assignment.id} style={row}>
+                    <div>
+                      <div style={{ fontWeight: 800 }}>
+                        {assignment.crew_name || "Unnamed Subcontractor"}
+                      </div>
+                      <div style={{ opacity: 0.8, marginTop: 4 }}>
+                        Status: {assignment.status || "PENDING"}
+                      </div>
+                      <div style={{ opacity: 0.7, marginTop: 4 }}>
+                        Assigned by: {assignment.assigned_by || "—"}
+                      </div>
+                      <div style={{ opacity: 0.7, marginTop: 4 }}>
+                        Assigned:{" "}
+                        {assignment.assigned_at
+                          ? new Date(assignment.assigned_at).toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section style={card}>
         <h2>Stage / Bot Controls</h2>

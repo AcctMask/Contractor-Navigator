@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 import { schedulerTick } from "../services/scheduler";
 import { listJobAssetsByTenantSlug } from "../services/jobAssetsService";
+import { getCurrentUserFromToken } from "../services/authService";
 
 async function getTenantIdBySlug(slug: string): Promise<number> {
   const t = await pool.query(`select id from tenants where slug=$1 limit 1`, [slug]);
@@ -13,6 +14,48 @@ function asNullableString(v: any): string | null {
   if (v === undefined || v === null) return null;
   const s = String(v).trim();
   return s.length ? s : null;
+}
+
+function getBearerToken(request: any) {
+  const auth = String(request.headers.authorization || "");
+  return auth.startsWith("Bearer ") ? auth.slice(7) : "";
+}
+
+async function requireAssignmentManager(request: any, reply: any) {
+  const token = getBearerToken(request);
+
+  if (!token) {
+    reply.code(401);
+    return null;
+  }
+
+  const user = await getCurrentUserFromToken(token);
+
+  if (!user?.is_active) {
+    reply.code(401);
+    return null;
+  }
+
+  const allowedRoles = ["platform_owner", "tenant_admin", "admin", "manager"];
+
+  if (!allowedRoles.includes(String(user.role))) {
+    reply.code(403);
+    return null;
+  }
+
+  return user;
+}
+
+async function ensureCrewAssignmentUserColumn() {
+  await pool.query(`
+    alter table crew_assignments
+    add column if not exists app_user_id bigint null
+  `);
+
+  await pool.query(`
+    create index if not exists idx_crew_assignments_tenant_user
+    on crew_assignments (tenant_id, app_user_id)
+  `);
 }
 
 export async function registerAdminRoutes(app: FastifyInstance) {
@@ -809,6 +852,220 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     );
 
     return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, contact_saved: true });
+  });
+
+  app.get("/admin/:tenant_slug/subcontractors", async (req, reply) => {
+    try {
+      const actor = await requireAssignmentManager(req, reply);
+
+      if (!actor) {
+        return reply.send({ ok: false, error: "Not authorized" });
+      }
+
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+
+      if (Number(actor.tenant_id) !== tenantId) {
+        return reply.code(403).send({ ok: false, error: "Tenant access denied" });
+      }
+
+      const result = await pool.query(
+        `
+        select
+          id,
+          email,
+          full_name,
+          role,
+          is_active
+        from app_users
+        where tenant_id = $1
+          and role = 'subcontractor'
+          and is_active = true
+        order by full_name asc, id asc
+        `,
+        [tenantId]
+      );
+
+      return reply.send({
+        ok: true,
+        subcontractors: result.rows
+      });
+    } catch (err: any) {
+      return reply.code(400).send({
+        ok: false,
+        error: err?.message || String(err)
+      });
+    }
+  });
+
+  app.post("/admin/job/:tenant_slug/:job_id/assign-subcontractor", async (req, reply) => {
+    try {
+      const actor = await requireAssignmentManager(req, reply);
+
+      if (!actor) {
+        return reply.send({ ok: false, error: "Not authorized" });
+      }
+
+      await ensureCrewAssignmentUserColumn();
+
+      const tenant_slug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenant_slug);
+      const jobId = Number((req.params as any).job_id);
+      const body: any = (req as any).body || {};
+      const appUserId = Number(body.app_user_id);
+
+      if (Number(actor.tenant_id) !== tenantId) {
+        return reply.code(403).send({ ok: false, error: "Tenant access denied" });
+      }
+
+      if (!Number.isFinite(jobId) || jobId <= 0) {
+        return reply.code(400).send({ ok: false, error: "Valid job required" });
+      }
+
+      if (!Number.isFinite(appUserId) || appUserId <= 0) {
+        return reply.code(400).send({ ok: false, error: "Valid subcontractor required" });
+      }
+
+      const jobResult = await pool.query(
+        `
+        select id
+        from jobs
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, jobId]
+      );
+
+      if (!jobResult.rowCount) {
+        return reply.code(404).send({ ok: false, error: "Job not found" });
+      }
+
+      const subcontractorResult = await pool.query(
+        `
+        select
+          id,
+          email,
+          full_name
+        from app_users
+        where tenant_id = $1
+          and id = $2
+          and role = 'subcontractor'
+          and is_active = true
+        limit 1
+        `,
+        [tenantId, appUserId]
+      );
+
+      if (!subcontractorResult.rowCount) {
+        return reply.code(404).send({
+          ok: false,
+          error: "Active subcontractor not found"
+        });
+      }
+
+      const subcontractor = subcontractorResult.rows[0];
+
+      const existing = await pool.query(
+        `
+        select id
+        from crew_assignments
+        where tenant_id = $1
+          and job_id = $2
+          and app_user_id = $3
+        limit 1
+        `,
+        [tenantId, jobId, appUserId]
+      );
+
+      let assignment;
+
+      if (existing.rowCount) {
+        const updated = await pool.query(
+          `
+          update crew_assignments
+             set crew_name = $1,
+                 assigned_by = $2,
+                 status = 'PENDING',
+                 assigned_at = now(),
+                 updated_at = now()
+           where tenant_id = $3
+             and job_id = $4
+             and app_user_id = $5
+          returning *
+          `,
+          [
+            subcontractor.full_name,
+            actor.full_name || actor.email,
+            tenantId,
+            jobId,
+            appUserId
+          ]
+        );
+
+        assignment = updated.rows[0];
+      } else {
+        const inserted = await pool.query(
+          `
+          insert into crew_assignments
+            (
+              tenant_id,
+              job_id,
+              crew_name,
+              assigned_by,
+              status,
+              assigned_at,
+              created_at,
+              updated_at,
+              app_user_id
+            )
+          values
+            ($1, $2, $3, $4, 'PENDING', now(), now(), now(), $5)
+          returning *
+          `,
+          [
+            tenantId,
+            jobId,
+            subcontractor.full_name,
+            actor.full_name || actor.email,
+            appUserId
+          ]
+        );
+
+        assignment = inserted.rows[0];
+      }
+
+      await pool.query(
+        `
+        insert into timeline_events
+          (tenant_id, job_id, kind, message, meta, created_at)
+        values
+          ($1, $2, 'subcontractor_assigned', $3, $4::jsonb, now())
+        `,
+        [
+          tenantId,
+          jobId,
+          `Job assigned to subcontractor: ${subcontractor.full_name}`,
+          JSON.stringify({
+            author: actor.full_name || actor.email,
+            app_user_id: appUserId,
+            subcontractor_name: subcontractor.full_name,
+            subcontractor_email: subcontractor.email,
+            assignment_status: "PENDING"
+          })
+        ]
+      );
+
+      return reply.send({
+        ok: true,
+        assignment
+      });
+    } catch (err: any) {
+      return reply.code(400).send({
+        ok: false,
+        error: err?.message || String(err)
+      });
+    }
   });
 
   app.post("/admin/simulate-inbound/:tenant_slug", async (req, reply) => {
