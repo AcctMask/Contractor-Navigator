@@ -41,22 +41,27 @@ async function requireRole(request: any, reply: any, allowedRoles: string[]) {
   return user
 }
 
-const TENANT_ADMIN_PLUS = ["platform_owner", "tenant_admin"]
+const USER_MANAGEMENT_ROLES = [
+  "platform_owner",
+  "tenant_admin",
+  "admin",
+  "manager",
+]
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/auth/:tenantSlug/invite", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
       if (!actor) return { ok: false, error: "Not authorized" }
 
       const { tenantSlug } = request.params
-      const { email, full_name, role, invited_by_user_id } = request.body || {}
+      const { email, full_name, role } = request.body || {}
 
       const invite = await inviteUserByTenantSlug(tenantSlug, {
         email,
         full_name,
         role,
-        invited_by_user_id,
+        invited_by_user_id: Number(actor.id),
       })
 
       return {
@@ -161,7 +166,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/auth/:tenantSlug/users", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
       if (!actor) return { ok: false, error: "Not authorized" }
 
       const { tenantSlug } = request.params
@@ -175,7 +180,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/auth/:tenantSlug/invitations", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, TENANT_ADMIN_PLUS)
+      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
       if (!actor) return { ok: false, error: "Not authorized" }
 
       const { tenantSlug } = request.params
