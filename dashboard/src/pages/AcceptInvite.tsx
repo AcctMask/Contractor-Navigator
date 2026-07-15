@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { acceptInvite, fetchInvite } from "../lib/auth"
+import {
+  setTenantSlug,
+  tenantDisplayName,
+} from "../lib/tenant"
 
 export default function AcceptInvitePage() {
   const { token = "" } = useParams()
@@ -21,6 +25,13 @@ export default function AcceptInvitePage() {
         const data = await fetchInvite(token)
         if (!active) return
         setInvite(data)
+
+        if (data?.tenant_slug) {
+          setTenantSlug(
+            data.tenant_slug,
+          )
+        }
+
         setStatus("Invitation loaded")
       } catch (err: any) {
         if (!active) return
@@ -54,9 +65,17 @@ export default function AcceptInvitePage() {
     setStatus("Accepting invitation...")
 
     try {
-      await acceptInvite(token, password)
+      const accepted =
+        await acceptInvite(token, password)
+
+      if (accepted?.tenant_slug) {
+        setTenantSlug(
+          accepted.tenant_slug,
+        )
+      }
+
       setStatus("Invitation accepted")
-      navigate("/job-admin")
+      navigate("/")
     } catch (err: any) {
       setError(err?.message || "Accept invite failed")
       setStatus("Accept invite failed")
@@ -68,7 +87,23 @@ export default function AcceptInvitePage() {
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
-        <h1 style={{ marginTop: 0, fontSize: "42px", lineHeight: 1.1 }}>Accept Invitation</h1>
+        <div
+          style={{
+            fontSize: "15px",
+            opacity: 0.78,
+            marginBottom: "8px",
+          }}
+        >
+          {invite?.tenant_slug
+            ? tenantDisplayName(
+                invite.tenant_slug,
+              )
+            : "Contractor Navigator"}
+        </div>
+
+        <h1 style={{ marginTop: 0, fontSize: "42px", lineHeight: 1.1 }}>
+          Accept Invitation
+        </h1>
 
         {invite ? (
           <div

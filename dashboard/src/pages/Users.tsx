@@ -1,9 +1,8 @@
 import { getToken } from "../lib/auth"
 import { useEffect, useMemo, useState } from "react"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
-const TENANT_SLUG = "g2g-roofing"
-
 type UserRow = {
   id?: string | number | null
   email: string
@@ -77,8 +76,8 @@ export default function UsersPage() {
       }
 
       const [usersRes, invitesRes] = await Promise.all([
-        fetch(`${API_BASE}/auth/${TENANT_SLUG}/users`, { headers: authHeaders }),
-        fetch(`${API_BASE}/auth/${TENANT_SLUG}/invitations`, { headers: authHeaders }),
+        fetch(`${API_BASE}/auth/${getTenantSlug()}/users`, { headers: authHeaders }),
+        fetch(`${API_BASE}/auth/${getTenantSlug()}/invitations`, { headers: authHeaders }),
       ])
 
       const usersJson = await usersRes.json()
@@ -112,7 +111,7 @@ export default function UsersPage() {
     try {
       const token = getToken()
 
-      const res = await fetch(`${API_BASE}/auth/${TENANT_SLUG}/invite`, {
+      const res = await fetch(`${API_BASE}/auth/${getTenantSlug()}/invite`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { clearToken, getMe, getToken, type AuthUser } from "../lib/auth"
+import {
+  getTenantSlug,
+  tenantDisplayName,
+} from "../lib/tenant"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
   "https://contractor-navigator.onrender.com"
-
-const TENANT = "g2g-roofing"
 
 export default function FieldPortalPage() {
   const navigate = useNavigate()
@@ -27,7 +29,7 @@ export default function FieldPortalPage() {
 
         const token = getToken()
         const res = await fetch(
-          `${API_BASE}/admin/${TENANT}/jobs-all`,
+          `${API_BASE}/admin/${getTenantSlug()}/jobs-all`,
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -76,7 +78,7 @@ export default function FieldPortalPage() {
       <div style={content}>
         <div style={headerCard}>
           <div style={{ fontSize: "14px", opacity: 0.78 }}>
-            Good2Go Roofing
+            {tenantDisplayName(getTenantSlug())}
           </div>
 
           <h1 style={{ margin: "8px 0 0", fontSize: "36px" }}>

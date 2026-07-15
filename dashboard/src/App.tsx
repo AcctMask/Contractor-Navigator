@@ -19,6 +19,7 @@ import EstimatorPage from "./pages/Estimator"
 import TimelinePage from "./pages/Timeline"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
+import { useTenant } from "./context/TenantContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 
@@ -26,6 +27,7 @@ function HeaderBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const authed = isLoggedIn()
+  const { tenantName } = useTenant()
 
   function handleLogout() {
     clearToken()
@@ -34,7 +36,26 @@ function HeaderBar() {
 
   return (
     <div style={headerWrap}>
-      <div style={{ fontSize: "14px", opacity: 0.85 }}>Actual Assistant</div>
+      <div>
+        <div
+          style={{
+            fontSize: "14px",
+            fontWeight: 800,
+          }}
+        >
+          {tenantName}
+        </div>
+
+        <div
+          style={{
+            marginTop: "3px",
+            fontSize: "11px",
+            opacity: 0.62,
+          }}
+        >
+          Contractor Navigator
+        </div>
+      </div>
 
       <div style={headerLinks}>
         {authed ? (

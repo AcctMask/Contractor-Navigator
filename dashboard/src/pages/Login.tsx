@@ -1,9 +1,22 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { login } from "../lib/auth"
+import {
+  getTenantSlug,
+  setTenantSlug,
+  tenantDisplayName,
+} from "../lib/tenant"
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const [workspace, setWorkspace] = useState(() => {
+    const queryTenant =
+      new URLSearchParams(
+        window.location.search,
+      ).get("tenant")
+
+    return queryTenant || getTenantSlug()
+  })
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [status, setStatus] = useState("")
@@ -17,6 +30,15 @@ export default function LoginPage() {
     setStatus("Logging in...")
 
     try {
+      const tenantSlug =
+        setTenantSlug(workspace)
+
+      setStatus(
+        `Logging into ${tenantDisplayName(
+          tenantSlug,
+        )}...`,
+      )
+
       await login(email.trim(), password)
       setStatus("Login successful")
       navigate("/")
@@ -41,11 +63,37 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
           <div>
+            <label style={labelStyle}>
+              Company Workspace
+            </label>
+
+            <input
+              value={workspace}
+              onChange={(e) =>
+                setWorkspace(e.target.value)
+              }
+              placeholder="company-workspace"
+              autoComplete="organization"
+              style={inputStyle}
+            />
+
+            <div
+              style={{
+                marginTop: "7px",
+                fontSize: "13px",
+                opacity: 0.7,
+              }}
+            >
+              {tenantDisplayName(workspace)}
+            </div>
+          </div>
+
+          <div>
             <label style={labelStyle}>Email</label>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="michelle@g2groofing.com"
+              placeholder="you@yourcompany.com"
               style={inputStyle}
             />
           </div>

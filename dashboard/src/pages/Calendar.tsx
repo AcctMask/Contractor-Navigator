@@ -7,9 +7,9 @@ import { startOfWeek } from "date-fns/startOfWeek"
 import { getDay } from "date-fns/getDay"
 import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-const TENANT = "g2g-roofing"
 const EASTERN_TIME_ZONE = "America/New_York"
 
 function localDateTimeToIso(value: string) {
@@ -54,7 +54,7 @@ export default function CalendarPage() {
     try {
       setMessage("Loading calendar...")
 
-      const res = await fetch(`${API_BASE}/calendar/${TENANT}/events`)
+      const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`)
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
@@ -87,7 +87,7 @@ export default function CalendarPage() {
     try {
       setMessage("Creating event...")
 
-      const res = await fetch(`${API_BASE}/calendar/${TENANT}/events`, {
+      const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -145,7 +145,7 @@ export default function CalendarPage() {
     try {
       setMessage("Deleting calendar event...")
 
-      const res = await fetch(`${API_BASE}/calendar/${TENANT}/events/${selectedEvent.id}`, {
+      const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events/${selectedEvent.id}`, {
         method: "DELETE",
       })
 

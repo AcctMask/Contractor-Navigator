@@ -1,3 +1,8 @@
+import {
+  getTenantSlug,
+  tenantLoginPath,
+} from "./tenant"
+
 const API_BASE = import.meta.env.VITE_API_BASE 
 const TOKEN_KEY = "contractor_autopilot_token"
 
@@ -27,7 +32,7 @@ export function isLoggedIn() {
 }
 
 export async function login(email: string, password: string) {
-  const res = await fetch(`${API_BASE}/auth/g2g-roofing/login`, {
+  const res = await fetch(`${API_BASE}${tenantLoginPath(getTenantSlug())}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

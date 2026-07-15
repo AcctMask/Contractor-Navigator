@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { G2G_TERMS_AND_CONDITIONS } from "../lib/g2gTerms"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
-const TENANT_SLUG = "g2g-roofing"
-
 type JobSummary = {
   id: number
   stage?: string | null
@@ -179,7 +178,7 @@ export default function DocumentPipelinePage() {
     setStatus("Loading pipeline...")
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${TENANT_SLUG}/job/${jobId}`)
+      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}`)
       const json = await res.json()
 
       if (!res.ok) {
@@ -226,7 +225,7 @@ export default function DocumentPipelinePage() {
     setStatus("Saving estimate details...")
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${TENANT_SLUG}/job/${jobId}/estimate-details`, {
+      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/estimate-details`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -285,7 +284,7 @@ export default function DocumentPipelinePage() {
     setStatus("Sending package for signature...")
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${TENANT_SLUG}/job/${jobId}/send-package`, {
+      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/send-package`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -314,7 +313,7 @@ export default function DocumentPipelinePage() {
     setStatus(`Creating ${packageType} package...`)
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${TENANT_SLUG}/job/${jobId}/create-package`, {
+      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/create-package`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

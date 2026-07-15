@@ -1,6 +1,10 @@
 import { Link } from "react-router-dom"
 import { useEffect, useMemo, useState } from "react"
 import type { CSSProperties } from "react"
+import {
+  getTenantSlug,
+  tenantDisplayName,
+} from "../lib/tenant"
 
 const capabilityRoutes: Record<string, string> = {
   "SEO Lead Engine": "/reports",
@@ -23,8 +27,6 @@ const capabilityLabels = [
 ]
 
 const API_BASE = import.meta.env.VITE_API_BASE
-const TENANT_SLUG = "g2g-roofing"
-
 type DashboardJob = {
   id: number
   external_job_id?: string | null
@@ -109,8 +111,8 @@ export default function DashboardPage() {
       setError("")
 
       const [jobsRes, eventsRes, systemEventsRes] = await Promise.all([
-        fetch(`${API_BASE}/admin/jobs/${TENANT_SLUG}?limit=250`),
-        fetch(`${API_BASE}/admin/calendar/${TENANT_SLUG}?limit=20`),
+        fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=250`),
+        fetch(`${API_BASE}/admin/calendar/${getTenantSlug()}?limit=20`),
         fetch(`${API_BASE}/events`)
       ])
 
@@ -207,7 +209,7 @@ export default function DashboardPage() {
 
           <div style={companyCard}>
             <div style={companyLabel}>Live company</div>
-            <div style={companyName}>Good2Go Roofing</div>
+            <div style={companyName}>{tenantDisplayName(getTenantSlug())}</div>
             <div style={companySub}>White-label ready tenant</div>
           </div>
 
@@ -252,7 +254,7 @@ export default function DashboardPage() {
 
         <main style={main}>
           <section style={heroCard}>
-            <div style={heroEyebrow}>Good2Go Roofing Command Center</div>
+            <div style={heroEyebrow}>{tenantDisplayName(getTenantSlug())} Command Center</div>
             <h1 style={heroTitle}>
               AI-driven lead intake, job routing, customer follow-up, claims visibility, and reporting in one place.
             </h1>

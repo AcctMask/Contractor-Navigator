@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-const TENANT = "g2g-roofing"
-
 type ReportRow = {
   label: string
   count: number
@@ -23,7 +22,7 @@ export default function ReportsPage() {
 
   async function loadReports(nextRange = range) {
     setError("")
-    const res = await fetch(`${API_BASE}/admin/reports/${TENANT}?range=${nextRange}`)
+    const res = await fetch(`${API_BASE}/admin/reports/${getTenantSlug()}?range=${nextRange}`)
     const json = await res.json()
 
     if (!res.ok || !json.ok) {

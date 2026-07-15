@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { getToken } from "../lib/auth"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-const TENANT = "g2g-roofing"
-
 export default function JobAdmin() {
   const navigate = useNavigate()
 
@@ -48,7 +47,7 @@ export default function JobAdmin() {
 
       const token = getToken()
       const res = await fetch(
-        `${API_BASE}/admin/${TENANT}/job-search?q=${encodeURIComponent(query.trim())}`,
+        `${API_BASE}/admin/${getTenantSlug()}/job-search?q=${encodeURIComponent(query.trim())}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -75,7 +74,7 @@ export default function JobAdmin() {
       setStatus("Loading all jobs...")
 
       const token = getToken()
-      const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs-all`, {
+      const res = await fetch(`${API_BASE}/admin/${getTenantSlug()}/jobs-all`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -103,7 +102,7 @@ export default function JobAdmin() {
       setError("")
       setStatus("Creating job...")
 
-      const res = await fetch(`${API_BASE}/admin/create-job/${TENANT}`, {
+      const res = await fetch(`${API_BASE}/admin/create-job/${getTenantSlug()}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { getToken } from "../lib/auth"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 
@@ -26,7 +27,7 @@ export default function DeveloperSettings() {
   const [passwordError, setPasswordError] = useState("")
 
   useEffect(() => {
-    fetch(`${API_BASE}/admin/dev-settings/g2g-roofing`)
+    fetch(`${API_BASE}/admin/dev-settings/${getTenantSlug()}`)
       .then(res => res.json())
       .then(data => setSettings(data.settings))
   }, [])
@@ -54,7 +55,7 @@ export default function DeveloperSettings() {
   }
 
   function save() {
-    fetch(`${API_BASE}/admin/dev-settings/g2g-roofing`, {
+    fetch(`${API_BASE}/admin/dev-settings/${getTenantSlug()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),

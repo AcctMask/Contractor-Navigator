@@ -1,10 +1,9 @@
 import { useEffect, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
+import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-const TENANT = "g2g-roofing"
-
 const STAGES = [
   "intake_pending", "lead", "callback", "inspection", "roof_repair", "roof_replacement", "tarp",
   "estimate_sent", "contract_sent", "pre_production", "in_production",
@@ -55,7 +54,7 @@ export default function JobDetail() {
     if (!id) return
 
     const token = getToken()
-    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}`, {
+    const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -104,7 +103,7 @@ export default function JobDetail() {
   async function loadSubcontractors() {
     const token = getToken()
 
-    const res = await fetch(`${API_BASE}/admin/${TENANT}/subcontractors`, {
+    const res = await fetch(`${API_BASE}/admin/${getTenantSlug()}/subcontractors`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -133,7 +132,7 @@ export default function JobDetail() {
     const token = getToken()
 
     const res = await fetch(
-      `${API_BASE}/admin/job/${TENANT}/${id}/assign-subcontractor`,
+      `${API_BASE}/admin/job/${getTenantSlug()}/${id}/assign-subcontractor`,
       {
         method: "POST",
         headers: {
@@ -162,7 +161,7 @@ export default function JobDetail() {
     if (!id) return
 
     const token = getToken()
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}`, {
+    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -228,7 +227,7 @@ export default function JobDetail() {
   async function loadCalendarEvents() {
     if (!id) return
 
-    const res = await fetch(`${API_BASE}/calendar/${TENANT}/events`)
+    const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`)
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -251,7 +250,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Saving calendar event...")
 
-    const res = await fetch(`${API_BASE}/calendar/${TENANT}/events/${event.id}`, {
+    const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events/${event.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -318,7 +317,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Saving...")
 
-    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/update`, {
+    const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
@@ -349,7 +348,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Archiving customer file...")
 
-    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/archive`, {
+    const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/archive`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: "Archived from Job Detail screen" }),
@@ -380,7 +379,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Saving stage...")
 
-    const res = await fetch(`${API_BASE}/admin/${TENANT}/jobs/${id}/stage`, {
+    const res = await fetch(`${API_BASE}/admin/${getTenantSlug()}/jobs/${id}/stage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -408,7 +407,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Saving intake decision...")
 
-    const res = await fetch(`${API_BASE}/admin/job/${TENANT}/${id}/update`, {
+    const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/update`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -440,7 +439,7 @@ export default function JobDetail() {
     setError("")
     setStatus("Sending text...")
 
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/send-sms`, {
+    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/send-sms`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -473,7 +472,7 @@ export default function JobDetail() {
     setStatus("Adding note...")
 
     const token = getToken()
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/notes`, {
+    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/notes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -502,7 +501,7 @@ export default function JobDetail() {
     if (!id) return
     if (!window.confirm("Delete this note?")) return
 
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/notes/${noteId}`, {
+    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/notes/${noteId}`, {
       method: "DELETE",
     })
 
@@ -541,7 +540,7 @@ export default function JobDetail() {
       selectedFiles.forEach((file) => formData.append("file", file))
 
       const token = getToken()
-      const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/upload`, {
+      const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/upload`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -629,7 +628,7 @@ export default function JobDetail() {
     if (!id) return
     if (!window.confirm("Delete this file/photo?")) return
 
-    const res = await fetch(`${API_BASE}/assets/${TENANT}/job/${id}/file/${assetId}`, {
+    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/file/${assetId}`, {
       method: "DELETE",
     })
 
