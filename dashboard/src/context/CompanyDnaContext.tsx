@@ -284,9 +284,10 @@ export function CompanyDnaProvider({
         navigation:
           Array.isArray(
             data.workspace?.navigation,
-          )
+          ) &&
+          data.workspace.navigation.length > 0
             ? data.workspace.navigation
-            : [],
+            : defaultWorkspace.navigation,
 
         supporting_modules:
           Array.isArray(
