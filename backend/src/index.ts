@@ -18,6 +18,7 @@ import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
 import { registerClaimsEmailIntakeRoutes } from "./routes/claimsEmailIntake"
 import { registerReportingRoutes } from "./routes/reporting"
+import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { commercialRoutes } from "./modules/commercial/routes"
 import { startCommercialEmailScheduler } from "./modules/commercial/scheduler"
@@ -56,6 +57,7 @@ await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)
 await registerCalendarRoutes(app)
 await registerReportingRoutes(app)
+await registerPlatformProvisioningRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
 await commercialRoutes(app)
 
