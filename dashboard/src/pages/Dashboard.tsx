@@ -5,6 +5,7 @@ import {
   getTenantSlug,
   tenantDisplayName,
 } from "../lib/tenant"
+import { useCompanyDna } from "../context/CompanyDnaContext"
 
 const capabilityRoutes: Record<string, string> = {
   "SEO Lead Engine": "/reports",
@@ -94,6 +95,22 @@ function fmtLeadDate(value?: string | null) {
 }
 
 export default function DashboardPage() {
+  const {
+    branding,
+    workflowDefaults,
+  } = useCompanyDna()
+
+  const jobTerm =
+    workflowDefaults.job_term || "Job"
+
+  const customerTerm =
+    workflowDefaults.customer_term ||
+    "Customer"
+
+  const inspectionTerm =
+    workflowDefaults.inspection_term ||
+    "Inspection"
+
   const [jobs, setJobs] = useState<DashboardJob[]>([])
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
   const [systemEvents, setSystemEvents] = useState<SystemEventSummary[]>([])
@@ -209,7 +226,10 @@ export default function DashboardPage() {
 
           <div style={companyCard}>
             <div style={companyLabel}>Live company</div>
-            <div style={companyName}>{tenantDisplayName(getTenantSlug())}</div>
+            <div style={companyName}>
+              {branding.business_display_name ||
+                tenantDisplayName(getTenantSlug())}
+            </div>
             <div style={companySub}>White-label ready tenant</div>
           </div>
 
@@ -319,7 +339,9 @@ export default function DashboardPage() {
             <div style={panelCardLarge}>
               <div style={panelHeaderRow}>
                 <div>
-                  <h2 style={panelTitle}>Job Command Center</h2>
+                  <h2 style={panelTitle}>
+                    {jobTerm} Command Center
+                  </h2>
                   <div style={panelSub}>
                     {selectedStage === "__buying_signals"
                       ? "Showing jobs with buying signals. Click Buying Signals again to clear."
@@ -339,7 +361,7 @@ export default function DashboardPage() {
               ) : (
                 <div style={tableShell}>
                   <div style={tableHeader}>
-                    <div>CUSTOMER</div>
+                    <div>{customerTerm.toUpperCase()}</div>
                     <div>STAGE</div>
                     <div>ZIP</div>
                     <div>{selectedStage === "lead" ? "RECEIVED" : "CARRIER"}</div>
@@ -349,9 +371,13 @@ export default function DashboardPage() {
                   </div>
 
                   {loading ? (
-                    <div style={tableEmpty}>Loading jobs...</div>
+                    <div style={tableEmpty}>
+                      Loading {jobTerm.toLowerCase()} records...
+                    </div>
                   ) : newestJobs.length === 0 ? (
-                    <div style={tableEmpty}>No jobs loaded here yet.</div>
+                    <div style={tableEmpty}>
+                      No {jobTerm.toLowerCase()} records loaded here yet.
+                    </div>
                   ) : (
                     newestJobs.map((job) => (
                       <Link key={job.id} to={`/job/${job.id}`} style={tableRowLink}>
@@ -379,7 +405,7 @@ export default function DashboardPage() {
 
             <div style={panelCardSide}>
               <h2 style={panelTitle}>Upcoming Calendar</h2>
-              <div style={panelSub}>Scheduled projects, inspections, and appointments.</div>
+              <div style={panelSub}>Scheduled projects, {inspectionTerm.toLowerCase()} events, and appointments.</div>
 
               <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
                 {loading ? (
@@ -401,7 +427,7 @@ export default function DashboardPage() {
                       {event.job_id ? (
                         <div style={{ marginTop: 8 }}>
                           <Link to={`/job/${event.job_id}`} style={{ color: "#a9cbff", fontWeight: 700 }}>
-                            Open linked job
+                            Open linked {jobTerm.toLowerCase()}
                           </Link>
                         </div>
                       ) : null}

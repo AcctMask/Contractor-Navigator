@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { randomBytes, timingSafeEqual } from "crypto"
 import { pool } from "../db/db"
+import { getCurrentUserFromToken } from "../services/authService"
 
 const APP_BASE_URL =
   process.env.APP_BASE_URL ||
@@ -15,6 +16,16 @@ function safeEqual(left: string, right: string) {
   }
 
   return timingSafeEqual(leftBuffer, rightBuffer)
+}
+
+function getBearerToken(request: any) {
+  const authorization = String(
+    request.headers.authorization || "",
+  )
+
+  return authorization.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : ""
 }
 
 function requireProvisioningSecret(request: any) {
@@ -276,6 +287,258 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.get(
+    "/platform/company-dna-runtime/:tenantSlug",
+    async (request: any, reply) => {
+      const token = getBearerToken(request)
+
+      if (!token) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required.",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || "",
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required.",
+        })
+      }
+
+      const client = await pool.connect()
+
+      try {
+        const currentUser =
+          await getCurrentUserFromToken(token)
+
+        if (!currentUser?.is_active) {
+          return reply.code(401).send({
+            ok: false,
+            error: "User account is inactive.",
+          })
+        }
+
+        const tenantResult = await client.query(
+          `
+            select
+              id,
+              slug,
+              name,
+              created_at
+            from tenants
+            where slug = $1
+            limit 1
+          `,
+          [tenantSlug],
+        )
+
+        const tenant = tenantResult.rows[0]
+
+        if (!tenant) {
+          return reply.code(404).send({
+            ok: false,
+            error: "Navigator tenant was not found.",
+          })
+        }
+
+        if (
+          Number(currentUser.tenant_id) !==
+          Number(tenant.id)
+        ) {
+          return reply.code(403).send({
+            ok: false,
+            error:
+              "The authenticated user does not belong to this tenant.",
+          })
+        }
+
+        let companyDna = null
+
+        try {
+          const companyDnaResult =
+            await client.query(
+              `
+                select
+                  status,
+                  version,
+                  branding,
+                  workflow_defaults,
+                  approved_at,
+                  provisioned_at,
+                  updated_at
+                from tenant_company_dna
+                where tenant_id = $1
+                limit 1
+              `,
+              [tenant.id],
+            )
+
+          companyDna =
+            companyDnaResult.rows[0] || null
+        } catch (error: any) {
+          if (error?.code !== "42P01") {
+            throw error
+          }
+        }
+
+        const branding = {
+          business_display_name:
+            companyDna?.branding
+              ?.business_display_name ||
+            tenant.name,
+
+          dba_name:
+            companyDna?.branding?.dba_name ||
+            null,
+
+          primary_color:
+            companyDna?.branding
+              ?.primary_color ||
+            null,
+
+          accent_color:
+            companyDna?.branding
+              ?.accent_color ||
+            null,
+
+          website:
+            companyDna?.branding?.website ||
+            null,
+
+          email:
+            companyDna?.branding?.email ||
+            null,
+
+          phone:
+            companyDna?.branding?.phone ||
+            null,
+        }
+
+        const workflowDefaults = {
+          customer_term:
+            companyDna?.workflow_defaults
+              ?.customer_term ||
+            "Customer",
+
+          job_term:
+            companyDna?.workflow_defaults
+              ?.job_term ||
+            "Job",
+
+          crew_term:
+            companyDna?.workflow_defaults
+              ?.crew_term ||
+            "Crew",
+
+          estimate_term:
+            companyDna?.workflow_defaults
+              ?.estimate_term ||
+            "Estimate",
+
+          agreement_term:
+            companyDna?.workflow_defaults
+              ?.agreement_term ||
+            "Agreement",
+
+          inspection_term:
+            companyDna?.workflow_defaults
+              ?.inspection_term ||
+            "Inspection",
+
+          call_to_action:
+            companyDna?.workflow_defaults
+              ?.call_to_action ||
+            "Contact Us",
+
+          office_hours:
+            companyDna?.workflow_defaults
+              ?.office_hours ||
+            null,
+
+          after_hours_behavior:
+            companyDna?.workflow_defaults
+              ?.after_hours_behavior ||
+            null,
+
+          ring_owner_first:
+            companyDna?.workflow_defaults
+              ?.ring_owner_first ||
+            null,
+
+          rejected_call_behavior:
+            companyDna?.workflow_defaults
+              ?.rejected_call_behavior ||
+            null,
+
+          scheduling_rules:
+            companyDna?.workflow_defaults
+              ?.scheduling_rules ||
+            null,
+
+          escalation_rules:
+            companyDna?.workflow_defaults
+              ?.escalation_rules ||
+            null,
+
+          territory:
+            companyDna?.workflow_defaults
+              ?.territory ||
+            null,
+        }
+
+        return reply.send({
+          ok: true,
+
+          tenant: {
+            id: Number(tenant.id),
+            slug: tenant.slug,
+            name: tenant.name,
+          },
+
+          company_dna: {
+            status:
+              companyDna?.status ||
+              "defaults",
+
+            version:
+              Number(
+                companyDna?.version || 1,
+              ),
+
+            approved_at:
+              companyDna?.approved_at ||
+              null,
+
+            updated_at:
+              companyDna?.updated_at ||
+              null,
+          },
+
+          branding,
+          workflow_defaults:
+            workflowDefaults,
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Company DNA runtime could not be loaded.",
+          details:
+            error?.message || String(error),
+        })
+      } finally {
+        client.release()
+      }
+    },
+  )
+
   app.get(
     "/platform/provisioning-status/:tenantSlug",
     async (request: any, reply) => {
