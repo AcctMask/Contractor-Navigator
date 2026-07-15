@@ -294,6 +294,96 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.post(
+    "/platform/promote-platform-owner",
+    async (request: any, reply) => {
+      if (!requireProvisioningSecret(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error:
+            "Platform provisioning authorization required.",
+        })
+      }
+
+      const tenantSlug = String(
+        request.body?.tenant_slug || "",
+      )
+        .trim()
+        .toLowerCase()
+
+      const email = String(
+        request.body?.email || "",
+      )
+        .trim()
+        .toLowerCase()
+
+      if (!tenantSlug || !email) {
+        return reply.code(400).send({
+          ok: false,
+          error:
+            "tenant_slug and email are required.",
+        })
+      }
+
+      try {
+        const result = await pool.query(
+          `
+            update app_users u
+            set
+              role = 'platform_owner',
+              updated_at = now()
+            from tenants t
+            where u.tenant_id = t.id
+              and lower(t.slug) = $1
+              and lower(u.email) = $2
+              and u.is_active = true
+            returning
+              u.id,
+              u.tenant_id,
+              t.slug as tenant_slug,
+              t.name as tenant_name,
+              u.email,
+              u.full_name,
+              u.role,
+              u.is_active,
+              u.updated_at
+          `,
+          [
+            tenantSlug,
+            email,
+          ],
+        )
+
+        if (result.rowCount !== 1) {
+          return reply.code(404).send({
+            ok: false,
+            error:
+              "Exactly one active Navigator user was not found.",
+            tenant_slug: tenantSlug,
+            email,
+            matches:
+              result.rowCount || 0,
+          })
+        }
+
+        return reply.send({
+          ok: true,
+          user: result.rows[0],
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Platform owner promotion failed.",
+          details:
+            error?.message || String(error),
+        })
+      }
+    },
+  )
+
   app.get(
     "/platform/tenants",
     async (request: any, reply) => {
