@@ -87,11 +87,18 @@ async function ensureProvisioningTables(
 
       branding jsonb not null default '{}'::jsonb,
       workflow_defaults jsonb not null default '{}'::jsonb,
+      workspace jsonb not null default '{}'::jsonb,
 
       approved_at timestamptz null,
       provisioned_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
+  `)
+
+  await client.query(`
+    alter table tenant_company_dna
+    add column if not exists workspace
+      jsonb not null default '{}'::jsonb
   `)
 
   await client.query(`
@@ -368,6 +375,7 @@ export async function registerPlatformProvisioningRoutes(
                   version,
                   branding,
                   workflow_defaults,
+                  workspace,
                   approved_at,
                   provisioned_at,
                   updated_at
@@ -522,6 +530,47 @@ export async function registerPlatformProvisioningRoutes(
           branding,
           workflow_defaults:
             workflowDefaults,
+
+          workspace: {
+            version:
+              Number(
+                companyDna?.workspace
+                  ?.version || 1,
+              ),
+
+            hero:
+              companyDna?.workspace
+                ?.hero || {
+                eyebrow:
+                  `${branding.business_display_name} Command Center`,
+                title:
+                  `${branding.business_display_name} Command Center`,
+                description:
+                  "Manage business records, communications, schedules, documents, and reporting from one tenant-specific workspace.",
+              },
+
+            navigation:
+              Array.isArray(
+                companyDna?.workspace
+                  ?.navigation,
+              )
+                ? companyDna.workspace
+                    .navigation
+                : [],
+
+            supporting_modules:
+              Array.isArray(
+                companyDna?.workspace
+                  ?.supporting_modules,
+              )
+                ? companyDna.workspace
+                    .supporting_modules
+                : [],
+
+            dashboard:
+              companyDna?.workspace
+                ?.dashboard || {},
+          },
         })
       } catch (error: any) {
         request.log.error(error)
@@ -598,6 +647,7 @@ export async function registerPlatformProvisioningRoutes(
                 version,
                 branding,
                 workflow_defaults,
+                workspace,
                 approved_at,
                 provisioned_at,
                 updated_at
@@ -774,6 +824,12 @@ export async function registerPlatformProvisioningRoutes(
             ? body.not_applicable
             : {}
 
+        const workspace =
+          body.workspace &&
+          typeof body.workspace === "object"
+            ? body.workspace
+            : {}
+
         const branding = {
           business_display_name:
             responses.business_display_name ||
@@ -839,6 +895,7 @@ export async function registerPlatformProvisioningRoutes(
               not_applicable,
               branding,
               workflow_defaults,
+              workspace,
               approved_at,
               provisioned_at,
               updated_at
@@ -854,7 +911,8 @@ export async function registerPlatformProvisioningRoutes(
               $7::jsonb,
               $8::jsonb,
               $9::jsonb,
-              $10::timestamptz,
+              $10::jsonb,
+              $11::timestamptz,
               now(),
               now()
             )
@@ -873,6 +931,8 @@ export async function registerPlatformProvisioningRoutes(
               branding = excluded.branding,
               workflow_defaults =
                 excluded.workflow_defaults,
+              workspace =
+                excluded.workspace,
               approved_at =
                 excluded.approved_at,
               provisioned_at = now(),
@@ -890,6 +950,7 @@ export async function registerPlatformProvisioningRoutes(
             JSON.stringify(notApplicable),
             JSON.stringify(branding),
             JSON.stringify(workflowDefaults),
+            JSON.stringify(workspace),
             cleanOptional(body.approved_at),
           ],
         )

@@ -39,9 +39,46 @@ type WorkflowDefaults = {
   territory: string | null
 }
 
+export type WorkspaceModule = {
+  id: string
+  label: string
+  description?: string | null
+  provisioning_status?: string | null
+  route?: string | null
+  external_url?: string | null
+}
+
+export type WorkspaceDefinition = {
+  version: number
+
+  hero: {
+    eyebrow: string
+    title: string
+    description: string
+  }
+
+  navigation: Array<{
+    id: string
+    label: string
+    route: string
+  }>
+
+  supporting_modules:
+    WorkspaceModule[]
+
+  dashboard: {
+    record_label?: string
+    record_label_plural?: string
+    show_pipeline?: boolean
+    show_calendar?: boolean
+    show_system_events?: boolean
+  }
+}
+
 type CompanyDnaContextValue = {
   branding: Branding
   workflowDefaults: WorkflowDefaults
+  workspace: WorkspaceDefinition
   loading: boolean
   error: string
   refresh: () => Promise<void>
@@ -75,6 +112,31 @@ const defaultWorkflowDefaults: WorkflowDefaults = {
   territory: null,
 }
 
+const defaultWorkspace: WorkspaceDefinition = {
+  version: 1,
+
+  hero: {
+    eyebrow:
+      "Contractor Navigator Command Center",
+    title:
+      "Your operational command center",
+    description:
+      "Manage records, communications, schedules, documents, and reporting from one tenant-specific workspace.",
+  },
+
+  navigation: [],
+
+  supporting_modules: [],
+
+  dashboard: {
+    record_label: "Job",
+    record_label_plural: "Jobs",
+    show_pipeline: true,
+    show_calendar: true,
+    show_system_events: true,
+  },
+}
+
 const CompanyDnaContext =
   createContext<CompanyDnaContextValue | null>(
     null,
@@ -101,6 +163,11 @@ export function CompanyDnaProvider({
     defaultWorkflowDefaults,
   )
 
+  const [workspace, setWorkspace] =
+    useState<WorkspaceDefinition>(
+      defaultWorkspace,
+    )
+
   const [loading, setLoading] =
     useState(true)
 
@@ -119,6 +186,10 @@ export function CompanyDnaProvider({
 
       setWorkflowDefaults(
         defaultWorkflowDefaults,
+      )
+
+      setWorkspace(
+        defaultWorkspace,
       )
 
       setLoading(false)
@@ -164,6 +235,38 @@ export function CompanyDnaProvider({
         ...defaultWorkflowDefaults,
         ...(data.workflow_defaults || {}),
       })
+
+      setWorkspace({
+        ...defaultWorkspace,
+        ...(data.workspace || {}),
+
+        hero: {
+          ...defaultWorkspace.hero,
+          ...(data.workspace?.hero || {}),
+        },
+
+        navigation:
+          Array.isArray(
+            data.workspace?.navigation,
+          )
+            ? data.workspace.navigation
+            : [],
+
+        supporting_modules:
+          Array.isArray(
+            data.workspace
+              ?.supporting_modules,
+          )
+            ? data.workspace
+                .supporting_modules
+            : [],
+
+        dashboard: {
+          ...defaultWorkspace.dashboard,
+          ...(data.workspace
+            ?.dashboard || {}),
+        },
+      })
     } catch (runtimeError: any) {
       setBranding({
         ...defaultBranding,
@@ -173,6 +276,10 @@ export function CompanyDnaProvider({
 
       setWorkflowDefaults(
         defaultWorkflowDefaults,
+      )
+
+      setWorkspace(
+        defaultWorkspace,
       )
 
       setError(
@@ -192,6 +299,7 @@ export function CompanyDnaProvider({
     () => ({
       branding,
       workflowDefaults,
+      workspace,
       loading,
       error,
       refresh: loadCompanyDna,
@@ -199,6 +307,7 @@ export function CompanyDnaProvider({
     [
       branding,
       workflowDefaults,
+      workspace,
       loading,
       error,
       tenantSlug,

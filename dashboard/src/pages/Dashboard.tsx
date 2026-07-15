@@ -7,26 +7,6 @@ import {
 } from "../lib/tenant"
 import { useCompanyDna } from "../context/CompanyDnaContext"
 
-const capabilityRoutes: Record<string, string> = {
-  "SEO Lead Engine": "/reports",
-  "Storm Check": "https://g2g-weather-event-frontend.onrender.com/storm-check.html?zip=33710",
-  "Storm Tracking Map": "https://g2g-weather-event-frontend.onrender.com",
-  "Roof Age Targeting": "/roof-intelligence",
-  "Evergreen Social": "/social",
-  "Instant Estimator": "https://g2g-instant-estimator.netlify.app",
-  "GC Mail Engine": "/commercial",
-}
-
-const capabilityLabels = [
-  "SEO Lead Engine",
-  "Storm Check",
-  "Storm Tracking Map",
-  "Roof Age Targeting",
-  "Evergreen Social",
-  "Instant Estimator",
-  "GC Mail Engine",
-]
-
 const API_BASE = import.meta.env.VITE_API_BASE
 type DashboardJob = {
   id: number
@@ -98,6 +78,7 @@ export default function DashboardPage() {
   const {
     branding,
     workflowDefaults,
+    workspace,
   } = useCompanyDna()
 
   const jobTerm =
@@ -217,10 +198,23 @@ export default function DashboardPage() {
       <div style={layout}>
         <aside style={sidebar}>
           <div style={brandRow}>
-            <div style={brandBadge}>CP</div>
+            <div style={brandBadge}>
+              {(branding.dba_name ||
+                branding.business_display_name ||
+                "CN")
+                .slice(0, 2)
+                .toUpperCase()}
+            </div>
+
             <div>
-              <div style={brandTitle}>Co-Pilot</div>
-              <div style={brandSub}>Contractor operating platform</div>
+              <div style={brandTitle}>
+                {branding.dba_name ||
+                  branding.business_display_name}
+              </div>
+
+              <div style={brandSub}>
+                Tenant operational workspace
+              </div>
             </div>
           </div>
 
@@ -236,50 +230,92 @@ export default function DashboardPage() {
           <div style={navSectionLabel}>WORKSPACE</div>
 
           <div style={tenantSummary}>
-            <div style={tenantSummaryTitle}>Supporting Modules</div>
+            <div style={tenantSummaryTitle}>
+              AI Workforce
+            </div>
 
             <div style={capabilityWrap}>
-              {capabilityLabels.map((label) =>
-                (capabilityRoutes[label] || "").startsWith("http") ? (
-                  <a
-                    key={label}
-                    href={capabilityRoutes[label]}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      ...capabilityPill,
-                      textDecoration: "none",
-                      display: "inline-block",
-                    }}
-                  >
-                    {label}
-                  </a>
-                ) : (
-                  <Link
-                    key={label}
-                    to={capabilityRoutes[label] || "/"}
-                    style={{
-                      ...capabilityPill,
-                      textDecoration: "none",
-                      display: "inline-block",
-                    }}
-                  >
-                    {label}
-                  </Link>
-                )
-              )}
+              {workspace.supporting_modules
+                .map((module) => {
+                  if (module.external_url) {
+                    return (
+                      <a
+                        key={module.id}
+                        href={module.external_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          ...capabilityPill,
+                          textDecoration: "none",
+                          display: "inline-block",
+                        }}
+                        title={
+                          module.description ||
+                          undefined
+                        }
+                      >
+                        {module.label}
+                      </a>
+                    )
+                  }
+
+                  if (module.route) {
+                    return (
+                      <Link
+                        key={module.id}
+                        to={module.route}
+                        style={{
+                          ...capabilityPill,
+                          textDecoration: "none",
+                          display: "inline-block",
+                        }}
+                        title={
+                          module.description ||
+                          undefined
+                        }
+                      >
+                        {module.label}
+                      </Link>
+                    )
+                  }
+
+                  return (
+                    <span
+                      key={module.id}
+                      style={capabilityPill}
+                      title={
+                        module.description ||
+                        undefined
+                      }
+                    >
+                      {module.label}
+                    </span>
+                  )
+                })}
+
+              {workspace.supporting_modules
+                .length === 0 ? (
+                <span style={companySub}>
+                  No supporting modules have
+                  been assigned yet.
+                </span>
+              ) : null}
             </div>
           </div>
         </aside>
 
         <main style={main}>
           <section style={heroCard}>
-            <div style={heroEyebrow}>{tenantDisplayName(getTenantSlug())} Command Center</div>
+            <div style={heroEyebrow}>
+              {workspace.hero.eyebrow}
+            </div>
+
             <h1 style={heroTitle}>
-              AI-driven lead intake, job routing, customer follow-up, claims visibility, and reporting in one place.
+              {workspace.hero.title}
             </h1>
+
             <p style={heroText}>
-              Automatically load leads from web forms, calls, and text conversations, then track every opportunity from first contact through follow-up, claims support, and contract closure. Never lose an opportunity again.
+              {workspace.hero.description}
             </p>
           </section>
 
