@@ -294,6 +294,68 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.post(
+    "/platform/ensure-provisioning-schema",
+    async (request: any, reply) => {
+      if (!requireProvisioningSecret(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error:
+            "Platform provisioning authorization required.",
+        })
+      }
+
+      const client = await pool.connect()
+
+      try {
+        await client.query("begin")
+
+        await ensureProvisioningTables(
+          client,
+        )
+
+        await client.query("commit")
+
+        const verification =
+          await client.query(
+            `
+              select
+                column_name,
+                data_type
+              from information_schema.columns
+              where table_schema = 'public'
+                and table_name =
+                  'tenant_company_dna'
+                and column_name =
+                  'workspace'
+              limit 1
+            `,
+          )
+
+        return reply.send({
+          ok: true,
+          schema: "tenant_company_dna",
+          workspace_column:
+            verification.rows[0] || null,
+        })
+      } catch (error: any) {
+        await client.query("rollback")
+
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Navigator provisioning schema could not be initialized.",
+          details:
+            error?.message || String(error),
+        })
+      } finally {
+        client.release()
+      }
+    },
+  )
+
   app.get(
     "/platform/company-dna-runtime/:tenantSlug",
     async (request: any, reply) => {
