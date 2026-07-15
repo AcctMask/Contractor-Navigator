@@ -124,7 +124,43 @@ const defaultWorkspace: WorkspaceDefinition = {
       "Manage records, communications, schedules, documents, and reporting from one tenant-specific workspace.",
   },
 
-  navigation: [],
+  navigation: [
+    {
+      id: "command-center",
+      label: "Command Center",
+      route: "/",
+    },
+    {
+      id: "records",
+      label: "Jobs",
+      route: "/job-admin",
+    },
+    {
+      id: "calendar",
+      label: "Calendar",
+      route: "/calendar",
+    },
+    {
+      id: "developer-settings",
+      label: "Developer Settings",
+      route: "/developer-settings",
+    },
+    {
+      id: "documents",
+      label: "Documents",
+      route: "/document-pipeline",
+    },
+    {
+      id: "users",
+      label: "Users",
+      route: "/users",
+    },
+    {
+      id: "reports",
+      label: "Reports",
+      route: "/reports",
+    },
+  ],
 
   supporting_modules: [],
 

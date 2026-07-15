@@ -20,6 +20,7 @@ import TimelinePage from "./pages/Timeline"
 import ProtectedRoute from "./components/ProtectedRoute"
 import { clearToken, isLoggedIn } from "./lib/auth"
 import { useTenant } from "./context/TenantContext"
+import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 
@@ -28,6 +29,25 @@ function HeaderBar() {
   const navigate = useNavigate()
   const authed = isLoggedIn()
   const { tenantName } = useTenant()
+  const {
+    branding,
+    workspace,
+  } = useCompanyDna()
+
+  function navigationIsActive(
+    route: string,
+  ) {
+    if (route === "/") {
+      return location.pathname === "/"
+    }
+
+    return (
+      location.pathname === route ||
+      location.pathname.startsWith(
+        `${route}/`,
+      )
+    )
+  }
 
   function handleLogout() {
     clearToken()
@@ -43,7 +63,8 @@ function HeaderBar() {
             fontWeight: 800,
           }}
         >
-          {tenantName}
+          {branding.business_display_name ||
+            tenantName}
         </div>
 
         <div
@@ -60,35 +81,28 @@ function HeaderBar() {
       <div style={headerLinks}>
         {authed ? (
           <>
-            <Link to="/" style={location.pathname === "/" ? activeLinkStyle : mutedLinkStyle}>
-              Command Center
-            </Link>
+            {workspace.navigation.map(
+              (item) => (
+                <Link
+                  key={item.id}
+                  to={item.route}
+                  style={
+                    navigationIsActive(
+                      item.route,
+                    )
+                      ? activeLinkStyle
+                      : mutedLinkStyle
+                  }
+                >
+                  {item.label}
+                </Link>
+              ),
+            )}
 
-            <Link to="/job-admin" style={location.pathname === "/job-admin" ? activeLinkStyle : mutedLinkStyle}>
-              Jobs
-            </Link>
-
-            <Link to="/calendar" style={location.pathname === "/calendar" ? activeLinkStyle : mutedLinkStyle}>
-              Calendar
-            </Link>
-
-            <Link to="/developer-settings" style={location.pathname === "/developer-settings" ? activeLinkStyle : mutedLinkStyle}>
-              Developer Settings
-            </Link>
-
-            <Link to="/document-pipeline" style={location.pathname === "/document-pipeline" ? activeLinkStyle : mutedLinkStyle}>
-              Documents
-            </Link>
-
-            <Link to="/users" style={location.pathname === "/users" ? activeLinkStyle : mutedLinkStyle}>
-              Users
-            </Link>
-
-            <Link to="/reports" style={location.pathname === "/reports" ? activeLinkStyle : mutedLinkStyle}>
-              Reports
-            </Link>
-
-            <button onClick={handleLogout} style={logoutButtonStyle}>
+            <button
+              onClick={handleLogout}
+              style={logoutButtonStyle}
+            >
               Logout
             </button>
           </>
