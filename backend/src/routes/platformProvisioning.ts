@@ -294,6 +294,135 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.get(
+    "/platform/tenants",
+    async (request: any, reply) => {
+      const token = getBearerToken(request)
+
+      if (!token) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required.",
+        })
+      }
+
+      try {
+        const currentUser =
+          await getCurrentUserFromToken(token)
+
+        if (!currentUser?.is_active) {
+          return reply.code(401).send({
+            ok: false,
+            error: "User account is inactive.",
+          })
+        }
+
+        if (
+          String(currentUser.role) !==
+          "platform_owner"
+        ) {
+          return reply.code(403).send({
+            ok: false,
+            error:
+              "Platform owner authorization required.",
+          })
+        }
+
+        const result = await pool.query(
+          `
+            select
+              t.id,
+              t.slug,
+              t.name,
+              t.created_at,
+              coalesce(
+                d.branding,
+                '{}'::jsonb
+              ) as branding,
+              coalesce(
+                d.workflow_defaults,
+                '{}'::jsonb
+              ) as workflow_defaults,
+              coalesce(
+                d.status,
+                'not_provisioned'
+              ) as company_dna_status,
+              coalesce(
+                p.navigator_status,
+                'not_provisioned'
+              ) as navigator_status,
+              coalesce(
+                p.crm_status,
+                'not_provisioned'
+              ) as crm_status
+            from tenants t
+            left join tenant_company_dna d
+              on d.tenant_id = t.id
+            left join tenant_provisioning_state p
+              on p.tenant_id = t.id
+            order by
+              lower(
+                coalesce(
+                  d.branding
+                    ->> 'business_display_name',
+                  t.name
+                )
+              ),
+              t.id
+          `,
+        )
+
+        return reply.send({
+          ok: true,
+          tenants: result.rows.map(
+            (tenant) => ({
+              id: Number(tenant.id),
+              slug: tenant.slug,
+              name: tenant.name,
+
+              display_name:
+                tenant.branding
+                  ?.business_display_name ||
+                tenant.name,
+
+              dba_name:
+                tenant.branding
+                  ?.dba_name ||
+                null,
+
+              industry:
+                tenant.workflow_defaults
+                  ?.industry ||
+                null,
+
+              company_dna_status:
+                tenant.company_dna_status,
+
+              navigator_status:
+                tenant.navigator_status,
+
+              crm_status:
+                tenant.crm_status,
+
+              created_at:
+                tenant.created_at,
+            }),
+          ),
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Platform tenant directory could not be loaded.",
+          details:
+            error?.message || String(error),
+        })
+      }
+    },
+  )
+
   app.post(
     "/platform/ensure-provisioning-schema",
     async (request: any, reply) => {
@@ -415,9 +544,14 @@ export async function registerPlatformProvisioningRoutes(
           })
         }
 
+        const isPlatformOwner =
+          String(currentUser.role) ===
+          "platform_owner"
+
         if (
+          !isPlatformOwner &&
           Number(currentUser.tenant_id) !==
-          Number(tenant.id)
+            Number(tenant.id)
         ) {
           return reply.code(403).send({
             ok: false,

@@ -1,5 +1,12 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
-import type { CSSProperties, ReactNode } from "react"
+import {
+  useEffect,
+  useState,
+} from "react"
+import type {
+  CSSProperties,
+  ReactNode,
+} from "react"
 import UsersPage from "./pages/Users"
 import JobAdminPage from "./pages/JobAdmin"
 import JobDetailPage from "./pages/JobDetail"
@@ -18,7 +25,11 @@ import SocialPage from "./pages/Social"
 import EstimatorPage from "./pages/Estimator"
 import TimelinePage from "./pages/Timeline"
 import ProtectedRoute from "./components/ProtectedRoute"
-import { clearToken, isLoggedIn } from "./lib/auth"
+import {
+  clearToken,
+  getToken,
+  isLoggedIn,
+} from "./lib/auth"
 import { useTenant } from "./context/TenantContext"
 import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
@@ -28,7 +39,120 @@ function HeaderBar() {
   const location = useLocation()
   const navigate = useNavigate()
   const authed = isLoggedIn()
-  const { tenantName } = useTenant()
+  const {
+    tenantSlug,
+    tenantName,
+    changeTenant,
+  } = useTenant()
+
+  const [currentUser, setCurrentUser] =
+    useState<any>(null)
+
+  const [platformTenants, setPlatformTenants] =
+    useState<any[]>([])
+
+  const [tenantDirectoryError, setTenantDirectoryError] =
+    useState("")
+
+  const API_BASE =
+    import.meta.env.VITE_API_BASE
+
+  useEffect(() => {
+    if (!authed) {
+      setCurrentUser(null)
+      setPlatformTenants([])
+      return
+    }
+
+    const token = getToken()
+
+    if (!token) {
+      return
+    }
+
+    void fetch(
+      `${API_BASE}/auth/me`,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${token}`,
+        },
+      },
+    )
+      .then(async (response) => {
+        const data = await response.json()
+
+        if (!response.ok || !data?.ok) {
+          throw new Error(
+            data?.error ||
+              "Current user could not be loaded.",
+          )
+        }
+
+        setCurrentUser(data.user)
+
+        if (
+          data.user?.role !==
+          "platform_owner"
+        ) {
+          setPlatformTenants([])
+          return null
+        }
+
+        return fetch(
+          `${API_BASE}/platform/tenants`,
+          {
+            headers: {
+              Authorization:
+                `Bearer ${token}`,
+            },
+          },
+        )
+      })
+      .then(async (response) => {
+        if (!response) {
+          return
+        }
+
+        const data = await response.json()
+
+        if (!response.ok || !data?.ok) {
+          throw new Error(
+            data?.error ||
+              "Tenant directory could not be loaded.",
+          )
+        }
+
+        setPlatformTenants(
+          Array.isArray(data.tenants)
+            ? data.tenants
+            : [],
+        )
+
+        setTenantDirectoryError("")
+      })
+      .catch((error) => {
+        setTenantDirectoryError(
+          error?.message ||
+            "Tenant directory could not be loaded.",
+        )
+      })
+  }, [authed])
+
+  function handleTenantChange(
+    nextTenantSlug: string,
+  ) {
+    if (
+      !nextTenantSlug ||
+      nextTenantSlug === tenantSlug
+    ) {
+      return
+    }
+
+    changeTenant(nextTenantSlug)
+    navigate("/")
+    window.location.reload()
+  }
   const {
     branding,
     workspace,
@@ -76,6 +200,63 @@ function HeaderBar() {
         >
           Contractor Navigator
         </div>
+
+        {currentUser?.role ===
+          "platform_owner" ? (
+          <div
+            style={{
+              marginTop: "8px",
+              display: "grid",
+              gap: "5px",
+            }}
+          >
+            <label
+              htmlFor="platform-tenant-switcher"
+              style={{
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                opacity: 0.62,
+              }}
+            >
+              Client workspace
+            </label>
+
+            <select
+              id="platform-tenant-switcher"
+              value={tenantSlug}
+              onChange={(event) =>
+                handleTenantChange(
+                  event.target.value,
+                )
+              }
+              style={tenantSwitcherStyle}
+            >
+              {platformTenants.map(
+                (tenant) => (
+                  <option
+                    key={tenant.slug}
+                    value={tenant.slug}
+                  >
+                    {tenant.display_name ||
+                      tenant.name}
+                  </option>
+                ),
+              )}
+            </select>
+
+            {tenantDirectoryError ? (
+              <span
+                style={{
+                  color: "#fecaca",
+                  fontSize: "10px",
+                }}
+              >
+                {tenantDirectoryError}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div style={headerLinks}>
@@ -114,6 +295,19 @@ function HeaderBar() {
       </div>
     </div>
   )
+}
+
+const tenantSwitcherStyle: CSSProperties = {
+  minWidth: "190px",
+  maxWidth: "260px",
+  padding: "7px 9px",
+  color: "#f8fafc",
+  background: "rgba(15, 23, 42, 0.92)",
+  border:
+    "1px solid rgba(148, 163, 184, 0.32)",
+  borderRadius: "9px",
+  fontSize: "12px",
+  fontWeight: 700,
 }
 
 const CRM_ROLES = ["platform_owner", "tenant_admin", "admin", "manager", "sales", "staff"]
