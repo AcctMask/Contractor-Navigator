@@ -48,6 +48,18 @@ export type WorkspaceModule = {
   external_url?: string | null
 }
 
+export type WorkspacePipelineCard = {
+  id: string
+  label: string
+  filter_type:
+    | "stage"
+    | "stage_any"
+    | "buying_signal"
+  filter_value?: string | null
+  filter_values?: string[]
+  attention?: boolean
+}
+
 export type WorkspaceDefinition = {
   version: number
 
@@ -69,6 +81,8 @@ export type WorkspaceDefinition = {
   dashboard: {
     record_label?: string
     record_label_plural?: string
+    pipeline_cards?:
+      WorkspacePipelineCard[]
     show_pipeline?: boolean
     show_calendar?: boolean
     show_system_events?: boolean
@@ -167,6 +181,145 @@ const defaultWorkspace: WorkspaceDefinition = {
   dashboard: {
     record_label: "Job",
     record_label_plural: "Jobs",
+
+    pipeline_cards: [
+      {
+        id: "intake-pending",
+        label: "Intake Pending",
+        filter_type: "stage",
+        filter_value:
+          "intake_pending",
+        attention: false,
+      },
+      {
+        id: "lead",
+        label: "Lead",
+        filter_type: "stage",
+        filter_value: "lead",
+        attention: false,
+      },
+      {
+        id: "callback",
+        label: "Callback",
+        filter_type: "stage",
+        filter_value: "callback",
+        attention: false,
+      },
+      {
+        id: "inspection",
+        label: "Inspection",
+        filter_type: "stage",
+        filter_value: "inspection",
+        attention: false,
+      },
+      {
+        id: "estimate-sent",
+        label: "Estimate Sent",
+        filter_type: "stage",
+        filter_value:
+          "estimate_sent",
+        attention: false,
+      },
+      {
+        id: "contract-sent",
+        label: "Contract Sent",
+        filter_type: "stage",
+        filter_value:
+          "contract_sent",
+        attention: true,
+      },
+      {
+        id: "pre-production",
+        label: "Pre Production",
+        filter_type: "stage",
+        filter_value:
+          "pre_production",
+        attention: false,
+      },
+      {
+        id: "in-production",
+        label: "In Production",
+        filter_type: "stage",
+        filter_value:
+          "in_production",
+        attention: false,
+      },
+      {
+        id: "roof-repair",
+        label: "Roof Repair",
+        filter_type: "stage",
+        filter_value:
+          "roof_repair",
+        attention: false,
+      },
+      {
+        id: "roof-replacement",
+        label: "Roof Replacement",
+        filter_type: "stage",
+        filter_value:
+          "roof_replacement",
+        attention: false,
+      },
+      {
+        id: "tarp",
+        label: "Tarp",
+        filter_type: "stage",
+        filter_value: "tarp",
+        attention: false,
+      },
+      {
+        id: "tarp-complete",
+        label: "Tarp Complete",
+        filter_type: "stage",
+        filter_value:
+          "tarp_complete",
+        attention: false,
+      },
+      {
+        id: "invoiced",
+        label: "Invoiced",
+        filter_type: "stage",
+        filter_value: "invoiced",
+        attention: false,
+      },
+      {
+        id: "completed",
+        label: "Completed",
+        filter_type: "stage",
+        filter_value: "completed",
+        attention: false,
+      },
+      {
+        id: "paid",
+        label: "Paid",
+        filter_type: "stage",
+        filter_value: "paid",
+        attention: false,
+      },
+      {
+        id: "disqualified",
+        label: "Disqualified",
+        filter_type: "stage",
+        filter_value:
+          "disqualified",
+        attention: false,
+      },
+      {
+        id: "dnc",
+        label: "DNC",
+        filter_type: "stage",
+        filter_value: "dnc",
+        attention: false,
+      },
+      {
+        id: "buying-signals",
+        label: "Buying Signals",
+        filter_type:
+          "buying_signal",
+        attention: true,
+      },
+    ],
+
     show_pipeline: true,
     show_calendar: true,
     show_system_events: true,
@@ -302,6 +455,21 @@ export function CompanyDnaProvider({
           ...defaultWorkspace.dashboard,
           ...(data.workspace
             ?.dashboard || {}),
+
+          pipeline_cards:
+            Array.isArray(
+              data.workspace
+                ?.dashboard
+                ?.pipeline_cards,
+            ) &&
+            data.workspace.dashboard
+              .pipeline_cards.length > 0
+              ? data.workspace
+                  .dashboard
+                  .pipeline_cards
+              : defaultWorkspace
+                  .dashboard
+                  .pipeline_cards,
         },
       })
     } catch (runtimeError: any) {

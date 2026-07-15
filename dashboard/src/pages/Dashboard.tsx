@@ -140,33 +140,63 @@ export default function DashboardPage() {
     })
   }, [jobs])
 
-  const stageOrder = [
-    "intake_pending",
-    "lead",
-    "callback",
-    "inspection",
-    "estimate_sent",
-    "contract_sent",
-    "pre_production",
-    "in_production",
-    "roof_repair",
-    "roof_replacement",
-    "tarp",
-    "tarp_complete",
-    "invoiced",
-    "completed",
-    "paid",
-    "disqualified",
-    "dnc",
-  ]
+  const pipelineCards =
+    workspace.dashboard
+      .pipeline_cards || []
 
-  const buyingSignalJobs = sortedJobs.filter((j) => !!j.has_buying_signal)
+  const buyingSignalJobs =
+    sortedJobs.filter(
+      (job) =>
+        !!job.has_buying_signal,
+    )
 
-  const stageCounts = stageOrder.map((stage) => ({
-    stage,
-    count: sortedJobs.filter((j) => (j.stage || "lead") === stage).length,
-    attention: stage === "contract_sent",
-  }))
+  function jobsForPipelineCard(
+    card: {
+      filter_type:
+        | "stage"
+        | "stage_any"
+        | "buying_signal"
+      filter_value?: string | null
+      filter_values?: string[]
+    },
+  ) {
+    if (
+      card.filter_type ===
+      "buying_signal"
+    ) {
+      return buyingSignalJobs
+    }
+
+    if (
+      card.filter_type ===
+      "stage_any"
+    ) {
+      const stages =
+        card.filter_values || []
+
+      return sortedJobs.filter(
+        (job) =>
+          stages.includes(
+            job.stage || "lead",
+          ),
+      )
+    }
+
+    return sortedJobs.filter(
+      (job) =>
+        (job.stage || "lead") ===
+        card.filter_value,
+    )
+  }
+
+  const pipelineCardCounts =
+    pipelineCards.map((card) => ({
+      ...card,
+      count:
+        jobsForPipelineCard(
+          card,
+        ).length,
+    }))
 
   const intakePendingJobs = sortedJobs.filter((j) => j.stage === "intake_pending")
   const intakeBreakdown = {
@@ -176,10 +206,17 @@ export default function DashboardPage() {
     other: intakePendingJobs.filter((j) => !["waiting_on_info", "no_response", "likely_solicitor"].includes(j.crm_substatus || "")).length,
   }
 
-  const filteredJobs = selectedStage === "__buying_signals"
-    ? buyingSignalJobs
-    : selectedStage
-      ? sortedJobs.filter((j) => (j.stage || "lead") === selectedStage)
+  const selectedPipelineCard =
+    pipelineCards.find(
+      (card) =>
+        card.id === selectedStage,
+    )
+
+  const filteredJobs =
+    selectedPipelineCard
+      ? jobsForPipelineCard(
+          selectedPipelineCard,
+        )
       : sortedJobs
 
   const newestJobs = filteredJobs.slice(0, 10)
@@ -320,42 +357,52 @@ export default function DashboardPage() {
           </section>
 
           <section style={statsGrid}>
-            {stageCounts.map(({ stage, count, attention }) => (
-              <button
-                key={stage}
-                onClick={() => setSelectedStage(selectedStage === stage ? null : stage)}
-                style={{
-                  ...statCard,
-                  ...(attention ? statCardAttention : {}),
-                  ...(selectedStage === stage ? statCardActive : {}),
-                  cursor: "pointer",
-                  textAlign: "left",
-                }}
-              >
-                <div style={statNumber}>{loading ? "…" : count}</div>
-                <div style={statLabel}>{stage.replaceAll("_", " ")}</div>
-                <div style={statSub}>
-                  {selectedStage === stage ? "Showing below" : "Click to filter"}
-                </div>
-              </button>
-            ))}
+            {pipelineCardCounts.map(
+              ({
+                id,
+                label,
+                count,
+                attention,
+              }) => (
+                <button
+                  key={id}
+                  onClick={() =>
+                    setSelectedStage(
+                      selectedStage === id
+                        ? null
+                        : id,
+                    )
+                  }
+                  style={{
+                    ...statCard,
+                    ...(attention
+                      ? statCardAttention
+                      : {}),
+                    ...(selectedStage === id
+                      ? statCardActive
+                      : {}),
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={statNumber}>
+                    {loading
+                      ? "…"
+                      : count}
+                  </div>
 
-            <button
-              onClick={() => setSelectedStage(selectedStage === "__buying_signals" ? null : "__buying_signals")}
-              style={{
-                ...statCard,
-                ...statCardAttention,
-                ...(selectedStage === "__buying_signals" ? statCardActive : {}),
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
-              <div style={statNumber}>{loading ? "…" : buyingSignalJobs.length}</div>
-              <div style={statLabel}>Buying Signals</div>
-              <div style={statSub}>
-                {selectedStage === "__buying_signals" ? "Showing below" : "Click to filter"}
-              </div>
-            </button>
+                  <div style={statLabel}>
+                    {label}
+                  </div>
+
+                  <div style={statSub}>
+                    {selectedStage === id
+                      ? "Showing below"
+                      : "Click to filter"}
+                  </div>
+                </button>
+              ),
+            )}
           </section>
 
           {intakePendingJobs.length > 0 ? (
@@ -379,11 +426,9 @@ export default function DashboardPage() {
                     {jobTerm} Command Center
                   </h2>
                   <div style={panelSub}>
-                    {selectedStage === "__buying_signals"
-                      ? "Showing jobs with buying signals. Click Buying Signals again to clear."
-                      : selectedStage
-                        ? `Showing ${selectedStage.replaceAll("_", " ")} jobs. Click the same stage again to clear.`
-                        : "Search and open jobs, then review the record from the job detail view."}
+                    {selectedPipelineCard
+                      ? `Showing ${selectedPipelineCard.label.toLowerCase()} ${jobTerm.toLowerCase()} records. Click the same stage again to clear.`
+                      : `Search and open ${jobTerm.toLowerCase()} records, then review the record from the detail view.`}
                   </div>
                 </div>
 
