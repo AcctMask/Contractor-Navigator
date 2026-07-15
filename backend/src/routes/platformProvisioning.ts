@@ -276,6 +276,140 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.get(
+    "/platform/provisioning-status/:tenantSlug",
+    async (request: any, reply) => {
+      if (!requireProvisioningSecret(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error:
+            "Platform provisioning authorization required.",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || "",
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required.",
+        })
+      }
+
+      const client = await pool.connect()
+
+      try {
+        const tenantResult = await client.query(
+          `
+            select
+              id,
+              slug,
+              name,
+              created_at
+            from tenants
+            where slug = $1
+            limit 1
+          `,
+          [tenantSlug],
+        )
+
+        const tenant = tenantResult.rows[0]
+
+        if (!tenant) {
+          return reply.code(404).send({
+            ok: false,
+            error: "Navigator tenant was not found.",
+          })
+        }
+
+        const companyDnaResult =
+          await client.query(
+            `
+              select
+                tenant_id,
+                owner_controls_tenant_id,
+                source_review_id,
+                status,
+                version,
+                branding,
+                workflow_defaults,
+                approved_at,
+                provisioned_at,
+                updated_at
+              from tenant_company_dna
+              where tenant_id = $1
+              limit 1
+            `,
+            [tenant.id],
+          )
+
+        const provisioningResult =
+          await client.query(
+            `
+              select
+                tenant_id,
+                owner_controls_tenant_id,
+                navigator_status,
+                company_dna_status,
+                crm_status,
+                owner_access_status,
+                metadata,
+                created_at,
+                updated_at
+              from tenant_provisioning_state
+              where tenant_id = $1
+              limit 1
+            `,
+            [tenant.id],
+          )
+
+        const invitationResult =
+          await client.query(
+            `
+              select
+                id,
+                email,
+                full_name,
+                role,
+                accepted_at,
+                expires_at,
+                created_at
+              from user_invitations
+              where tenant_id = $1
+              order by created_at desc
+              limit 1
+            `,
+            [tenant.id],
+          )
+
+        return reply.send({
+          ok: true,
+          tenant,
+          company_dna:
+            companyDnaResult.rows[0] || null,
+          provisioning:
+            provisioningResult.rows[0] || null,
+          owner_invitation:
+            invitationResult.rows[0] || null,
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Navigator provisioning status could not be loaded.",
+          details:
+            error?.message || String(error),
+        })
+      } finally {
+        client.release()
+      }
+    },
+  )
+
   app.post(
     "/platform/provision-tenant",
     async (request: any, reply) => {
