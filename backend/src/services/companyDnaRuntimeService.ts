@@ -628,3 +628,557 @@ export async function getTenantConversationProfileBySlug(
     },
   }
 }
+
+export type TenantRuntime = {
+  version: 1
+
+  tenant: {
+    id: number
+    slug: string
+  }
+
+  identity:
+    TenantConversationProfile["identity"]
+
+  branding: {
+    business_display_name: string
+    dba_name: string | null
+    website: string | null
+    email: string | null
+    phone: string | null
+    primary_color: string | null
+    accent_color: string | null
+    brand_voice: string | null
+  }
+
+  terminology:
+    TenantConversationProfile["vocabulary"]
+
+  business:
+    TenantConversationProfile["business"]
+
+  workflow: {
+    office_hours: string | null
+    after_hours_behavior: string | null
+    rejected_call_behavior: string | null
+    ring_owner_first: string | null
+    scheduling_rules: string | null
+    escalation_rules: string | null
+
+    lead_qualification: string | null
+    estimate_process: string | null
+    proposal_process: string | null
+    inspection_process: string | null
+    close_process: string | null
+    invoice_process: string | null
+    typical_sales_timeline: string | null
+  }
+
+  workspace: JsonObject
+
+  conversation: {
+    intake:
+      TenantConversationProfile["intake"]
+
+    intent_language:
+      TenantConversationProfile["intent_language"]
+
+    alerts:
+      TenantConversationProfile["alerts"]
+
+    communication:
+      TenantConversationProfile["communication"]
+
+    receptionist: {
+      greeting: string
+      services: string | null
+      service_area: string | null
+      scheduling_information_required:
+        string | null
+      frequently_asked_questions:
+        string | null
+      promises_allowed: string | null
+      promises_not_allowed: string | null
+      topics_to_avoid: string | null
+      topics_to_promote: string | null
+    }
+  }
+
+  automation: {
+    follow_up_frequency: string | null
+    morning_brief: string | null
+    weekly_summary: string | null
+    urgent_alerts: string | null
+    owner_notifications: string | null
+    missed_call_notifications: string | null
+    buying_signal_notifications: string | null
+    customer_reply_notifications: string | null
+    seconds_before_ai_answers: number | null
+    call_recording: string | null
+  }
+
+  permissions: {
+    approval_preferences: string | null
+    preferred_contact_method: string | null
+    vip_contacts: string | null
+    internal_contacts: string | null
+  }
+
+  integrations: {
+    website: string | null
+    social_accounts: string | null
+    appointment_booking: string | null
+    document_storage_preferences:
+      string | null
+    import_description: string | null
+    import_stage_notes: string | null
+  }
+
+  source: {
+    company_dna_available: boolean
+    identity: JsonObject
+    responses: JsonObject
+    not_applicable: JsonObject
+  }
+}
+
+function runtimeNumber(
+  value: unknown,
+): number | null {
+  const text = clean(value)
+
+  if (!text) {
+    return null
+  }
+
+  const numberValue =
+    Number(text)
+
+  return Number.isFinite(numberValue)
+    ? numberValue
+    : null
+}
+
+export async function getTenantRuntimeBySlug(
+  tenantSlug: string,
+): Promise<TenantRuntime> {
+  const conversation =
+    await getTenantConversationProfileBySlug(
+      tenantSlug,
+    )
+
+  const result = await pool.query(
+    `
+      select
+        coalesce(
+          branding,
+          '{}'::jsonb
+        ) as branding,
+
+        coalesce(
+          workflow_defaults,
+          '{}'::jsonb
+        ) as workflow_defaults,
+
+        coalesce(
+          workspace,
+          '{}'::jsonb
+        ) as workspace,
+
+        coalesce(
+          identity,
+          '{}'::jsonb
+        ) as identity,
+
+        coalesce(
+          responses,
+          '{}'::jsonb
+        ) as responses,
+
+        coalesce(
+          not_applicable,
+          '{}'::jsonb
+        ) as not_applicable
+      from tenant_company_dna
+      where tenant_id = $1
+      limit 1
+    `,
+    [
+      conversation.tenant_id,
+    ],
+  )
+
+  const row =
+    result.rows[0] || {}
+
+  const branding: JsonObject =
+    row.branding || {}
+
+  const workflowDefaults:
+    JsonObject =
+    row.workflow_defaults || {}
+
+  const workspace: JsonObject =
+    row.workspace || {}
+
+  const identity: JsonObject =
+    row.identity ||
+    conversation.raw.identity ||
+    {}
+
+  const responses: JsonObject =
+    row.responses ||
+    conversation.raw.responses ||
+    {}
+
+  const notApplicable:
+    JsonObject =
+    row.not_applicable ||
+    conversation.raw.not_applicable ||
+    {}
+
+  const companyDnaAvailable =
+    Object.keys(identity).length > 0 ||
+    Object.keys(responses).length > 0
+
+  return {
+    version: 1,
+
+    tenant: {
+      id:
+        conversation.tenant_id,
+
+      slug:
+        conversation.tenant_slug,
+    },
+
+    identity:
+      conversation.identity,
+
+    branding: {
+      business_display_name:
+        conversation.identity
+          .display_name,
+
+      dba_name:
+        conversation.identity
+          .dba_name,
+
+      website:
+        conversation.identity
+          .website,
+
+      email:
+        conversation.identity
+          .email,
+
+      phone:
+        conversation.identity
+          .phone,
+
+      primary_color:
+        first(
+          responses.primary_color,
+          branding.primary_color,
+        ),
+
+      accent_color:
+        first(
+          responses.accent_color,
+          branding.accent_color,
+        ),
+
+      brand_voice:
+        first(
+          responses.brand_voice,
+          branding.brand_voice,
+        ),
+    },
+
+    terminology:
+      conversation.vocabulary,
+
+    business:
+      conversation.business,
+
+    workflow: {
+      office_hours:
+        conversation.communication
+          .office_hours,
+
+      after_hours_behavior:
+        conversation.communication
+          .after_hours_behavior,
+
+      rejected_call_behavior:
+        conversation.communication
+          .rejected_call_behavior,
+
+      ring_owner_first:
+        conversation.communication
+          .ring_owner_first,
+
+      scheduling_rules:
+        conversation.communication
+          .scheduling_rules,
+
+      escalation_rules:
+        conversation.communication
+          .escalation_rules,
+
+      lead_qualification:
+        first(
+          responses.lead_qualification,
+          workflowDefaults
+            .lead_qualification,
+        ),
+
+      estimate_process:
+        first(
+          responses.estimate_process,
+          workflowDefaults
+            .estimate_process,
+        ),
+
+      proposal_process:
+        first(
+          responses.proposal_process,
+          workflowDefaults
+            .proposal_process,
+        ),
+
+      inspection_process:
+        first(
+          responses.inspection_process,
+          workflowDefaults
+            .inspection_process,
+        ),
+
+      close_process:
+        first(
+          responses.close_process,
+          workflowDefaults
+            .close_process,
+        ),
+
+      invoice_process:
+        first(
+          responses.invoice_process,
+          workflowDefaults
+            .invoice_process,
+        ),
+
+      typical_sales_timeline:
+        first(
+          responses
+            .typical_sales_timeline,
+          workflowDefaults
+            .typical_sales_timeline,
+        ),
+    },
+
+    workspace,
+
+    conversation: {
+      intake:
+        conversation.intake,
+
+      intent_language:
+        conversation.intent_language,
+
+      alerts:
+        conversation.alerts,
+
+      communication:
+        conversation.communication,
+
+      receptionist: {
+        greeting:
+          first(
+            responses
+              .receptionist_greeting,
+            responses.voice_greeting,
+            conversation.intake
+              .greeting,
+          ) ||
+          conversation.intake
+            .greeting,
+
+        services:
+          first(
+            responses
+              .receptionist_services,
+          ),
+
+        service_area:
+          first(
+            responses
+              .receptionist_service_area,
+            conversation.business
+              .territory,
+          ),
+
+        scheduling_information_required:
+          first(
+            responses
+              .scheduling_information_required,
+          ),
+
+        frequently_asked_questions:
+          first(
+            responses
+              .frequently_asked_questions,
+          ),
+
+        promises_allowed:
+          first(
+            responses.promises_allowed,
+          ),
+
+        promises_not_allowed:
+          first(
+            responses
+              .promises_not_allowed,
+          ),
+
+        topics_to_avoid:
+          first(
+            responses.topics_to_avoid,
+          ),
+
+        topics_to_promote:
+          first(
+            responses.topics_to_promote,
+          ),
+      },
+    },
+
+    automation: {
+      follow_up_frequency:
+        first(
+          responses.follow_up_frequency,
+        ),
+
+      morning_brief:
+        first(
+          responses.morning_brief,
+        ),
+
+      weekly_summary:
+        first(
+          responses.weekly_summary,
+        ),
+
+      urgent_alerts:
+        first(
+          responses.urgent_alerts,
+        ),
+
+      owner_notifications:
+        first(
+          responses.owner_notifications,
+        ),
+
+      missed_call_notifications:
+        first(
+          responses
+            .missed_call_notifications,
+        ),
+
+      buying_signal_notifications:
+        first(
+          responses
+            .buying_signal_notifications,
+        ),
+
+      customer_reply_notifications:
+        first(
+          responses
+            .customer_reply_notifications,
+        ),
+
+      seconds_before_ai_answers:
+        runtimeNumber(
+          responses
+            .seconds_before_ai_answers,
+        ),
+
+      call_recording:
+        first(
+          responses.call_recording,
+        ),
+    },
+
+    permissions: {
+      approval_preferences:
+        first(
+          responses
+            .approval_preferences,
+        ),
+
+      preferred_contact_method:
+        first(
+          responses
+            .preferred_contact_method,
+        ),
+
+      vip_contacts:
+        first(
+          responses.vip_contacts,
+        ),
+
+      internal_contacts:
+        first(
+          responses.internal_contacts,
+        ),
+    },
+
+    integrations: {
+      website:
+        first(
+          responses.marketing_website,
+          responses.website,
+          conversation.identity.website,
+        ),
+
+      social_accounts:
+        first(
+          responses.social_accounts,
+        ),
+
+      appointment_booking:
+        first(
+          responses
+            .appointment_booking,
+        ),
+
+      document_storage_preferences:
+        first(
+          responses
+            .document_storage_preferences,
+        ),
+
+      import_description:
+        first(
+          responses.import_description,
+        ),
+
+      import_stage_notes:
+        first(
+          responses.import_stage_notes,
+        ),
+    },
+
+    source: {
+      company_dna_available:
+        companyDnaAvailable,
+
+      identity,
+
+      responses,
+
+      not_applicable:
+        notApplicable,
+    },
+  }
+}

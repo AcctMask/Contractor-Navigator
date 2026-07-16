@@ -4,6 +4,7 @@ import { pool } from "../db/db"
 import { getCurrentUserFromToken } from "../services/authService"
 import {
   getTenantConversationProfileBySlug,
+  getTenantRuntimeBySlug,
 } from "../services/companyDnaRuntimeService"
 
 const APP_BASE_URL =
@@ -297,6 +298,54 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.get(
+    "/platform/tenant-runtime/:tenantSlug",
+    async (request: any, reply) => {
+      if (!requireProvisioningSecret(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error:
+            "Platform provisioning authorization required.",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || "",
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error:
+            "tenantSlug is required.",
+        })
+      }
+
+      try {
+        const runtime =
+          await getTenantRuntimeBySlug(
+            tenantSlug,
+          )
+
+        return reply.send({
+          ok: true,
+          runtime,
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Tenant runtime could not be loaded.",
+          details:
+            error?.message ||
+            String(error),
+        })
+      }
+    },
+  )
+
   app.get(
     "/platform/conversation-profile/:tenantSlug",
     async (request: any, reply) => {
