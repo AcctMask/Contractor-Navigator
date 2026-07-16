@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify"
 import { randomBytes, timingSafeEqual } from "crypto"
 import { pool } from "../db/db"
 import { getCurrentUserFromToken } from "../services/authService"
+import {
+  getTenantConversationProfileBySlug,
+} from "../services/companyDnaRuntimeService"
 
 const APP_BASE_URL =
   process.env.APP_BASE_URL ||
@@ -294,6 +297,54 @@ async function ensureOwnerInvitation({
 export async function registerPlatformProvisioningRoutes(
   app: FastifyInstance,
 ) {
+  app.get(
+    "/platform/conversation-profile/:tenantSlug",
+    async (request: any, reply) => {
+      if (!requireProvisioningSecret(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error:
+            "Platform provisioning authorization required.",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || "",
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error:
+            "tenantSlug is required.",
+        })
+      }
+
+      try {
+        const profile =
+          await getTenantConversationProfileBySlug(
+            tenantSlug,
+          )
+
+        return reply.send({
+          ok: true,
+          profile,
+        })
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(500).send({
+          ok: false,
+          error:
+            "Tenant conversation profile could not be loaded.",
+          details:
+            error?.message ||
+            String(error),
+        })
+      }
+    },
+  )
+
   app.post(
     "/platform/promote-platform-owner",
     async (request: any, reply) => {
