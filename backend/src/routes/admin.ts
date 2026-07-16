@@ -70,7 +70,10 @@ async function requireJobReadUser(
       });
     }
 
-    if (Number(user.tenant_id) !== tenantId) {
+    if (
+      String(user.role) !== "platform_owner" &&
+      Number(user.tenant_id) !== tenantId
+    ) {
       return reply.code(403).send({
         ok: false,
         error: "Tenant access denied"

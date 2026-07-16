@@ -34,7 +34,10 @@ async function requireJobReadUser(
       return null
     }
 
-    if (Number(user.tenant_id) !== tenantId) {
+    if (
+      String(user.role) !== "platform_owner" &&
+      Number(user.tenant_id) !== tenantId
+    ) {
       reply.code(403)
       return null
     }
