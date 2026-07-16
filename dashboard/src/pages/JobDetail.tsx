@@ -573,17 +573,6 @@ export default function JobDetail() {
   }
 
   async function openFile(asset: any) {
-    const viewingWindow = window.open("", "_blank")
-
-    if (!viewingWindow) {
-      errorToast("Allow pop-ups for Navigator to view files")
-      return
-    }
-
-    viewingWindow.document.title = "Opening file..."
-    viewingWindow.document.body.innerHTML =
-      '<p style="font-family: sans-serif; padding: 24px;">Opening file...</p>'
-
     try {
       const token = getToken()
       const assetUrl = asset.download_url
@@ -591,7 +580,6 @@ export default function JobDetail() {
         : asset.url
 
       if (!assetUrl) {
-        viewingWindow.close()
         errorToast("File URL is unavailable")
         return
       }
@@ -612,19 +600,26 @@ export default function JobDetail() {
           // Preserve the generic error when the response is not JSON.
         }
 
-        viewingWindow.close()
         errorToast(message)
         return
       }
 
       const blob = await res.blob()
       const objectUrl = URL.createObjectURL(blob)
+      const opened = window.open(objectUrl, "_blank", "noopener,noreferrer")
 
-      viewingWindow.location.replace(objectUrl)
+      if (!opened) {
+        const link = document.createElement("a")
+        link.href = objectUrl
+        link.download =
+          asset.original_name || asset.file_name || "job-file"
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+      }
 
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60000)
     } catch (err: any) {
-      viewingWindow.close()
       errorToast(err?.message || "Open file failed")
     }
   }
