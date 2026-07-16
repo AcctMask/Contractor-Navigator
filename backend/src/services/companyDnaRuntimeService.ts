@@ -110,6 +110,42 @@ function firstNameTemplate(
   return message
 }
 
+function primaryTerm(
+  value: unknown,
+  fallback: string,
+) {
+  const submitted = clean(value)
+
+  if (!submitted) {
+    return fallback
+  }
+
+  const firstTerm = submitted
+    .split(/[,|;/]+/, 1)[0]
+    .trim()
+
+  return firstTerm || fallback
+}
+
+function normalizeWholeExamples(
+  value: unknown,
+): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map(clean)
+      .filter(
+        (item): item is string =>
+          Boolean(item),
+      )
+  }
+
+  const submitted = clean(value)
+
+  return submitted
+    ? [submitted.replace(/[.]+$/, "")]
+    : []
+}
+
 function normalizeExamples(
   value: unknown,
 ): string[] {
@@ -144,18 +180,23 @@ function buildServiceExamples(
     ...normalizeExamples(
       responses.service_examples,
     ),
-    ...normalizeExamples(
+
+    ...normalizeWholeExamples(
       responses.services_offered,
     ),
+
     ...normalizeExamples(
       responses.primary_services,
     ),
+
     ...normalizeExamples(
       responses.customer_needs,
     ),
+
     ...normalizeExamples(
       responses.common_requests,
     ),
+
     ...normalizeExamples(
       responses.intake_topics,
     ),
@@ -312,12 +353,13 @@ export async function getTenantConversationProfileBySlug(
     "Proposal"
 
   const agreementTerm =
-    first(
-      responses.agreement_term,
-      workflow.agreement_term,
+    primaryTerm(
+      first(
+        responses.agreement_term,
+        workflow.agreement_term,
+      ),
       "Agreement",
-    ) ||
-    "Agreement"
+    )
 
   const consultationTerm =
     first(
