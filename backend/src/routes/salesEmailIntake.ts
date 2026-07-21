@@ -174,12 +174,90 @@ function textLines(text: string): string[] {
     .filter(Boolean)
 }
 
+const SALES_FIELD_LABEL_PATTERN =
+  "(?:customer name|client name|homeowner name|contact name|name|" +
+  "customer phone|client phone|homeowner phone|contact phone|phone|cell|" +
+  "customer email|client email|homeowner email|contact email|email|" +
+  "property address|service address|job address|customer address|address|" +
+  "city|state|zip|postal code|" +
+  "request|service requested|work requested|notes|comments|message|description|" +
+  "source|stage)"
+
+function normalizeSalesFieldBoundaries(text: string): string {
+  const value = String(text || "")
+
+  return value
+    .replace(
+      new RegExp(
+        `\\s*(?:,|/|\\|)?\\s+(?=${SALES_FIELD_LABEL_PATTERN}\\s*[:#-])`,
+        "gi"
+      ),
+      "\n"
+    )
+    .replace(
+      new RegExp(
+        `([^\\n])\\s+(?=${SALES_FIELD_LABEL_PATTERN}\\s*[:#-])`,
+        "gi"
+      ),
+      "$1\n"
+    )
+}
+
+function extractLabeledValue(
+  text: string,
+  labels: string
+): string | null {
+  const normalized = normalizeSalesFieldBoundaries(text)
+
+  const match = normalized.match(
+    new RegExp(
+      `(?:${labels})\\s*[:#-]\\s*([^\\n\\r,|/]+)`,
+      "i"
+    )
+  )
+
+  return clean(match?.[1])
+}
+
+function normalizeUsPhone(value: string | null): string | null {
+  if (!value) return null
+
+  const digits = value.replace(/\D/g, "")
+
+  if (digits.length === 10) {
+    return digits
+  }
+
+  if (
+    digits.length === 11 &&
+    digits.startsWith("1")
+  ) {
+    return digits.slice(1)
+  }
+
+  return null
+}
+
 function extractPhone(text: string): string | null {
+  const labeled = extractLabeledValue(
+    text,
+    "customer phone|client phone|homeowner phone|contact phone|phone|cell"
+  )
+
+  const normalizedLabeled =
+    normalizeUsPhone(labeled)
+
+  if (normalizedLabeled) {
+    return normalizedLabeled
+  }
+
   const match = text.match(
     /(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/
   )
 
-  return match ? clean(match[0]) : null
+  return normalizeUsPhone(
+    match ? match[0] : null
+  )
 }
 
 function isInternalG2GEmail(
@@ -228,42 +306,44 @@ function extractExternalEmail(
 function extractForwardedSenderName(
   text: string
 ): string | null {
-  return firstMatch(text, [
-    /(?:customer name|client name|homeowner name|contact name|name)\s*[:#-]\s*([^\n\r]+)/i,
-    /from:\s*"?([^"<\n\r]+)"?\s*<[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}>/i,
-  ])
+  return (
+    extractLabeledValue(
+      text,
+      "customer name|client name|homeowner name|contact name|name"
+    ) ||
+    firstMatch(text, [
+      /from:\s*"?([^"<\n\r]+)"?\s*<[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}>/i,
+    ])
+  )
 }
 
 function extractProperty(text: string) {
-  const rawExplicitAddress = firstMatch(text, [
-    /(?:property address|service address|job address|customer address|address)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const normalizedText =
+    normalizeSalesFieldBoundaries(text)
 
-  const explicitAddress = rawExplicitAddress
-    ? clean(
-        rawExplicitAddress
-          .replace(
-            /^(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\s*/i,
-            ""
-          )
-          .replace(
-            /^(?:property|property address|service address|job address|customer address|address)\s*[:#-]\s*/i,
-            ""
-          )
-      )
-    : null
+  const explicitAddress =
+    extractLabeledValue(
+      normalizedText,
+      "property address|service address|job address|customer address|address"
+    )
 
-  const explicitCity = firstMatch(text, [
-    /(?:city)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
+  const explicitCity =
+    extractLabeledValue(
+      normalizedText,
+      "city"
+    )
 
-  const explicitState = firstMatch(text, [
-    /(?:state)\s*[:#-]\s*([A-Z]{2})/i,
-  ])
+  const explicitState =
+    extractLabeledValue(
+      normalizedText,
+      "state"
+    )
 
-  const explicitZip = firstMatch(text, [
-    /(?:zip|postal code)\s*[:#-]\s*(\d{5}(?:-\d{4})?)/i,
-  ])
+  const explicitZip =
+    extractLabeledValue(
+      normalizedText,
+      "zip|postal code"
+    )
 
   if (explicitAddress) {
     const oneLineMatch = explicitAddress.match(
@@ -331,25 +411,27 @@ function extractProperty(text: string) {
 }
 
 function parseSalesEmail(text: string) {
-  const property = extractProperty(text)
+  const normalizedText =
+    normalizeSalesFieldBoundaries(text)
+
+  const property =
+    extractProperty(normalizedText)
 
   const customerName =
-    extractForwardedSenderName(text)
+    extractForwardedSenderName(normalizedText)
 
   const customerPhone =
-    firstMatch(text, [
-      /(?:customer phone|client phone|homeowner phone|contact phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) ||
-    extractPhone(text)
+    extractPhone(normalizedText)
 
   const customerEmail =
-    extractExternalEmail(text)
+    extractExternalEmail(normalizedText)
 
   const notes =
-    firstMatch(text, [
-      /(?:request|service requested|work requested|notes|comments|message|description)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) ||
-    clean(text.slice(0, 4000))
+    extractLabeledValue(
+      normalizedText,
+      "request|service requested|work requested|notes|comments|message|description"
+    ) ||
+    clean(normalizedText.slice(0, 4000))
 
   return {
     customerName,
@@ -581,10 +663,13 @@ export async function registerSalesEmailIntakeRoutes(
           }
         }
 
-        const parsed =
-          parseSalesEmail(
-            parsedPayload.text
-          )
+        console.log("\n========== RAW SALES EMAIL ==========\n")
+        console.log(parsedPayload.text)
+        console.log("\n========== NORMALIZED SALES EMAIL ==========\n")
+        console.log(normalizeSalesFieldBoundaries(parsedPayload.text))
+        console.log("\n=====================================\n")
+
+        const parsed = parseSalesEmail(parsedPayload.text)
 
         const customerName =
           parsed.customerName ||
