@@ -85,3 +85,137 @@ export async function sendAlertEmail(
     return { ok: false, error: err?.message || String(err) }
   }
 }
+
+
+export async function sendCustomerAcknowledgmentEmail(
+  to: string,
+  customerName: string,
+  details?: {
+    propertyAddress?: string | null
+    sourceDetail?: string | null
+  }
+) {
+  try {
+    const apiKey = process.env.RESEND_API_KEY
+    const from =
+      process.env.EMAIL_FROM ||
+      "Good2Go Roofing <info@g2groofing.com>"
+
+    if (!apiKey) {
+      throw new Error("RESEND_API_KEY is required")
+    }
+
+    if (!to) {
+      throw new Error("Customer email recipient is required")
+    }
+
+    const safeCustomerName =
+      String(customerName || "").trim() || "there"
+
+    const propertyAddress =
+      String(details?.propertyAddress || "").trim()
+
+    const text = [
+      `Hi ${safeCustomerName},`,
+      "",
+      "Thank you for contacting Good2Go Roofing & Construction.",
+      "We received your request and a member of our team will review it and follow up with you.",
+      propertyAddress
+        ? `Property: ${propertyAddress}`
+        : null,
+      "",
+      "You may reply directly to this email with any questions, photographs, documents, or additional information.",
+      "",
+      "Good2Go Roofing & Construction",
+      "www.g2groofing.com",
+    ]
+      .filter(Boolean)
+      .join("\n")
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827; max-width: 680px;">
+        <h2 style="margin-bottom: 14px;">
+          We received your request
+        </h2>
+
+        <p>Hi ${escapeHtml(safeCustomerName)},</p>
+
+        <p>
+          Thank you for contacting Good2Go Roofing &amp; Construction.
+          We received your request and a member of our team will review it
+          and follow up with you.
+        </p>
+
+        ${
+          propertyAddress
+            ? `<p><strong>Property:</strong> ${escapeHtml(propertyAddress)}</p>`
+            : ""
+        }
+
+        <p>
+          You may reply directly to this email with any questions,
+          photographs, documents, or additional information.
+        </p>
+
+        <p style="margin-top: 24px;">
+          <strong>Good2Go Roofing &amp; Construction</strong><br />
+          www.g2groofing.com
+        </p>
+      </div>
+    `
+
+    const response = await fetch(
+      "https://api.resend.com/emails",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          to,
+          subject:
+            "Good2Go Roofing received your request",
+          text,
+          html,
+          reply_to: "info@g2groofing.com",
+        }),
+      }
+    )
+
+    const data =
+      await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          `Resend failed with status ${response.status}`
+      )
+    }
+
+    console.log(
+      "✅ CUSTOMER ACKNOWLEDGMENT EMAIL SENT",
+      {
+        to,
+        result: data,
+      }
+    )
+
+    return {
+      ok: true,
+      result: data,
+    }
+  } catch (error: any) {
+    console.error(
+      "❌ CUSTOMER ACKNOWLEDGMENT EMAIL FAILED",
+      error
+    )
+
+    return {
+      ok: false,
+      error: error?.message || String(error),
+    }
+  }
+}

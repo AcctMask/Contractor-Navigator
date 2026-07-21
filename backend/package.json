@@ -15,9 +15,11 @@
     "bcryptjs": "^2.4.3",
     "dotenv": "^17.3.1",
     "fastify": "^5.0.0",
+    "fastify-raw-body": "^5.0.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.16",
     "pg": "^8.13.1",
+    "svix": "^1.98.0",
     "twilio": "^5.3.7"
   },
   "devDependencies": {

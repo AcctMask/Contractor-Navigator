@@ -2,6 +2,7 @@ import Fastify from "fastify"
 import cors from "@fastify/cors"
 import formbody from "@fastify/formbody"
 import multipart from "@fastify/multipart"
+import rawBody from "fastify-raw-body"
 import dotenv from "dotenv"
 
 import { registerAdminRoutes } from "./routes/admin"
@@ -17,6 +18,7 @@ import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
 import { registerClaimsEmailIntakeRoutes } from "./routes/claimsEmailIntake"
+import { registerSalesEmailIntakeRoutes } from "./routes/salesEmailIntake"
 import { registerBusinessDevelopmentIntakeRoutes } from "./routes/businessDevelopmentIntake"
 import { registerReportingRoutes } from "./routes/reporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
@@ -30,6 +32,13 @@ const app = Fastify({ logger: true })
 
 await app.register(cors, { origin: true })
 await app.register(formbody)
+
+await app.register(rawBody, {
+  field: "rawBody",
+  global: false,
+  encoding: "utf8",
+  runFirst: true,
+})
 
 await app.register(multipart, {
   limits: {
@@ -60,6 +69,7 @@ await registerCalendarRoutes(app)
 await registerReportingRoutes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
+await registerSalesEmailIntakeRoutes(app)
 await registerBusinessDevelopmentIntakeRoutes(app)
 await commercialRoutes(app)
 

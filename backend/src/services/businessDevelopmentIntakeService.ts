@@ -3,6 +3,7 @@ import { sendAlertEmail } from "./emailService"
 
 export type BusinessDevelopmentSource =
   | "manual_office_entry"
+  | "manual_office_email"
   | "universal_outreach_reply"
 
 export type BusinessDevelopmentIntakeInput = {
@@ -39,6 +40,10 @@ function clean(value: unknown): string | null {
 function sourceLabel(source: BusinessDevelopmentSource): string {
   if (source === "universal_outreach_reply") {
     return "Universal Outreach"
+  }
+
+  if (source === "manual_office_email") {
+    return "Manual Office Email"
   }
 
   return "Manual Office Entry"
@@ -230,6 +235,7 @@ export async function processBusinessDevelopmentIntake(
 
   if (
     input.source !== "manual_office_entry" &&
+    input.source !== "manual_office_email" &&
     input.source !== "universal_outreach_reply"
   ) {
     throw new Error("unsupported business development source")
