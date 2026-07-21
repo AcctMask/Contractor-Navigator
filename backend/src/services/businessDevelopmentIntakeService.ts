@@ -218,7 +218,9 @@ export async function processBusinessDevelopmentIntake(
     tenantSlug: clean(rawInput.tenantSlug) || "",
     source: rawInput.source,
     sourceDetail: clean(rawInput.sourceDetail),
-    customerName: clean(rawInput.customerName),
+    customerName:
+      clean(rawInput.customerName) ||
+      "Unknown Customer",
     customerPhone: clean(rawInput.customerPhone),
     customerEmail: clean(rawInput.customerEmail),
     address1: clean(rawInput.address1),
@@ -239,10 +241,6 @@ export async function processBusinessDevelopmentIntake(
     input.source !== "universal_outreach_reply"
   ) {
     throw new Error("unsupported business development source")
-  }
-
-  if (!input.customerName) {
-    throw new Error("customerName required")
   }
 
   const client = await pool.connect()

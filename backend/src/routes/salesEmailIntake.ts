@@ -572,16 +572,9 @@ export async function registerSalesEmailIntakeRoutes(
             parsedPayload.text
           )
 
-        if (!parsed.customerName) {
-          reply.code(400)
-
-          return {
-            ok: false,
-            error:
-              "Customer name could not be parsed",
-            parsed,
-          }
-        }
+        const customerName =
+          parsed.customerName ||
+          "Unknown Customer"
 
         if (
           !parsed.customerPhone &&
@@ -605,8 +598,7 @@ export async function registerSalesEmailIntakeRoutes(
             sourceDetail:
               parsedPayload.subject ||
               "Direct Forward to Navigator Intake",
-            customerName:
-              parsed.customerName,
+            customerName,
             customerPhone:
               parsed.customerPhone,
             customerEmail:
@@ -632,7 +624,7 @@ export async function registerSalesEmailIntakeRoutes(
           parsed.customerEmail
             ? await sendCustomerAcknowledgmentEmail(
                 parsed.customerEmail,
-                parsed.customerName,
+                customerName,
                 {
                   propertyAddress: [
                     parsed.address1,
