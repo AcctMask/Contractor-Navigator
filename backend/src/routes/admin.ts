@@ -944,8 +944,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       const tenant_slug = String((req.params as any).tenant_slug || "");
       const tenantId = await getTenantIdBySlug(tenant_slug);
 
-      if (Number(actor.tenant_id) !== tenantId) {
-        return reply.code(403).send({ ok: false, error: "Tenant access denied" });
+      if (
+        String(actor.role) !== "platform_owner" &&
+        Number(actor.tenant_id) !== tenantId
+      ) {
+        return reply.code(403).send({
+          ok: false,
+          error: "Tenant access denied",
+        });
       }
 
       const result = await pool.query(

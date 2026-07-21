@@ -235,9 +235,23 @@ function extractForwardedSenderName(
 }
 
 function extractProperty(text: string) {
-  const explicitAddress = firstMatch(text, [
+  const rawExplicitAddress = firstMatch(text, [
     /(?:property address|service address|job address|customer address|address)\s*[:#-]\s*([^\n\r]+)/i,
   ])
+
+  const explicitAddress = rawExplicitAddress
+    ? clean(
+        rawExplicitAddress
+          .replace(
+            /^(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\s*/i,
+            ""
+          )
+          .replace(
+            /^(?:property|property address|service address|job address|customer address|address)\s*[:#-]\s*/i,
+            ""
+          )
+      )
+    : null
 
   const explicitCity = firstMatch(text, [
     /(?:city)\s*[:#-]\s*([^\n\r]+)/i,
