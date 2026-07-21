@@ -7,6 +7,9 @@ import {
 import {
   sendCustomerAcknowledgmentEmail,
 } from "../services/emailService"
+import {
+  parseUniversalIntake,
+} from "../services/universalIntakeParser"
 
 const TENANT_SLUG = "g2g-roofing"
 const INBOUND_ADDRESS = "sales@istaeriiul.resend.app"
@@ -411,38 +414,7 @@ function extractProperty(text: string) {
 }
 
 function parseSalesEmail(text: string) {
-  const normalizedText =
-    normalizeSalesFieldBoundaries(text)
-
-  const property =
-    extractProperty(normalizedText)
-
-  const customerName =
-    extractForwardedSenderName(normalizedText)
-
-  const customerPhone =
-    extractPhone(normalizedText)
-
-  const customerEmail =
-    extractExternalEmail(normalizedText)
-
-  const notes =
-    extractLabeledValue(
-      normalizedText,
-      "request|service requested|work requested|notes|comments|message|description"
-    ) ||
-    clean(normalizedText.slice(0, 4000))
-
-  return {
-    customerName,
-    customerPhone,
-    customerEmail,
-    address1: property.address1,
-    city: property.city,
-    state: property.state,
-    zip: property.zip,
-    notes,
-  }
+  return parseUniversalIntake(text)
 }
 
 function hasAutoCreateSubject(
