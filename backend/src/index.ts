@@ -17,6 +17,7 @@ import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
 import { registerClaimsEmailIntakeRoutes } from "./routes/claimsEmailIntake"
+import { registerBusinessDevelopmentIntakeRoutes } from "./routes/businessDevelopmentIntake"
 import { registerReportingRoutes } from "./routes/reporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
@@ -59,6 +60,7 @@ await registerCalendarRoutes(app)
 await registerReportingRoutes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
+await registerBusinessDevelopmentIntakeRoutes(app)
 await commercialRoutes(app)
 
 const port = Number(process.env.PORT || 8787)

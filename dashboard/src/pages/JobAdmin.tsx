@@ -37,7 +37,9 @@ export default function JobAdmin() {
     city: "",
     state: "FL",
     zip: "",
-    stage: "lead",
+    source: "manual_office_entry",
+    source_detail: "",
+    notes: "",
   })
 
   async function searchJobs() {
@@ -102,11 +104,18 @@ export default function JobAdmin() {
       setError("")
       setStatus("Creating job...")
 
-      const res = await fetch(`${API_BASE}/admin/create-job/${getTenantSlug()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      })
+      const token = getToken()
+      const res = await fetch(
+        `${API_BASE}/business-development/${getTenantSlug()}/intake`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(form),
+        }
+      )
 
       const data = await res.json()
 
@@ -114,7 +123,11 @@ export default function JobAdmin() {
         throw new Error(data.error || "Create failed")
       }
 
-      successToast(`Job created: #${data.job?.id || data.job_id}`)
+      successToast(
+        data.action === "updated_existing_job"
+          ? `Existing job updated: #${data.job_id}`
+          : `Job created: #${data.job_id}`
+      )
 
       setForm({
         customer_name: "",
@@ -124,7 +137,9 @@ export default function JobAdmin() {
         city: "",
         state: "FL",
         zip: "",
-        stage: "lead",
+        source: "manual_office_entry",
+        source_detail: "",
+        notes: "",
       })
 
       loadAllJobs()
@@ -182,7 +197,10 @@ export default function JobAdmin() {
 
       {/* CREATE */}
       <div style={card}>
-        <h2>Create Job</h2>
+        <h2>Create Business Opportunity</h2>
+        <p style={{ color: "#cbd5e1", marginTop: -4 }}>
+          Creates a new Navigator job or updates the active job already associated with the property address.
+        </p>
 
         <div style={grid2}>
           <input
@@ -238,10 +256,50 @@ export default function JobAdmin() {
             }
             style={input}
           />
+
+          <select
+            value={form.source}
+            onChange={(e) =>
+              setForm({ ...form, source: e.target.value })
+            }
+            style={input}
+          >
+            <option value="manual_office_entry">
+              Manual Office Entry
+            </option>
+            <option value="universal_outreach_reply">
+              Universal Outreach Reply
+            </option>
+          </select>
+
+          <input
+            placeholder="Source Detail"
+            value={form.source_detail}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                source_detail: e.target.value,
+              })
+            }
+            style={input}
+          />
         </div>
 
+        <textarea
+          placeholder="Opportunity Notes"
+          value={form.notes}
+          onChange={(e) =>
+            setForm({ ...form, notes: e.target.value })
+          }
+          style={{
+            ...input,
+            minHeight: 100,
+            resize: "vertical",
+          }}
+        />
+
         <button onClick={createJob} style={button}>
-          Create Job
+          Process Business Opportunity
         </button>
       </div>
 
