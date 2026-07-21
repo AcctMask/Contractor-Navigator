@@ -9,7 +9,7 @@ import {
 } from "../services/emailService"
 
 const TENANT_SLUG = "g2g-roofing"
-const INBOUND_ADDRESS = "sales@g2groofing.com"
+const INBOUND_ADDRESS = "sales@istaeriiul.resend.app"
 
 function clean(value: unknown): string | null {
   if (value === undefined || value === null) {
@@ -526,19 +526,6 @@ export async function registerSalesEmailIntakeRoutes(
             : initialPayload
 
         if (
-          !hasAutoCreateSubject(
-            parsedPayload.subject
-          )
-        ) {
-          return {
-            ok: true,
-            ignored: true,
-            reason:
-              "Subject does not contain Auto Job Create, Auto Create, or Manual Entry",
-          }
-        }
-
-        if (
           parsedPayload.to &&
           !parsedPayload.to
             .toLowerCase()
@@ -617,7 +604,7 @@ export async function registerSalesEmailIntakeRoutes(
             source: "manual_office_email",
             sourceDetail:
               parsedPayload.subject ||
-              "Sales mailbox Auto Job Create",
+              "Direct Forward to Navigator Intake",
             customerName:
               parsed.customerName,
             customerPhone:
