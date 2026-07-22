@@ -305,9 +305,9 @@ async function importReceivedEmailAttachments(params: {
 
   const userAttachments = listedAttachments.filter(
     (attachment) =>
-      String(attachment.content_disposition || "").toLowerCase() !==
-        "inline" &&
-      !attachment.content_id
+      String(
+        attachment.content_disposition || ""
+      ).toLowerCase() !== "inline"
   )
 
   outcome.attempted = userAttachments.length

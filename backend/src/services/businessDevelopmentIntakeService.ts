@@ -159,17 +159,19 @@ async function notifyStaff(
   result: IntakeResult,
   input: BusinessDevelopmentIntakeInput
 ) {
-  const recipient = clean(process.env.ALERT_EMAIL_TO)
+  const recipient =
+    clean(process.env.G2G_GMAIL_TO) ||
+    clean(process.env.ALERT_EMAIL_TO)
 
   if (!recipient) {
     console.warn(
-      "Skipping BDI staff notification: missing ALERT_EMAIL_TO"
+      "Skipping BDI staff notification: missing G2G_GMAIL_TO and ALERT_EMAIL_TO"
     )
 
     return {
       ok: false,
       skipped: true,
-      reason: "missing_alert_email_to",
+      reason: "missing_office_notification_recipient",
     }
   }
 
