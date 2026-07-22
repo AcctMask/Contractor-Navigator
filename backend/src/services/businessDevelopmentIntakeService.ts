@@ -211,6 +211,68 @@ async function notifyStaff(
   )
 }
 
+function buildVisibleAdministrativeNote(
+  input: BusinessDevelopmentIntakeInput,
+  action: "created_job" | "updated_existing_job"
+): string {
+  const lines = [
+    "Manual Office Email received and processed by the Receptionist / Administrative Assistant.",
+    action === "created_job"
+      ? "Navigator job created."
+      : "Existing Navigator job updated.",
+  ]
+
+  const sourceDetail = clean(input.sourceDetail)
+  const customerName = clean(input.customerName)
+  const customerPhone = clean(input.customerPhone)
+  const customerEmail = clean(input.customerEmail)
+  const address1 = clean(input.address1)
+  const city = clean(input.city)
+  const state = clean(input.state)
+  const zip = clean(input.zip)
+  const notes = clean(input.notes)
+
+  if (sourceDetail) {
+    lines.push(`Subject: ${sourceDetail}`)
+  }
+
+  if (customerName && customerName !== "Unknown Customer") {
+    lines.push(`Customer: ${customerName}`)
+  }
+
+  if (customerPhone) {
+    lines.push(`Phone: ${customerPhone}`)
+  }
+
+  if (customerEmail) {
+    lines.push(`Email: ${customerEmail}`)
+  }
+
+  const locality = [
+    city,
+    state,
+    zip,
+  ]
+    .filter(Boolean)
+    .join(" ")
+
+  if (address1) {
+    lines.push(
+      locality
+        ? `Property: ${address1}, ${locality}`
+        : `Property: ${address1}`
+    )
+  } else if (locality) {
+    lines.push(`Property location: ${locality}`)
+  }
+
+  if (notes) {
+    lines.push("", notes)
+  }
+
+  return lines.join("\n")
+}
+
 export async function processBusinessDevelopmentIntake(
   rawInput: BusinessDevelopmentIntakeInput
 ): Promise<IntakeResult> {
@@ -345,6 +407,47 @@ export async function processBusinessDevelopmentIntake(
             state: input.state,
             zip: input.zip,
             notes: input.notes,
+            external_reference:
+              input.externalReference,
+          }),
+        ]
+      )
+
+      await client.query(
+        `
+        insert into timeline_events
+          (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+        values
+          (
+            $1,
+            $2,
+            'staff_note',
+            $3,
+            $4::jsonb,
+            now()
+          )
+        `,
+        [
+          tenantId,
+          jobId,
+          buildVisibleAdministrativeNote(
+            input,
+            "updated_existing_job"
+          ),
+          JSON.stringify({
+            source: input.source,
+            source_detail:
+              input.sourceDetail || input.source,
+            action: "updated_existing_job",
+            generated_by:
+              "receptionist_administrative_assistant",
             external_reference:
               input.externalReference,
           }),
@@ -496,6 +599,47 @@ export async function processBusinessDevelopmentIntake(
             state: input.state,
             zip: input.zip,
             notes: input.notes,
+            external_reference:
+              input.externalReference,
+          }),
+        ]
+      )
+
+      await client.query(
+        `
+        insert into timeline_events
+          (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+        values
+          (
+            $1,
+            $2,
+            'staff_note',
+            $3,
+            $4::jsonb,
+            now()
+          )
+        `,
+        [
+          tenantId,
+          jobId,
+          buildVisibleAdministrativeNote(
+            input,
+            "created_job"
+          ),
+          JSON.stringify({
+            source: input.source,
+            source_detail:
+              input.sourceDetail || input.source,
+            action: "created_job",
+            generated_by:
+              "receptionist_administrative_assistant",
             external_reference:
               input.externalReference,
           }),

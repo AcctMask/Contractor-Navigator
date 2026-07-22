@@ -10,6 +10,10 @@ import {
 import {
   parseUniversalIntake,
 } from "../services/universalIntakeParser"
+import {
+  saveJobAssetByTenantSlug,
+} from "../services/jobAssetsService"
+import path from "node:path"
 
 const TENANT_SLUG = "g2g-roofing"
 const INBOUND_ADDRESS = "sales@istaeriiul.resend.app"
@@ -107,15 +111,293 @@ function readTextPayload(body: any) {
   }
 }
 
+
+type ResendReceivedAttachment = {
+  id: string
+  filename: string
+  size?: number | null
+  content_type?: string | null
+  content_disposition?: string | null
+  content_id?: string | null
+  download_url?: string | null
+  expires_at?: string | null
+}
+
+function extractReceivedEmailId(email: any): string | null {
+  return clean(
+    email?.email_id ||
+      email?.id ||
+      email?.emailId ||
+      email?.data?.email_id ||
+      email?.data?.id
+  )
+}
+
+function extractAttachmentLabels(text: string): Map<number, string> {
+  const labels = new Map<number, string>()
+  const pattern =
+    /^attachment\s*(\d+)\s*(?::|#|-|\bis\b)\s*(.+)$/gim
+
+  for (const match of String(text || "").matchAll(pattern)) {
+    const attachmentNumber = Number(match[1])
+    const label = clean(match[2])
+
+    if (
+      Number.isInteger(attachmentNumber) &&
+      attachmentNumber > 0 &&
+      label
+    ) {
+      labels.set(attachmentNumber, label)
+    }
+  }
+
+  return labels
+}
+
+function buildLabeledAttachmentName(
+  label: string,
+  originalFilename: string
+): string {
+  const originalExtension = path.extname(originalFilename || "")
+  const labelExtension = path.extname(label || "")
+  const cleanLabel = String(label || "")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (!cleanLabel) {
+    return originalFilename
+  }
+
+  return labelExtension
+    ? cleanLabel
+    : `${cleanLabel}${originalExtension}`
+}
+
+function buildAttachmentIdentity(
+  attachmentNumber: number,
+  originalFilename: string,
+  label?: string | null
+): string {
+  if (label) {
+    return buildLabeledAttachmentName(
+      label,
+      originalFilename
+    )
+  }
+
+  const extension = path.extname(originalFilename || "")
+  const baseName = path.basename(
+    originalFilename || "",
+    extension
+  )
+  const cleanBaseName = String(baseName || "")
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  const isGeneric =
+    !cleanBaseName ||
+    /^(attachment|upload|file|document|image|img|photo|scan|untitled)[-_ ]*\d*$/i.test(
+      cleanBaseName
+    ) ||
+    /^img[-_ ]?\d+$/i.test(cleanBaseName)
+
+  if (!isGeneric) {
+    return `${cleanBaseName}${extension}`
+  }
+
+  const receivedDate = new Date()
+    .toISOString()
+    .slice(0, 10)
+
+  const typeLabel =
+    /^image\//i.test(extension)
+      ? "Photo"
+      : "Attachment"
+
+  return `${receivedDate} Manual Office Email - ${typeLabel} ${attachmentNumber}${extension}`
+}
+
+async function listReceivedEmailAttachments(
+  emailId: string
+): Promise<ResendReceivedAttachment[]> {
+  const apiKey = process.env.RESEND_API_KEY
+
+  if (!apiKey) {
+    throw new Error(
+      "RESEND_API_KEY is not configured for attachment retrieval"
+    )
+  }
+
+  const response = await fetch(
+    `https://api.resend.com/emails/receiving/${emailId}/attachments`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `Resend attachment list failed: ${response.status} ${response.statusText}`
+    )
+  }
+
+  const payload: any = await response.json()
+
+  return Array.isArray(payload?.data)
+    ? payload.data
+    : []
+}
+
+async function importReceivedEmailAttachments(params: {
+  emailId: string | null
+  emailText: string
+  jobId: number
+}) {
+  const outcome = {
+    attempted: 0,
+    imported: [] as Array<{
+      attachment_number: number
+      original_filename: string
+      stored_filename: string
+      asset_id: number | string | null
+    }>,
+    skipped: [] as Array<{
+      attachment_number: number
+      filename: string
+      reason: string
+    }>,
+    failed: [] as Array<{
+      attachment_number: number
+      filename: string
+      error: string
+    }>,
+  }
+
+  if (!params.emailId) {
+    outcome.skipped.push({
+      attachment_number: 0,
+      filename: "",
+      reason: "missing_received_email_id",
+    })
+
+    return outcome
+  }
+
+  let listedAttachments: ResendReceivedAttachment[]
+
+  try {
+    listedAttachments =
+      await listReceivedEmailAttachments(params.emailId)
+  } catch (error: any) {
+    outcome.failed.push({
+      attachment_number: 0,
+      filename: "",
+      error: error?.message || String(error),
+    })
+
+    return outcome
+  }
+
+  const userAttachments = listedAttachments.filter(
+    (attachment) =>
+      String(attachment.content_disposition || "").toLowerCase() !==
+        "inline" &&
+      !attachment.content_id
+  )
+
+  outcome.attempted = userAttachments.length
+
+  if (!userAttachments.length) {
+    return outcome
+  }
+
+  const labels = extractAttachmentLabels(params.emailText)
+
+  for (
+    let index = 0;
+    index < userAttachments.length;
+    index += 1
+  ) {
+    const attachment = userAttachments[index]
+    const attachmentNumber = index + 1
+    const label = labels.get(attachmentNumber)
+    const originalFilename =
+      clean(attachment.filename) ||
+      `attachment-${attachmentNumber}`
+
+    try {
+      if (!attachment.download_url) {
+        throw new Error("Attachment download URL was not supplied")
+      }
+
+      const downloadResponse = await fetch(
+        attachment.download_url
+      )
+
+      if (!downloadResponse.ok) {
+        throw new Error(
+          `Attachment download failed: ${downloadResponse.status} ${downloadResponse.statusText}`
+        )
+      }
+
+      const fileBuffer = Buffer.from(
+        await downloadResponse.arrayBuffer()
+      )
+
+      const storedFilename = buildAttachmentIdentity(
+        attachmentNumber,
+        originalFilename,
+        label
+      )
+
+      const saved: any = await saveJobAssetByTenantSlug({
+        tenantSlug: TENANT_SLUG,
+        jobId: params.jobId,
+        assetType: String(
+          attachment.content_type || ""
+        ).startsWith("image/")
+          ? "photo_before"
+          : "other",
+        originalName: storedFilename,
+        mimeType: attachment.content_type || null,
+        note: [
+          "Imported by the Receptionist / Administrative Assistant from Manual Office Email.",
+          `Original filename: ${originalFilename}`,
+          label ? `Office label: ${label}` : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        uploadedBy: "Manual Office Email",
+        fileBuffer,
+      })
+
+      outcome.imported.push({
+        attachment_number: attachmentNumber,
+        original_filename: originalFilename,
+        stored_filename: storedFilename,
+        asset_id: saved?.id || null,
+      })
+    } catch (error: any) {
+      outcome.failed.push({
+        attachment_number: attachmentNumber,
+        filename: originalFilename,
+        error: error?.message || String(error),
+      })
+    }
+  }
+
+  return outcome
+}
+
 async function retrieveReceivedEmailFromResend(
   email: any
 ) {
-  const emailId =
-    email?.email_id ||
-    email?.id ||
-    email?.emailId ||
-    email?.data?.email_id ||
-    email?.data?.id
+  const emailId = extractReceivedEmailId(email)
 
   if (!emailId) {
     return null
@@ -691,6 +973,30 @@ export async function registerSalesEmailIntakeRoutes(
             externalReference,
           })
 
+        const attachmentImport =
+          await importReceivedEmailAttachments({
+            emailId:
+              extractReceivedEmailId(
+                receivedEmail ||
+                  initialPayload.raw
+              ),
+            emailText: parsedPayload.text,
+            jobId: Number(result.job_id),
+          })
+
+        if (
+          attachmentImport.skipped.length ||
+          attachmentImport.failed.length
+        ) {
+          console.warn(
+            "SALES_EMAIL_ATTACHMENT_IMPORT_INCOMPLETE",
+            JSON.stringify({
+              job_id: result.job_id,
+              attachment_import: attachmentImport,
+            })
+          )
+        }
+
         const customerEmailAcknowledgment =
           parsed.customerEmail
             ? await sendCustomerAcknowledgmentEmail(
@@ -729,6 +1035,8 @@ export async function registerSalesEmailIntakeRoutes(
               externalReference,
             parsed,
             result,
+            attachment_import:
+              attachmentImport,
             customer_email_acknowledgment:
               customerEmailAcknowledgment,
           })
@@ -737,6 +1045,8 @@ export async function registerSalesEmailIntakeRoutes(
         return {
           ...result,
           parsed,
+          attachment_import:
+            attachmentImport,
           customer_email_acknowledgment:
             customerEmailAcknowledgment,
         }

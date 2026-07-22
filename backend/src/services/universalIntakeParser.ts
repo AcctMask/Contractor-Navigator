@@ -220,24 +220,34 @@ function parseLocalityLine(line: string): {
 }
 
 function looksLikePersonName(line: string): boolean {
+  const candidate = String(line || "").trim()
+
   if (
-    /^(from|to|subject|date|sent|phone|email|address|city|state|zip|notes|message)\s*:/i.test(
-      line
+    /^(from|to|subject|date|sent|phone|email|address|city|state|zip|notes|message|attachment)\s*:/i.test(
+      candidate
     )
   ) {
     return false
   }
 
   if (
-    /@|https?:\/\/|www\.|\d{3}[\s.-]?\d{3}[\s.-]?\d{4}/i.test(
-      line
+    /@|https?:\/\/|www\.|\d{3}[\s.-]?\d{3}[\s.-]?\d{4}|^\d/i.test(
+      candidate
+    )
+  ) {
+    return false
+  }
+
+  if (
+    /\b(llc|l\.l\.c\.?|inc\.?|incorporated|corp\.?|corporation|company|co\.?|roofing|construction|contracting|contractor|builders?|development|management|properties|property|association|hoa|condominium|church|department|office|sales|estimating|estimate|project|projects|insurance|adjuster|adjusting|claims?|team)\b/i.test(
+      candidate
     )
   ) {
     return false
   }
 
   return /^[A-Za-z][A-Za-z'.-]+(?:\s+[A-Za-z][A-Za-z'.-]+){1,3}$/.test(
-    line
+    candidate
   )
 }
 
@@ -363,8 +373,33 @@ export function extractUniversalProperty(
     /(\d+[A-Z]?(?:[- ]\d+)?\s+[^\n\r,]+),\s*([^,\n\r]+),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/i
   )
 
+  let inferredOneLineName: string | null = null
+  const oneLineConsumedLines = new Set<number>()
+
+  if (oneLine?.[0]) {
+    const lines = intakeTextLines(normalized)
+    const addressIndex = lines.findIndex((line) =>
+      line.toLowerCase().includes(
+        String(oneLine[1] || "").trim().toLowerCase()
+      )
+    )
+
+    if (addressIndex > 0) {
+      const precedingLine = lines[addressIndex - 1]
+
+      if (looksLikePersonName(precedingLine)) {
+        inferredOneLineName = cleanIntakeValue(precedingLine)
+        oneLineConsumedLines.add(addressIndex - 1)
+      }
+    }
+
+    if (addressIndex >= 0) {
+      oneLineConsumedLines.add(addressIndex)
+    }
+  }
+
   return {
-    customerName: explicitName,
+    customerName: explicitName || inferredOneLineName,
     address1: cleanIntakeValue(oneLine?.[1]),
     city: cleanIntakeValue(oneLine?.[2]) || explicitCity,
     state:
@@ -376,7 +411,7 @@ export function extractUniversalProperty(
           : null
       ),
     zip: cleanIntakeValue(oneLine?.[4]) || explicitZip,
-    consumedLines: new Set<number>(),
+    consumedLines: oneLineConsumedLines,
   }
 }
 
