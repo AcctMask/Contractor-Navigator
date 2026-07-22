@@ -372,7 +372,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       add column if not exists bot_pause_reason text,
       add column if not exists active_followup_workflow text,
       add column if not exists followup_workflow_started_at timestamptz,
-
       add column if not exists tarp_conversion_active boolean not null default false,
       add column if not exists tarp_conversion_started_at timestamptz,
       add column if not exists contract_status text,
@@ -397,79 +396,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       add column if not exists lead_source_detail text,
       add column if not exists marketing_campaign text;
     `);
-
-    await pool.query(`
-      -- CENTRAL FOLLOW-UP WORKFLOW LIFECYCLE
-      create or replace function sync_job_followup_workflow()
-      returns trigger
-      language plpgsql
-      as $$
-      declare
-        derived_workflow text;
-      begin
-        if new.stage in ('archived', 'disqualified') then
-          derived_workflow := null;
-
-        elsif new.crm_flow_key = 'weather_evidence_report' then
-          derived_workflow := 'weather_evidence_report';
-
-        elsif new.stage = 'lead' then
-          derived_workflow := 'lead';
-
-        elsif new.stage = 'tarp_complete' then
-          derived_workflow := 'tarp';
-
-        elsif new.stage = 'estimate_sent' then
-          derived_workflow := 'estimate_sent';
-
-        elsif new.stage = 'contract_sent' then
-          derived_workflow := 'contract_sent';
-
-        elsif tg_op = 'UPDATE' then
-          derived_workflow := old.active_followup_workflow;
-
-        else
-          derived_workflow := new.active_followup_workflow;
-        end if;
-
-        if tg_op = 'INSERT' then
-          new.active_followup_workflow := derived_workflow;
-
-          if derived_workflow is null then
-            new.followup_workflow_started_at := null;
-          else
-            new.followup_workflow_started_at :=
-              coalesce(new.followup_workflow_started_at, now());
-          end if;
-
-        elsif derived_workflow is distinct from old.active_followup_workflow then
-          new.active_followup_workflow := derived_workflow;
-
-          if derived_workflow is null then
-            new.followup_workflow_started_at := null;
-          else
-            new.followup_workflow_started_at := now();
-          end if;
-
-        else
-          new.active_followup_workflow := old.active_followup_workflow;
-          new.followup_workflow_started_at :=
-            old.followup_workflow_started_at;
-        end if;
-
-        return new;
-      end;
-      $$;
-
-      drop trigger if exists jobs_sync_followup_workflow on jobs;
-
-      create trigger jobs_sync_followup_workflow
-      before insert or update of stage, crm_flow_key
-      on jobs
-      for each row
-      execute function sync_job_followup_workflow();
-    `);
-
 
     await pool.query(
       `

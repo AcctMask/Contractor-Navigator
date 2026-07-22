@@ -107,8 +107,6 @@ type JobRow = {
   state?: string | null
   crm_flow_key?: string | null
   crm_substatus?: string | null
-  active_followup_workflow?: string | null
-  followup_workflow_started_at?: string | null
 }
 
 type TimelineRow = {
@@ -376,8 +374,6 @@ async function getJob(tenantId: number, jobId: number): Promise<JobRow> {
       j.state,
       j.crm_flow_key,
       j.crm_substatus,
-      j.active_followup_workflow,
-      j.followup_workflow_started_at,
       c.full_name as customer_name
     from jobs j
     left join customers c
@@ -496,47 +492,35 @@ function getWorkflowMessages(settings: DevSettings, job: JobRow) {
     }
   }
 
-  if (job.active_followup_workflow === "lead") {
+  if (job.stage === "lead") {
     return {
       workflowKey: "lead",
-      messages: settings.lead_messages || []
+      messages: settings.lead_messages
     }
   }
 
-  if (job.active_followup_workflow === "estimate_sent") {
+  if (job.stage === "estimate_sent") {
     return {
       workflowKey: "estimate_sent",
-      messages: settings.estimate_messages || []
+      messages: settings.estimate_messages
     }
   }
 
-  if (job.active_followup_workflow === "contract_sent") {
+  if (job.stage === "contract_sent") {
     return {
       workflowKey: "contract_sent",
-      messages: settings.contract_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "tarp") {
-    return {
-      workflowKey: "tarp",
-      messages: settings.tarp_messages || []
+      messages: settings.contract_messages
     }
   }
 
   return {
-    workflowKey: job.active_followup_workflow || "unknown",
+    workflowKey: job.stage || "unknown",
     messages: []
   }
 }
 
 function buildAiMessage(job: JobRow, timeline: TimelineRow[], settings: DevSettings) {
-  if (
-    !job.active_followup_workflow &&
-    job.crm_flow_key !== "weather_evidence_report"
-  ) {
-    return null
-  }
+  if (!job.stage) return null
 
   const workflow = getWorkflowMessages(settings, job)
   const stageMessages = workflow.messages.filter((m) => String(m || "").trim().length > 0)

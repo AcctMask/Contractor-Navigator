@@ -373,32 +373,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       add column if not exists active_followup_workflow text,
       add column if not exists followup_workflow_started_at timestamptz,
 
-      add column if not exists tarp_conversion_active boolean not null default false,
-      add column if not exists tarp_conversion_started_at timestamptz,
-      add column if not exists contract_status text,
-      add column if not exists estimate_status text,
-      add column if not exists last_human_note text,
-      add column if not exists carrier text,
-      add column if not exists claim_number text,
-      add column if not exists policy_holder text,
-      add column if not exists adjuster_name text,
-      add column if not exists adjuster_phone text,
-      add column if not exists adjuster_email text,
-      add column if not exists assignment_subject text,
-      add column if not exists assignment_notes text,
-      add column if not exists damage_location text,
-      add column if not exists damage_summary text,
-      add column if not exists wa_status text,
-      add column if not exists contract_sent_at timestamptz,
-      add column if not exists estimate_sent_at timestamptz,
-      add column if not exists wa_sent_at timestamptz,
-      add column if not exists wa_signed_at timestamptz,
-      add column if not exists lead_source text,
-      add column if not exists lead_source_detail text,
-      add column if not exists marketing_campaign text;
-    `);
-
-    await pool.query(`
       -- CENTRAL FOLLOW-UP WORKFLOW LIFECYCLE
       create or replace function sync_job_followup_workflow()
       returns trigger
@@ -453,8 +427,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
         else
           new.active_followup_workflow := old.active_followup_workflow;
-          new.followup_workflow_started_at :=
-            old.followup_workflow_started_at;
+          new.followup_workflow_started_at := old.followup_workflow_started_at;
         end if;
 
         return new;
@@ -468,8 +441,30 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       on jobs
       for each row
       execute function sync_job_followup_workflow();
+      add column if not exists tarp_conversion_active boolean not null default false,
+      add column if not exists tarp_conversion_started_at timestamptz,
+      add column if not exists contract_status text,
+      add column if not exists estimate_status text,
+      add column if not exists last_human_note text,
+      add column if not exists carrier text,
+      add column if not exists claim_number text,
+      add column if not exists policy_holder text,
+      add column if not exists adjuster_name text,
+      add column if not exists adjuster_phone text,
+      add column if not exists adjuster_email text,
+      add column if not exists assignment_subject text,
+      add column if not exists assignment_notes text,
+      add column if not exists damage_location text,
+      add column if not exists damage_summary text,
+      add column if not exists wa_status text,
+      add column if not exists contract_sent_at timestamptz,
+      add column if not exists estimate_sent_at timestamptz,
+      add column if not exists wa_sent_at timestamptz,
+      add column if not exists wa_signed_at timestamptz,
+      add column if not exists lead_source text,
+      add column if not exists lead_source_detail text,
+      add column if not exists marketing_campaign text;
     `);
-
 
     await pool.query(
       `

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
+import { planFollowUps } from "../services/conversationEngine"
 import { getCurrentUserFromToken } from "../services/authService"
 
 // helper
@@ -304,74 +305,6 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           stage = coalesce($3, stage),
           crm_substatus = $4,
           bot_paused = coalesce($5, bot_paused),
-
-          bot_pause_reason =
-            case
-              when $3 = 'disqualified'
-                then 'disqualified'
-              when $5 = true
-                then coalesce(bot_pause_reason, 'office_stop')
-              when $5 = false
-                then null
-              else bot_pause_reason
-            end,
-
-          active_followup_workflow =
-            case
-              when $3 = 'lead'
-                then 'lead'
-              when $3 = 'tarp_complete'
-                then 'tarp'
-              when $3 = 'estimate_sent'
-                then 'estimate_sent'
-              when $3 = 'contract_sent'
-                then 'contract_sent'
-              when $3 in ('archived', 'disqualified')
-                then null
-              else active_followup_workflow
-            end,
-
-          followup_workflow_started_at =
-            case
-              when $3 = 'lead'
-               and active_followup_workflow is distinct from 'lead'
-                then now()
-              when $3 = 'tarp_complete'
-               and active_followup_workflow is distinct from 'tarp'
-                then now()
-              when $3 = 'estimate_sent'
-               and active_followup_workflow is distinct from 'estimate_sent'
-                then now()
-              when $3 = 'contract_sent'
-               and active_followup_workflow is distinct from 'contract_sent'
-                then now()
-              when $3 in ('archived', 'disqualified')
-                then null
-              else followup_workflow_started_at
-            end,
-
-          tarp_conversion_active =
-            case
-              when $3 = 'tarp_complete'
-                then true
-              when $3 in (
-                'estimate_sent',
-                'contract_sent',
-                'archived',
-                'disqualified'
-              )
-                then false
-              else tarp_conversion_active
-            end,
-
-          tarp_conversion_started_at =
-            case
-              when $3 = 'tarp_complete'
-               and coalesce(tarp_conversion_active, false) = false
-                then now()
-              else tarp_conversion_started_at
-            end,
-
           updated_at = now()
         where tenant_id = $1
           and id = $2
@@ -385,7 +318,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
         ]
       )
 
-      if (stage && ["archived", "disqualified"].includes(stage)) {
+      if (stage && stage !== "tarp_complete") {
         await pool.query(
           `
           update scheduled_actions
@@ -405,6 +338,29 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
         )
       }
 
+      if (stage) {
+        await planFollowUps({
+          tenant_id: tenantId,
+          job_id: Number(jobId),
+          stage,
+          occurred_at: new Date().toISOString(),
+        })
+
+        await pool.query(
+          `
+          insert into timeline_events
+            (tenant_id, job_id, kind, message, meta, created_at)
+          values
+            ($1, $2, 'workflow_planned', $3, $4::jsonb, now())
+          `,
+          [
+            tenantId,
+            Number(jobId),
+            `follow-ups scheduled for stage=${stage}`,
+            JSON.stringify({ stage, source: "manual_stage_save" }),
+          ]
+        )
+      }
 
       return { ok: true }
 
