@@ -32,11 +32,16 @@ function defaultSettings(): DevSettings {
     contract_messages: ["", "", "", "", "", "", "", "", "", ""],
 
     tarp_messages: [
-      "Good2Go Roofing & Construction LLC has completed your emergency tarp service. Please remember coverage, cause of loss, and repair scope are determined by the carrier and desk adjuster after claim review. If you have questions in the meantime, feel free to reply here anytime.",
-      "Just checking in regarding your recent emergency tarp service. If you receive paperwork, estimates, or requests for information from your carrier and have questions about the process, feel free to send them over and we will do our best to help explain what you are seeing.",
-      "We know claim review can take time after severe weather events. Timely roof repairs are strongly recommended to help prevent additional water damage and interior discoloration once claim decisions are made.",
-      "If your claim process becomes delayed or difficult to navigate, Good2Go Roofing & Construction LLC License# CCC1331529 and Licensed Insurance Adjusters License# D076345 may be able to assist with communication and documentation related to authorized repairs.",
-      "If you would like, you can also request a free roof estimate anytime through our website: https://g2g-instant-estimator.netlify.app/ or by contacting sales@g2groofing.com."
+      "Hi {{name}}, Good2Go Roofing has completed your emergency tarp service to help protect your property while permanent repairs are arranged. If you have questions about the roof, insurance process, or what happens next, simply reply here anytime.",
+      "Many homeowners first meet us during an emergency, but Good2Go is a full-service Florida licensed roofing contractor, License #CCC1331529. We provide roof inspections, repairs, and complete roof replacements. Reply here if you would like to discuss your permanent roofing needs.",
+      "When a tarp assignment comes through an insurance carrier or managed repair program, the contractor must meet their licensing, insurance, and business-practice requirements. Good2Go has been vetted and accepted to perform this work, and we are available to help throughout the recovery process.",
+      "Insurance adjusters can become extremely busy after storms, so claim reviews sometimes take longer than expected. If you receive estimates, paperwork, or requests you do not understand, reply here. We will be glad to help explain what you are seeing.",
+      "Good2Go is a licensed roofing contractor, and our owner is also a licensed Florida insurance adjuster, License #D076345. This experience helps us understand both the roofing work and the insurance process while keeping the carrier responsible for all coverage decisions.",
+      "If you choose Good2Go for the permanent roof work, we can prepare a roofing contract while your claim is pending. Once under contract, we can speak directly with your adjuster about the roofing scope and help move questions toward resolution. If coverage is not awarded, the contract becomes void. Reply CONTRACT if you would like one prepared.",
+      "We know roofing projects can stall between adjuster schedules, paperwork, and everyday life. Have you received a claim decision or discussed the permanent repairs yet? Reply here and tell us where things stand so we can help with the next step.",
+      "Our weather systems indicate your area may have experienced winds exceeding 40 mph since your tarp was installed. High winds can sometimes loosen temporary protection. If you notice movement, lifting, or leaking, notify your adjuster and ask them to authorize Good2Go to inspect and reset the tarp. You may also reply here for help.",
+      "If your roof has not been permanently repaired, we would appreciate the opportunity to earn your business. Good2Go provides complete roofing services whether the work is covered by insurance or handled privately. Reply INSPECTION to schedule a complimentary roof inspection.",
+      "Thank you again for trusting Good2Go during your emergency. If your tarp remains in place or the permanent roofing work is still unresolved, reply here anytime. We are available for roofing advice, inspections, repairs, replacement, or help communicating about the roofing scope."
     ],
 
     weather_report_messages: [
@@ -56,7 +61,7 @@ function defaultSettings(): DevSettings {
     estimate_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
     contract_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
 
-    tarp_timings_minutes: [180, 7200, 20160, 43200, 86400],
+    tarp_timings_minutes: [0, 2880, 7200, 12960, 20160, 30240, 43200, 64800, 86400, 129600],
     weather_report_timings_minutes: [0, 1440, 4320, 10080, 20160, 30240, 43200, 64800, 86400, 129600]
   }
 }
@@ -92,9 +97,11 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
     lead_messages: [...(merged.lead_messages || []), ...defaults.lead_messages].slice(0, 10),
     estimate_messages: [...(merged.estimate_messages || []), ...defaults.estimate_messages].slice(0, 10),
     contract_messages: [...(merged.contract_messages || []), ...defaults.contract_messages].slice(0, 10),
+    tarp_messages: [...(merged.tarp_messages || []), ...defaults.tarp_messages].slice(0, 10),
     lead_timings_minutes: [...(merged.lead_timings_minutes || []), ...defaults.lead_timings_minutes].slice(0, 10),
     estimate_timings_minutes: [...(merged.estimate_timings_minutes || []), ...defaults.estimate_timings_minutes].slice(0, 10),
     contract_timings_minutes: [...(merged.contract_timings_minutes || []), ...defaults.contract_timings_minutes].slice(0, 10),
+    tarp_timings_minutes: [...(merged.tarp_timings_minutes || []), ...defaults.tarp_timings_minutes].slice(0, 10),
     weather_report_messages: [...(merged.weather_report_messages || []), ...defaults.weather_report_messages].slice(0, 10),
     weather_report_timings_minutes: [...(merged.weather_report_timings_minutes || []), ...defaults.weather_report_timings_minutes].slice(0, 10),
   }
