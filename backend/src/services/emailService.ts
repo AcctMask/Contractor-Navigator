@@ -10,7 +10,11 @@ function escapeHtml(value: string) {
 export async function sendAlertEmail(
   to: string,
   subject: string,
-  text: string
+  text: string,
+  options?: {
+    cc?: string | string[]
+    bcc?: string | string[]
+  }
 ) {
   try {
     const apiKey = process.env.RESEND_API_KEY
@@ -46,6 +50,8 @@ export async function sendAlertEmail(
 
     console.log("📧 RESEND EMAIL ATTEMPT")
     console.log("TO:", to)
+    console.log("CC:", options?.cc || "")
+    console.log("BCC:", options?.bcc || "")
     console.log("FROM:", from)
     console.log("SUBJECT:", safeSubject)
     console.log("TEXT LENGTH:", safeText.length)
@@ -59,6 +65,8 @@ export async function sendAlertEmail(
       body: JSON.stringify({
         from,
         to,
+        ...(options?.cc ? { cc: options.cc } : {}),
+        ...(options?.bcc ? { bcc: options.bcc } : {}),
         subject: safeSubject,
         text: safeText,
         html,

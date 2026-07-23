@@ -5,6 +5,7 @@ import {
   processBusinessDevelopmentIntake,
 } from "../services/businessDevelopmentIntakeService"
 import {
+  sendAlertEmail,
   sendCustomerAcknowledgmentEmail,
 } from "../services/emailService"
 import {
@@ -31,6 +32,234 @@ function clean(value: unknown): string | null {
     .trim()
 
   return result.length ? result : null
+}
+
+function extractEmailAddress(value: string): string | null {
+  const normalized = clean(value)
+
+  if (!normalized) {
+    return null
+  }
+
+  const angleBracketMatch =
+    normalized.match(/<([^<>\s]+@[^<>\s]+)>/)
+
+  if (angleBracketMatch?.[1]) {
+    return angleBracketMatch[1]
+      .trim()
+      .toLowerCase()
+  }
+
+  const plainEmailMatch =
+    normalized.match(
+      /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i
+    )
+
+  return plainEmailMatch?.[0]
+    ? plainEmailMatch[0]
+        .trim()
+        .toLowerCase()
+    : null
+}
+
+async function sendAdministrativeIntakeCompletionEmail(
+  params: {
+    result: any
+    parsed: any
+    subject: string
+    sender: string
+    attachmentImport: any
+    customerEmailAcknowledgment: any
+  }
+) {
+  const sharedOfficeRecipient =
+    extractEmailAddress(
+      process.env.G2G_GMAIL_TO ||
+      process.env.ALERT_EMAIL_TO ||
+      ""
+    )
+
+  const senderRecipient =
+    extractEmailAddress(params.sender)
+
+  const recipient =
+    senderRecipient ||
+    sharedOfficeRecipient
+
+  if (!recipient) {
+    console.error(
+      "Administrative Assistant completion receipt skipped: no valid sender or shared office recipient",
+      {
+        job_id: params.result.job_id,
+      }
+    )
+
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "missing_completion_receipt_recipient",
+    }
+  }
+
+  const ccRecipient =
+    senderRecipient &&
+    sharedOfficeRecipient &&
+    senderRecipient !== sharedOfficeRecipient
+      ? sharedOfficeRecipient
+      : null
+
+  const customerName =
+    clean(params.parsed.customerName) ||
+    "Unknown Customer"
+
+  const propertyAddress = [
+    clean(params.parsed.address1),
+    clean(params.parsed.city),
+    clean(params.parsed.state),
+    clean(params.parsed.zip),
+  ]
+    .filter(Boolean)
+    .join(", ")
+
+  const resultText =
+    params.result.action === "created_job"
+      ? "New Navigator job created"
+      : "Existing Navigator job updated"
+
+  const importedAttachments =
+    Array.isArray(params.attachmentImport?.imported)
+      ? params.attachmentImport.imported
+      : []
+
+  const skippedAttachments =
+    Array.isArray(params.attachmentImport?.skipped)
+      ? params.attachmentImport.skipped
+      : []
+
+  const failedAttachments =
+    Array.isArray(params.attachmentImport?.failed)
+      ? params.attachmentImport.failed
+      : []
+
+  const attachmentLines = [
+    `Attempted: ${Number(params.attachmentImport?.attempted || 0)}`,
+    `Imported: ${importedAttachments.length}`,
+    ...importedAttachments.map(
+      (attachment: any) =>
+        `  ✓ ${attachment.stored_filename}`
+    ),
+    `Skipped: ${skippedAttachments.length}`,
+    ...skippedAttachments.map(
+      (attachment: any) =>
+        `  - ${attachment.filename || "Attachment"}: ${attachment.reason}`
+    ),
+    `Failed: ${failedAttachments.length}`,
+    ...failedAttachments.map(
+      (attachment: any) =>
+        `  ⚠ ${attachment.filename || "Attachment"}: ${attachment.error}`
+    ),
+  ]
+
+  const customerAcknowledgmentText =
+    params.customerEmailAcknowledgment?.ok
+      ? "Sent"
+      : params.customerEmailAcknowledgment?.skipped
+        ? `Skipped: ${params.customerEmailAcknowledgment.reason}`
+        : `Failed: ${
+            params.customerEmailAcknowledgment?.error ||
+            "Unknown error"
+          }`
+
+  const officeReviewRequired =
+    failedAttachments.length > 0
+
+  const text = [
+    "Administrative Assistant Intake Complete",
+    "",
+    "Customer",
+    customerName,
+    "",
+    "Property",
+    propertyAddress ||
+      "No property address supplied",
+    "",
+    "Result",
+    resultText,
+    "",
+    "Attachments",
+    `✓ ${importedAttachments.length} imported`,
+    skippedAttachments.length > 0
+      ? `- ${skippedAttachments.length} skipped`
+      : "✓ None skipped",
+    failedAttachments.length > 0
+      ? `⚠ ${failedAttachments.length} failed`
+      : "✓ None failed",
+    "",
+    "Customer Acknowledgment",
+    customerAcknowledgmentText,
+    "",
+    "Office Review Required",
+    officeReviewRequired
+      ? "Yes"
+      : "No",
+    "",
+    "Supporting Information",
+    `Navigator Job: #${params.result.job_id}`,
+    `Original Subject: ${
+      clean(params.subject) ||
+      "Not supplied"
+    }`,
+    "",
+    "CRM",
+    "✓ Timeline event created",
+    "✓ Administrative Assistant note created",
+    "",
+    "Attachment Details",
+    ...attachmentLines,
+  ].join("\n")
+
+  const subjectIdentifier =
+    propertyAddress ||
+    customerName ||
+    `Job #${params.result.job_id}`
+
+  const receiptSubject =
+    officeReviewRequired
+      ? `Administrative Assistant Review Required: ${subjectIdentifier}`
+      : `Administrative Assistant Intake Complete: ${subjectIdentifier}`
+
+  try {
+    return await sendAlertEmail(
+      recipient,
+      receiptSubject,
+      text,
+      ccRecipient
+        ? {
+            cc: ccRecipient,
+          }
+        : undefined
+    )
+  } catch (error: any) {
+    console.error(
+      "Administrative Assistant completion receipt failed after intake completion",
+      {
+        job_id: params.result.job_id,
+        recipient,
+        cc: ccRecipient,
+        error:
+          error?.message ||
+          String(error),
+      }
+    )
+
+    return {
+      ok: false,
+      error:
+        error?.message ||
+        String(error),
+    }
+  }
 }
 
 function stripHtml(value: string): string {
@@ -971,6 +1200,7 @@ export async function registerSalesEmailIntakeRoutes(
               .filter(Boolean)
               .join("\n\n"),
             externalReference,
+            suppressStaffNotification: true,
           })
 
         const attachmentImport =
@@ -1022,6 +1252,16 @@ export async function registerSalesEmailIntakeRoutes(
                   "missing_customer_email",
               }
 
+        const officeCompletionReceipt =
+          await sendAdministrativeIntakeCompletionEmail({
+            result,
+            parsed,
+            subject: parsedPayload.subject,
+            sender: parsedPayload.from,
+            attachmentImport,
+            customerEmailAcknowledgment,
+          })
+
         console.log(
           "SALES_EMAIL_INTAKE_PROCESSED",
           JSON.stringify({
@@ -1039,6 +1279,8 @@ export async function registerSalesEmailIntakeRoutes(
               attachmentImport,
             customer_email_acknowledgment:
               customerEmailAcknowledgment,
+            office_completion_receipt:
+              officeCompletionReceipt,
           })
         )
 
@@ -1049,6 +1291,8 @@ export async function registerSalesEmailIntakeRoutes(
             attachmentImport,
           customer_email_acknowledgment:
             customerEmailAcknowledgment,
+          office_completion_receipt:
+            officeCompletionReceipt,
         }
       } catch (error: any) {
         console.error(
