@@ -175,6 +175,81 @@ function looksLikeStreet(line: string): boolean {
   ).test(line)
 }
 
+function extractEmbeddedStreet(
+  text: string
+): string | null {
+  const match = String(text || "").match(
+    new RegExp(
+      `\\b(\\d+[A-Z]?(?:[- ]\\d+)?\\s+(?:[A-Z0-9.'-]+\\s+){0,7}${STREET_SUFFIX_PATTERN}\\.?)\\b`,
+      "i"
+    )
+  )
+
+  return cleanIntakeValue(match?.[1])
+}
+
+function extractInlinePropertyAddress(
+  text: string
+): {
+  address1: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+} | null {
+  const normalized = String(text || "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  const streetPattern =
+    `(\\d+[A-Z]?(?:[- ]\\d+)?\\s+` +
+    `(?:[A-Z0-9.'-]+\\s+){0,7}` +
+    `${STREET_SUFFIX_PATTERN}\\.?)`
+
+  const completeAddress = normalized.match(
+    new RegExp(
+      `${streetPattern}\\s*,?\\s+` +
+      `([A-Za-z][A-Za-z .'-]{1,60}?)` +
+      `\\s*,?\\s+([A-Z]{2})` +
+      `(?:\\s+(\\d{5}(?:-\\d{4})?))?\\b`,
+      "i"
+    )
+  )
+
+  if (completeAddress) {
+    return {
+      address1: cleanIntakeValue(completeAddress[1]),
+      city: cleanIntakeValue(completeAddress[2]),
+      state: cleanIntakeValue(completeAddress[3]),
+      zip: cleanIntakeValue(completeAddress[4]),
+    }
+  }
+
+  const contextualAddress = normalized.match(
+    new RegExp(
+      `(?:subject\\s*:|re\\s*:|new\\s+document\\s+for|` +
+      `document\\s+for|job\\s+at|property\\s+at|` +
+      `upload\\s+(?:this\\s+)?for|for|at)\\s+` +
+      `${streetPattern}` +
+      `(?:\\s*,?\\s+([A-Za-z][A-Za-z.'-]*))?`,
+      "i"
+    )
+  )
+
+  if (contextualAddress) {
+    return {
+      address1: cleanIntakeValue(contextualAddress[1]),
+      city:
+        cleanIntakeValue(contextualAddress[2])
+          ?.replace(/[.,]+$/, "") || null,
+      state: "FL",
+      zip: null,
+    }
+  }
+
+  return null
+}
+
 function parseLocalityLine(line: string): {
   city: string | null
   state: string | null
@@ -366,6 +441,37 @@ export function extractUniversalProperty(
       state: locality.state || "FL",
       zip: locality.zip,
       consumedLines,
+    }
+  }
+
+  const inlineProperty =
+    extractInlinePropertyAddress(normalized)
+
+  if (inlineProperty?.address1) {
+    return {
+      customerName: explicitName,
+      address1: inlineProperty.address1,
+      city: inlineProperty.city || explicitCity,
+      state:
+        inlineProperty.state ||
+        explicitState ||
+        "FL",
+      zip: inlineProperty.zip || explicitZip,
+      consumedLines: new Set<number>(),
+    }
+  }
+
+  const embeddedStreet =
+    extractEmbeddedStreet(normalized)
+
+  if (embeddedStreet) {
+    return {
+      customerName: explicitName,
+      address1: embeddedStreet,
+      city: explicitCity,
+      state: explicitState || "FL",
+      zip: explicitZip,
+      consumedLines: new Set<number>(),
     }
   }
 
