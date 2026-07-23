@@ -19,6 +19,7 @@ export type BusinessDevelopmentIntakeInput = {
   zip?: string | null
   notes?: string | null
   externalReference?: string | null
+  suppressStaffNotification?: boolean
 }
 
 type IntakeResult = {
@@ -293,6 +294,8 @@ export async function processBusinessDevelopmentIntake(
     zip: clean(rawInput.zip),
     notes: clean(rawInput.notes),
     externalReference: clean(rawInput.externalReference),
+    suppressStaffNotification:
+      rawInput.suppressStaffNotification === true,
   }
 
   if (!input.tenantSlug) {
@@ -351,6 +354,31 @@ export async function processBusinessDevelopmentIntake(
     if (existingJob) {
       const jobId = Number(existingJob.id)
       const customerId = Number(existingJob.customer_id)
+
+      await client.query(
+        `
+        update customers
+        set
+          full_name = $3,
+          updated_at = now()
+        where tenant_id = $1
+          and id = $2
+          and nullif(trim($3), '') is not null
+          and (
+            nullif(trim(full_name), '') is null
+            or lower(trim(full_name)) in (
+              'unknown customer',
+              'inbound caller',
+              'ems tarp customer'
+            )
+          )
+        `,
+        [
+          tenantId,
+          customerId,
+          input.customerName,
+        ]
+      )
 
       await client.query(
         `
@@ -668,7 +696,14 @@ export async function processBusinessDevelopmentIntake(
 
   const [staffNotification, ownerControls] =
     await Promise.all([
-      notifyStaff(result, input),
+      input.suppressStaffNotification
+        ? Promise.resolve({
+            ok: false,
+            skipped: true,
+            reason:
+              "deferred_to_intake_completion_receipt",
+          })
+        : notifyStaff(result, input),
       reportOwnerControlsActivity({
         tenantSlug: input.tenantSlug,
         jobId: result.job_id,
