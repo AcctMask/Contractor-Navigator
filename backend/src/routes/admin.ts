@@ -806,13 +806,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
              lead_source = coalesce($20, lead_source),
              lead_source_detail = coalesce($21, lead_source_detail),
              marketing_campaign = coalesce($22, marketing_campaign),
-             address1 = coalesce($23, address1),
-             city = coalesce($24, city),
-             state = coalesce($25, state),
-             zip = coalesce($26, zip),
+             job_type = coalesce($23, job_type),
+             address1 = coalesce($24, address1),
+             city = coalesce($25, city),
+             state = coalesce($26, state),
+             zip = coalesce($27, zip),
              updated_at = now()
-       where tenant_id = $27
-         and id = $28
+       where tenant_id = $28
+         and id = $29
       `,
       [
         body.stage ?? null,
@@ -837,6 +838,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         body.lead_source ?? null,
         body.lead_source_detail ?? null,
         body.marketing_campaign ?? null,
+        body.job_type ?? null,
         body.address ?? body.address1 ?? null,
         body.city ?? null,
         body.state ?? null,

@@ -1019,6 +1019,14 @@ export default function JobDetail() {
               <label style={label}>Email</label>
               <input value={form.customer_email || ""} onChange={(e) => setField("customer_email", e.target.value)} style={input} />
 
+              <label style={label}>Job Type</label>
+              <input
+                value={form.job_type || ""}
+                onChange={(e) => setField("job_type", e.target.value)}
+                style={input}
+                placeholder="Enter job type"
+              />
+
               <hr style={hr} />
               <h3>Secondary Contact</h3>
 
