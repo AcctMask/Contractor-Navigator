@@ -1,6 +1,7 @@
 import { pool } from "../db/db"
 import { queueAiFollowupByTenantSlug } from "./followupEngine"
 import { getDeveloperSettingsByTenantSlug } from "./devSettingsService"
+import { AI_FOLLOWUP_PROGRESS_KIND } from "./followupProgress"
 
 type SchedJob = {
   id: number
@@ -124,10 +125,10 @@ async function getStageStats(jobId: number, stage: string): Promise<StageStats> 
       max(created_at) as last_message_at
     from timeline_events
     where job_id = $1
-      and lower(kind) in ('ai_message_generated', 'ai_message_sent', 'ai_message_send_failed')
+      and lower(kind) = $3
       and coalesce(meta->>'stage', '') = $2
     `,
-    [jobId, stage]
+    [jobId, stage, AI_FOLLOWUP_PROGRESS_KIND]
   )
 
   return {

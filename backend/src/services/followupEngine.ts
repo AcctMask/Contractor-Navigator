@@ -1,4 +1,5 @@
 import { pool } from "../db/db"
+import { countCompletedAiFollowups } from "./followupProgress"
 import { sendSMS } from "./twilioService"
 import { pool } from "../db/db"
 
@@ -473,14 +474,7 @@ async function logSystemEvent(
 }
 
 function countExistingAiMessagesForStage(timeline: TimelineRow[], stage: string) {
-  return timeline.filter((t) => {
-    const kind = t.kind.toLowerCase()
-    const metaStage = String(t.meta?.stage || "")
-    return (
-      ["ai_message_generated", "ai_message_sent", "ai_message_send_failed"].includes(kind) &&
-      metaStage === stage
-    )
-  }).length
+  return countCompletedAiFollowups(timeline, stage)
 }
 
 function hasTimelineKind(timeline: TimelineRow[], kind: string) {

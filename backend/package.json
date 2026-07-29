@@ -6,7 +6,9 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "dev:commercial": "tsx watch src/commercialIndex.ts",
-    "start:commercial": "tsx src/commercialIndex.ts"
+    "start:commercial": "tsx src/commercialIndex.ts",
+    "followup:backfill:preview": "tsx scripts/backfillFollowupWorkflows.ts --preview",
+    "followup:backfill:execute": "tsx scripts/backfillFollowupWorkflows.ts --execute"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
