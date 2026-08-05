@@ -45,6 +45,46 @@ import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
 import { isPhoneDnc } from "./dncService"
 
+const PERMANENT_TWILIO_ERROR_CODES = new Set([
+  21211,
+  21265,
+  21266,
+  21268,
+])
+
+function getTwilioErrorCode(error: any): number | null {
+  const code = Number(error?.code)
+
+  return Number.isFinite(code)
+    ? code
+    : null
+}
+
+function isPermanentTwilioDeliveryFailure(error: any) {
+  const code = getTwilioErrorCode(error)
+
+  return code !== null &&
+    PERMANENT_TWILIO_ERROR_CODES.has(code)
+}
+
+async function pauseAiFollowupForDeliveryFailure(
+  tenantId: number,
+  jobId: number,
+  reason: string
+) {
+  await pool.query(
+    `
+    update jobs
+       set bot_paused = true,
+           bot_pause_reason = $3,
+           updated_at = now()
+     where tenant_id = $1
+       and id = $2
+    `,
+    [tenantId, jobId, reason]
+  )
+}
+
 
 
 async function reportAaCustomerActivity(payload: {
@@ -1220,20 +1260,32 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
   )
 
   if (!callbackNumber) {
+    const reason =
+      "AI follow-up paused because customer phone is missing"
+
+    await pauseAiFollowupForDeliveryFailure(
+      tenantId,
+      jobId,
+      reason
+    )
+
     await addTimelineEvent(
       tenantId,
       jobId,
-      "ai_message_send_failed",
-      "AI message could not be sent because customer phone is missing",
+      "ai_message_delivery_halted",
+      reason,
       {
         stage: aiMessage.stage,
         order: aiMessage.order,
+        channel: "sms",
+        permanent: true,
+        reason: "missing_phone",
       }
     )
 
     return {
       ok: true,
-      skipped: false,
+      skipped: true,
       tenant_id: tenantId,
       job_id: jobId,
       stage: aiMessage.stage,
@@ -1241,6 +1293,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       message: aiMessage.message,
       sent: false,
       reason: "missing_phone",
+      permanent: true,
     }
   }
 
@@ -1305,15 +1358,65 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       twilio_sid: sms.sid,
     }
   } catch (err: any) {
+    const errorMessage = err?.message || String(err)
+    const twilioErrorCode = getTwilioErrorCode(err)
+    const permanent =
+      isPermanentTwilioDeliveryFailure(err)
+
+    if (permanent) {
+      const reason =
+        `AI follow-up paused after permanent Twilio error ` +
+        `${twilioErrorCode}: ${errorMessage}`
+
+      await pauseAiFollowupForDeliveryFailure(
+        tenantId,
+        jobId,
+        reason
+      )
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "ai_message_delivery_halted",
+        reason,
+        {
+          stage: aiMessage.stage,
+          order: aiMessage.order,
+          to: callbackNumber,
+          channel: "sms",
+          permanent: true,
+          twilio_error_code: twilioErrorCode,
+        }
+      )
+
+      return {
+        ok: true,
+        skipped: true,
+        reason: "permanent_delivery_failure",
+        tenant_id: tenantId,
+        job_id: jobId,
+        stage: aiMessage.stage,
+        order: aiMessage.order,
+        message: aiMessage.message,
+        sent: false,
+        to: callbackNumber,
+        permanent: true,
+        twilio_error_code: twilioErrorCode,
+        error: errorMessage,
+      }
+    }
+
     await addTimelineEvent(
       tenantId,
       jobId,
       "ai_message_send_failed",
-      `AI message failed to send: ${err?.message || String(err)}`,
+      `AI message failed to send: ${errorMessage}`,
       {
         stage: aiMessage.stage,
         order: aiMessage.order,
         to: callbackNumber,
+        permanent: false,
+        twilio_error_code: twilioErrorCode,
       }
     )
 
@@ -1327,7 +1430,9 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       message: aiMessage.message,
       sent: false,
       to: callbackNumber,
-      error: err?.message || String(err),
+      permanent: false,
+      twilio_error_code: twilioErrorCode,
+      error: errorMessage,
     }
   }
 }
