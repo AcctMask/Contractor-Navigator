@@ -278,9 +278,25 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       fs.mkdirSync(jobDir, { recursive: true })
 
       const uploaded: any[] = []
-      const parts = req.files()
+      const parts = req.parts()
+      let uploadCategory = "Documents"
+      let uploadNote: string | null = null
 
       for await (const part of parts) {
+        if (part.type === "field") {
+          const value = String(part.value ?? "").trim()
+
+          if (part.fieldname === "asset_category" && value) {
+            uploadCategory = value
+          }
+
+          if (part.fieldname === "note") {
+            uploadNote = value || null
+          }
+
+          continue
+        }
+
         const originalName = part.filename || "file"
         const ext = path.extname(originalName)
         const storedName = `${Date.now()}-${randomUUID()}${ext}`
@@ -334,7 +350,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             tenantId,
             numericJobId,
             assetType,
-            String(req.body?.asset_category || "Documents"),
+            uploadCategory,
             "local",
             originalName,
             storedName,
@@ -342,7 +358,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             relativePath,
             mimetype,
             stat.size,
-            String(req.body?.note || "").trim() || null,
+            uploadNote,
             String(user.full_name || user.email || "Team"),
           ]
         )
@@ -366,8 +382,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               mime_type: mimetype,
               file_size_bytes: stat.size,
               uploaded_by: String(user.full_name || user.email || "Team"),
-              asset_category: String(req.body?.asset_category || "Documents"),
-              note: String(req.body?.note || "").trim() || null,
+              asset_category: uploadCategory,
+              note: uploadNote,
             }),
           ]
         )
