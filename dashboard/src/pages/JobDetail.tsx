@@ -18,6 +18,9 @@ export default function JobDetail() {
   const [notes, setNotes] = useState<any[]>([])
   const [files, setFiles] = useState<FileList | null>(null)
   const [fileDescriptions, setFileDescriptions] = useState<Record<number, string>>({})
+  const [editingAssetId, setEditingAssetId] = useState<number | string | null>(null)
+  const [editingAssetNote, setEditingAssetNote] = useState("")
+  const [editingAssetCategory, setEditingAssetCategory] = useState("Documents")
   const [uploadCategory, setUploadCategory] = useState("Documents")
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
@@ -650,6 +653,39 @@ export default function JobDetail() {
       viewingWindow.close()
       errorToast(err?.message || "Open file failed")
     }
+  }
+
+  async function saveAssetMetadata(assetId: number | string) {
+    if (!id) return
+
+    const token = getToken()
+    const res = await fetch(
+      `${API_BASE}/assets/${getTenantSlug()}/job/${id}/file/${assetId}/metadata`,
+      {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          note: editingAssetNote,
+          asset_category: editingAssetCategory,
+        }),
+      }
+    )
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      errorToast(data?.error || "Update file details failed")
+      return
+    }
+
+    setEditingAssetId(null)
+    setEditingAssetNote("")
+    setEditingAssetCategory("Documents")
+    successToast("File details updated")
+    await loadAssets()
   }
 
   async function deleteFile(assetId: number | string) {
@@ -1504,40 +1540,110 @@ export default function JobDetail() {
         ) : (
           assets.map((asset) => (
             <div key={asset.id} style={row}>
-              <div>
-                <strong>
-                  {asset.note ||
-                    asset.original_name ||
-                    asset.file_name ||
-                    "File"}
-                </strong>
+              <div style={{ flex: 1 }}>
+                {String(editingAssetId) === String(asset.id) ? (
+                  <>
+                    <label style={label}>Document Description</label>
+                    <textarea
+                      value={editingAssetNote}
+                      onChange={(e) => setEditingAssetNote(e.target.value)}
+                      style={textarea}
+                      placeholder="Enter a description for this file"
+                    />
 
-                {asset.note ? (
-                  <p>
-                    <strong>Original file:</strong>{" "}
-                    {asset.original_name || asset.file_name || "File"}
-                  </p>
-                ) : null}
+                    <label style={label}>Category</label>
+                    <select
+                      value={editingAssetCategory}
+                      onChange={(e) => setEditingAssetCategory(e.target.value)}
+                      style={input}
+                    >
+                      <option value="Documents">Documents</option>
+                      <option value="Roof">Roof</option>
+                      <option value="Tarp">Tarp</option>
+                      <option value="Repairs">Repairs</option>
+                    </select>
 
-                <p>
-                  <strong>Category:</strong> {asset.asset_category || "Documents"}
-                </p>
+                    <div style={buttonRow}>
+                      <button
+                        onClick={() => saveAssetMetadata(asset.id)}
+                        style={button}
+                      >
+                        Save Details
+                      </button>
 
-                <p>
-                  {asset.mime_type || "file"} —{" "}
-                  {asset.size_bytes ? `${Math.round(Number(asset.size_bytes) / 1024)} KB` : "unknown size"}
-                </p>
-                {asset.download_url || asset.url ? (
-                  <button
-                    onClick={() => openFile(asset)}
-                    style={button}
-                  >
-                    Open File
-                  </button>
-                ) : null}
+                      <button
+                        onClick={() => {
+                          setEditingAssetId(null)
+                          setEditingAssetNote("")
+                          setEditingAssetCategory("Documents")
+                        }}
+                        style={secondaryButton}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <strong>
+                      {asset.note ||
+                        asset.original_name ||
+                        asset.file_name ||
+                        "File"}
+                    </strong>
+
+                    {asset.note ? (
+                      <p>
+                        <strong>Original file:</strong>{" "}
+                        {asset.original_name || asset.file_name || "File"}
+                      </p>
+                    ) : null}
+
+                    <p>
+                      <strong>Category:</strong>{" "}
+                      {asset.asset_category || "Documents"}
+                    </p>
+
+                    <p>
+                      {asset.mime_type || "file"} —{" "}
+                      {asset.size_bytes
+                        ? `${Math.round(Number(asset.size_bytes) / 1024)} KB`
+                        : "unknown size"}
+                    </p>
+
+                    <div style={buttonRow}>
+                      {asset.download_url || asset.url ? (
+                        <button
+                          onClick={() => openFile(asset)}
+                          style={button}
+                        >
+                          Open File
+                        </button>
+                      ) : null}
+
+                      <button
+                        onClick={() => {
+                          setEditingAssetId(asset.id)
+                          setEditingAssetNote(asset.note || "")
+                          setEditingAssetCategory(
+                            asset.asset_category || "Documents"
+                          )
+                        }}
+                        style={button}
+                      >
+                        Edit Description / Category
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
-              <button onClick={() => deleteFile(asset.id)} style={dangerButton}>Delete File</button>
+              <button
+                onClick={() => deleteFile(asset.id)}
+                style={dangerButton}
+              >
+                Delete File
+              </button>
             </div>
           ))
         )}

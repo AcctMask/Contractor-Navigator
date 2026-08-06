@@ -404,6 +404,90 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     }
   })
 
+  app.patch("/assets/:tenantSlug/job/:jobId/file/:assetId/metadata", async (req: any, reply) => {
+    try {
+      await ensureAssetCategoryColumn()
+
+      const { tenantSlug, jobId, assetId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const body = req.body || {}
+      const note = String(body.note || "").trim() || null
+      const assetCategory =
+        String(body.asset_category || "").trim() || "Documents"
+
+      const result = await pool.query(
+        `
+        update job_assets
+           set note = $1,
+               asset_category = $2
+         where tenant_id = $3
+           and job_id = $4
+           and id = $5
+         returning
+           id,
+           note,
+           asset_category
+        `,
+        [
+          note,
+          assetCategory,
+          tenantId,
+          numericJobId,
+          Number(assetId),
+        ]
+      )
+
+      if (!result.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "File not found" }
+      }
+
+      await pool.query(
+        `
+        insert into timeline_events
+          (tenant_id, job_id, kind, message, meta, created_at)
+        values
+          ($1, $2, 'job_asset_metadata_updated', $3, $4::jsonb, now())
+        `,
+        [
+          tenantId,
+          numericJobId,
+          "File description or category updated",
+          JSON.stringify({
+            asset_id: Number(assetId),
+            note,
+            asset_category: assetCategory,
+            updated_by: String(user.full_name || user.email || "Team"),
+          }),
+        ]
+      )
+
+      return {
+        ok: true,
+        asset: result.rows[0],
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || "Update file details failed",
+      }
+    }
+  })
+
   app.delete("/assets/:tenantSlug/job/:jobId/file/:assetId", async (req: any, reply) => {
     try {
       const { tenantSlug, jobId, assetId } = req.params
