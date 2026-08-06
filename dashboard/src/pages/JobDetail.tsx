@@ -17,6 +17,7 @@ export default function JobDetail() {
   const [assets, setAssets] = useState<any[]>([])
   const [notes, setNotes] = useState<any[]>([])
   const [files, setFiles] = useState<FileList | null>(null)
+  const [fileDescriptions, setFileDescriptions] = useState<Record<number, string>>({})
   const [uploadCategory, setUploadCategory] = useState("Documents")
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
@@ -535,36 +536,58 @@ export default function JobDetail() {
     setStatus(`Uploading ${selectedFiles.length} file(s), ${totalMb.toFixed(1)} MB total...`)
 
     try {
-      const formData = new FormData()
-      formData.append("asset_category", uploadCategory)
-      selectedFiles.forEach((file) => formData.append("file", file))
-
       const token = getToken()
-      const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/upload`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
-      })
+      let uploadedCount = 0
 
-      const text = await res.text()
-      let data: any = {}
+      for (const [index, file] of selectedFiles.entries()) {
+        const formData = new FormData()
+        formData.append("asset_category", uploadCategory)
+        formData.append("note", fileDescriptions[index]?.trim() || "")
+        formData.append("file", file)
 
-      try {
-        data = text ? JSON.parse(text) : {}
-      } catch {
-        data = { error: text || "Upload failed without a readable server response" }
-      }
+        setStatus(
+          `Uploading file ${index + 1} of ${selectedFiles.length}: ${file.name}`
+        )
 
-      if (!res.ok || !data.ok) {
-        setStatus("")
-        errorToast(data?.error || `Upload failed with status ${res.status}`)
-        return
+        const res = await fetch(
+          `${API_BASE}/assets/${getTenantSlug()}/job/${id}/upload`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+          }
+        )
+
+        const text = await res.text()
+        let data: any = {}
+
+        try {
+          data = text ? JSON.parse(text) : {}
+        } catch {
+          data = {
+            error:
+              text ||
+              "Upload failed without a readable server response",
+          }
+        }
+
+        if (!res.ok || !data.ok) {
+          setStatus("")
+          errorToast(
+            data?.error ||
+              `Upload failed for ${file.name} with status ${res.status}`
+          )
+          return
+        }
+
+        uploadedCount += data.uploaded?.length || 0
       }
 
       setFiles(null)
-      successToast(`Uploaded ${data.uploaded?.length || 0} file(s) successfully`)
+      setFileDescriptions({})
+      successToast(`Uploaded ${uploadedCount} file(s) successfully`)
       await loadAssets()
     } catch (err: any) {
       setStatus("")
@@ -1410,19 +1433,67 @@ export default function JobDetail() {
         <input
           type="file"
           multiple
-          onChange={(e) => setFiles(e.target.files)}
+          onChange={(e) => {
+            const selected = e.target.files
+            setFiles(selected)
+
+            if (!selected) {
+              setFileDescriptions({})
+              return
+            }
+
+            const initialDescriptions: Record<number, string> = {}
+
+            Array.from(selected).forEach((_, index) => {
+              initialDescriptions[index] = ""
+            })
+
+            setFileDescriptions(initialDescriptions)
+          }}
           style={input}
         />
+
+        {files && files.length > 0 ? (
+          <div style={{ marginBottom: 14 }}>
+            {Array.from(files).map((file, index) => (
+              <div
+                key={`${file.name}-${file.lastModified}-${index}`}
+                style={{
+                  background: "#1f2937",
+                  borderRadius: 10,
+                  padding: 12,
+                  marginBottom: 10,
+                }}
+              >
+                <strong>{file.name}</strong>
+
+                <label style={{ ...label, marginTop: 10 }}>
+                  Document Description
+                </label>
+
+                <textarea
+                  value={fileDescriptions[index] || ""}
+                  onChange={(e) =>
+                    setFileDescriptions((current) => ({
+                      ...current,
+                      [index]: e.target.value,
+                    }))
+                  }
+                  style={textarea}
+                  placeholder="Example: Living room ceiling water damage above fireplace"
+                />
+              </div>
+            ))}
+
+            <p>
+              {files.length} file(s) selected for {uploadCategory}
+            </p>
+          </div>
+        ) : null}
 
         <button onClick={uploadFiles} style={button}>
           Upload Selected Files
         </button>
-
-        {files && files.length > 0 ? (
-          <p>
-            {files.length} file(s) selected for {uploadCategory}
-          </p>
-        ) : null}
       </section>
 
       <section style={card}>
@@ -1434,7 +1505,20 @@ export default function JobDetail() {
           assets.map((asset) => (
             <div key={asset.id} style={row}>
               <div>
-                <strong>{asset.original_name || asset.file_name || "File"}</strong>
+                <strong>
+                  {asset.note ||
+                    asset.original_name ||
+                    asset.file_name ||
+                    "File"}
+                </strong>
+
+                {asset.note ? (
+                  <p>
+                    <strong>Original file:</strong>{" "}
+                    {asset.original_name || asset.file_name || "File"}
+                  </p>
+                ) : null}
+
                 <p>
                   <strong>Category:</strong> {asset.asset_category || "Documents"}
                 </p>

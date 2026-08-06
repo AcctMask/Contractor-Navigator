@@ -342,7 +342,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             relativePath,
             mimetype,
             stat.size,
-            null,
+            String(req.body?.note || "").trim() || null,
             String(user.full_name || user.email || "Team"),
           ]
         )
@@ -367,6 +367,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               file_size_bytes: stat.size,
               uploaded_by: String(user.full_name || user.email || "Team"),
               asset_category: String(req.body?.asset_category || "Documents"),
+              note: String(req.body?.note || "").trim() || null,
             }),
           ]
         )
