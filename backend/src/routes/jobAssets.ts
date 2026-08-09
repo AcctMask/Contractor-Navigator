@@ -8,6 +8,7 @@ import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
 import { getCurrentUserFromToken } from "../services/authService"
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
+import sharp from "sharp"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -182,6 +183,22 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         [tenantId, numericJobId]
       )
 
+      const sequenceResult = await pool.query(
+        `
+        select meta
+        from timeline_events
+        where tenant_id = $1
+          and job_id = $2
+          and kind = 'photo_report_sequence_saved'
+        order by created_at desc, id desc
+        limit 1
+        `,
+        [tenantId, numericJobId]
+      )
+
+      const savedSequence =
+        sequenceResult.rows[0]?.meta?.photo_ids
+
       return {
         ok: true,
         assets: assetsResult.rows.map((asset) => ({
@@ -192,6 +209,9 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           download_url: `/assets/${tenantSlug}/file/${asset.id}`,
         })),
         notes: notesResult.rows,
+        photo_sequence: Array.isArray(savedSequence)
+          ? savedSequence
+          : [],
       }
     } catch (err: any) {
       reply.code(400)
@@ -402,6 +422,131 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       console.error("UPLOAD ERROR:", err)
       reply.code(400)
       return { ok: false, error: err?.message || "Upload failed" }
+    }
+  })
+
+  app.post("/assets/:tenantSlug/job/:jobId/photo-sequence", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const rawPhotoIds = Array.isArray(req.body?.photo_ids)
+        ? req.body.photo_ids
+        : []
+
+      const photoIds = rawPhotoIds.map((value: any) =>
+        Number(value)
+      )
+
+      if (
+        photoIds.length === 0 ||
+        photoIds.some(
+          (value: number) =>
+            !Number.isInteger(value) || value <= 0
+        )
+      ) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: "At least one valid photo is required",
+        }
+      }
+
+      if (new Set(photoIds).size !== photoIds.length) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: "Duplicate photos are not allowed",
+        }
+      }
+
+      const photoResult = await pool.query(
+        `
+        select id
+        from job_assets
+        where tenant_id = $1
+          and job_id = $2
+          and id = any($3::bigint[])
+          and (
+            asset_type = 'photo'
+            or mime_type like 'image/%'
+          )
+        `,
+        [tenantId, numericJobId, photoIds]
+      )
+
+      if (photoResult.rows.length !== photoIds.length) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            "One or more selected photos could not be found on this job",
+        }
+      }
+
+      await pool.query(
+        `
+        insert into timeline_events
+          (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+        values
+          (
+            $1,
+            $2,
+            'photo_report_sequence_saved',
+            $3,
+            $4::jsonb,
+            now()
+          )
+        `,
+        [
+          tenantId,
+          numericJobId,
+          `Photo report sequence saved with ${photoIds.length} photo${photoIds.length === 1 ? "" : "s"}`,
+          JSON.stringify({
+            photo_ids: photoIds,
+            saved_by: String(
+              user.full_name ||
+                user.email ||
+                "Team"
+            ),
+          }),
+        ]
+      )
+
+      return {
+        ok: true,
+        photo_ids: photoIds,
+      }
+    } catch (err: any) {
+      console.error("PHOTO SEQUENCE SAVE ERROR:", err)
+
+      reply.code(400)
+
+      return {
+        ok: false,
+        error:
+          err?.message ||
+          "Photo sequence save failed",
+      }
     }
   })
 
@@ -870,12 +1015,17 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             column *
               (CELL_WIDTH + COLUMN_GAP)
 
-          const bytes = fs.readFileSync(
+          const sourceBytes = fs.readFileSync(
             photo.stored_path
           )
 
+          const orientedBytes = await sharp(sourceBytes)
+            .autoOrient()
+            .jpeg({ quality: 95 })
+            .toBuffer()
+
           const image =
-            await pdfDoc.embedJpg(bytes)
+            await pdfDoc.embedJpg(orientedBytes)
 
           const edit =
             photoEdits.get(Number(photo.id)) || {

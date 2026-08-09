@@ -28,6 +28,7 @@ export default function JobDetail() {
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
   const [photoRotations, setPhotoRotations] = useState<Record<string, number>>({})
   const [photoLocations, setPhotoLocations] = useState<Record<string, string>>({})
+  const [savingPhotoSequence, setSavingPhotoSequence] = useState(false)
   const [generatingPhotoReport, setGeneratingPhotoReport] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
@@ -240,6 +241,18 @@ export default function JobDetail() {
 
     const loadedAssets = data.assets || []
     setAssets(loadedAssets)
+
+    if (Array.isArray(data.photo_sequence)) {
+      const restoredSequence: Record<string, string> = {}
+
+      data.photo_sequence.forEach(
+        (photoId: number | string, index: number) => {
+          restoredSequence[String(photoId)] = String(index + 1)
+        }
+      )
+
+      setPhotoSequences(restoredSequence)
+    }
 
     const recentPhotos = loadedAssets
       .filter(
@@ -667,6 +680,102 @@ export default function JobDetail() {
     } catch (err: any) {
       setStatus("")
       errorToast(err?.message || "Upload failed. Large files may require a stronger upload path.")
+    }
+  }
+
+  async function savePhotoSequence() {
+    if (!id) return
+
+    const photos = assets.filter(
+      (asset: any) =>
+        asset.asset_type === "photo" ||
+        String(asset.mime_type || "").startsWith("image/")
+    )
+
+    const requested: Array<{
+      asset: any
+      sequence: number
+    }> = []
+
+    for (const asset of photos) {
+      const raw = String(
+        photoSequences[String(asset.id)] || ""
+      ).trim()
+
+      if (!raw) continue
+
+      const sequence = Number(raw)
+
+      if (!Number.isInteger(sequence) || sequence <= 0) {
+        errorToast(
+          `Photo Sequence must be a positive whole number. Check ${asset.note || asset.original_name || "the selected photo"}.`
+        )
+        return
+      }
+
+      requested.push({ asset, sequence })
+    }
+
+    if (requested.length === 0) {
+      errorToast("Enter a Photo Sequence for at least one photo")
+      return
+    }
+
+    const duplicateSequences = requested
+      .map((item) => item.sequence)
+      .filter(
+        (sequence, index, all) =>
+          all.indexOf(sequence) !== index
+      )
+
+    if (duplicateSequences.length > 0) {
+      const duplicates = Array.from(
+        new Set(duplicateSequences)
+      ).sort((a, b) => a - b)
+
+      errorToast(
+        `Duplicate Photo Sequence number${duplicates.length === 1 ? "" : "s"}: ${duplicates.join(", ")}`
+      )
+      return
+    }
+
+    requested.sort((a, b) => a.sequence - b.sequence)
+
+    setSavingPhotoSequence(true)
+
+    try {
+      const token = getToken()
+
+      const res = await fetch(
+        `${API_BASE}/assets/${getTenantSlug()}/job/${id}/photo-sequence`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            photo_ids: requested.map((item) =>
+              Number(item.asset.id)
+            ),
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        errorToast(data?.error || "Photo sequence save failed")
+        return
+      }
+
+      successToast(
+        `Saved photo sequence with ${requested.length} photo${requested.length === 1 ? "" : "s"}`
+      )
+    } catch (err: any) {
+      errorToast(err?.message || "Photo sequence save failed")
+    } finally {
+      setSavingPhotoSequence(false)
     }
   }
 
@@ -2115,6 +2224,20 @@ export default function JobDetail() {
                   </p>
 
                   <div style={{ ...buttonRow, marginBottom: 16 }}>
+                    <button
+                      onClick={savePhotoSequence}
+                      disabled={savingPhotoSequence}
+                      style={{
+                        ...button,
+                        fontWeight: 900,
+                        opacity: savingPhotoSequence ? 0.65 : 1,
+                      }}
+                    >
+                      {savingPhotoSequence
+                        ? "Saving Sequence..."
+                        : "Save Sequencing"}
+                    </button>
+
                     <button
                       onClick={generatePhotoReport}
                       disabled={generatingPhotoReport}
