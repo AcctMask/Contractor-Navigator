@@ -623,6 +623,375 @@ async function importReceivedEmailAttachments(params: {
   return outcome
 }
 
+function normalizeFieldPhotoAddress(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\bstreet\b/g, "st")
+    .replace(/\bavenue\b/g, "ave")
+    .replace(/\bboulevard\b/g, "blvd")
+    .replace(/\broad\b/g, "rd")
+    .replace(/\bdrive\b/g, "dr")
+    .replace(/\blane\b/g, "ln")
+    .replace(/\bcourt\b/g, "ct")
+    .replace(/\bcircle\b/g, "cir")
+    .replace(/\bterrace\b/g, "ter")
+    .replace(/\bparkway\b/g, "pkwy")
+    .replace(/\bplace\b/g, "pl")
+    .replace(/[^a-z0-9]+/g, "")
+}
+
+function looksLikeFieldPhotoAddressSubject(
+  subject: string
+): boolean {
+  const value = clean(subject) || ""
+
+  return /^\d+[a-z]?\s+.+\b(?:street|st|avenue|ave|boulevard|blvd|road|rd|drive|dr|lane|ln|court|ct|circle|cir|terrace|ter|parkway|pkwy|place|pl|way|trail|trl|highway|hwy)\b/i.test(
+    value
+  )
+}
+
+function parseFieldPhotoSubject(subject: string) {
+  const value = clean(subject) || ""
+  const parsed = parseUniversalIntake(value)
+
+  const streetMatch = value.match(
+    /^(\d+[a-z]?\s+.+?\b(?:street|st|avenue|ave|boulevard|blvd|road|rd|drive|dr|lane|ln|court|ct|circle|cir|terrace|ter|parkway|pkwy|place|pl|way|trail|trl|highway|hwy)\b)/i
+  )
+
+  return {
+    address1:
+      clean(parsed.address1) ||
+      clean(streetMatch?.[1]),
+    city: clean(parsed.city),
+    state: clean(parsed.state),
+    zip: clean(parsed.zip),
+  }
+}
+
+function isFieldPhotoAttachment(
+  attachment: ResendReceivedAttachment
+): boolean {
+  const contentType = String(
+    attachment.content_type || ""
+  ).toLowerCase()
+
+  const extension = path
+    .extname(attachment.filename || "")
+    .toLowerCase()
+
+  return (
+    contentType === "image/jpeg" ||
+    contentType === "image/jpg" ||
+    extension === ".jpg" ||
+    extension === ".jpeg"
+  )
+}
+
+async function findUniqueFieldPhotoJob(params: {
+  tenantId: number
+  address1: string
+  city?: string | null
+  zip?: string | null
+}) {
+  const result = await pool.query(
+    `
+    select
+      j.id,
+      j.address1,
+      j.city,
+      j.state,
+      j.zip,
+      j.stage,
+      c.full_name as customer_name
+    from jobs j
+    left join customers c
+      on c.id = j.customer_id
+     and c.tenant_id = j.tenant_id
+    where j.tenant_id = $1
+      and nullif(trim(j.address1), '') is not null
+      and coalesce(j.stage, '') not in (
+        'archived',
+        'disqualified',
+        'paid'
+      )
+    order by
+      j.updated_at desc nulls last,
+      j.id desc
+    `,
+    [params.tenantId]
+  )
+
+  const normalizedAddress =
+    normalizeFieldPhotoAddress(params.address1)
+
+  const normalizedCity = String(
+    params.city || ""
+  )
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+
+  const normalizedZip =
+    String(params.zip || "")
+      .replace(/\D/g, "")
+      .slice(0, 5)
+
+  const matches = result.rows.filter((row: any) => {
+    if (
+      normalizeFieldPhotoAddress(row.address1) !==
+      normalizedAddress
+    ) {
+      return false
+    }
+
+    if (normalizedCity) {
+      const rowCity = String(row.city || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "")
+
+      if (rowCity && rowCity !== normalizedCity) {
+        return false
+      }
+    }
+
+    if (normalizedZip) {
+      const rowZip = String(row.zip || "")
+        .replace(/\D/g, "")
+        .slice(0, 5)
+
+      if (rowZip && rowZip !== normalizedZip) {
+        return false
+      }
+    }
+
+    return true
+  })
+
+  return {
+    matches,
+    job:
+      matches.length === 1
+        ? matches[0]
+        : null,
+  }
+}
+
+async function importFieldPhotoAttachments(params: {
+  emailId: string
+  jobId: number
+  sender: string
+}) {
+  const listedAttachments =
+    await listReceivedEmailAttachments(params.emailId)
+
+  const imageAttachments =
+    listedAttachments.filter(
+      (attachment) =>
+        String(
+          attachment.content_disposition || ""
+        ).toLowerCase() !== "inline" &&
+        isFieldPhotoAttachment(attachment)
+    )
+
+  const outcome = {
+    attempted: imageAttachments.length,
+    imported: [] as Array<{
+      attachment_number: number
+      original_filename: string
+      stored_filename: string
+      asset_id: number | string | null
+    }>,
+    failed: [] as Array<{
+      attachment_number: number
+      filename: string
+      error: string
+    }>,
+  }
+
+  for (
+    let index = 0;
+    index < imageAttachments.length;
+    index += 1
+  ) {
+    const attachment = imageAttachments[index]
+    const attachmentNumber = index + 1
+
+    const originalFilename =
+      clean(attachment.filename) ||
+      `field-photo-${attachmentNumber}.jpg`
+
+    try {
+      if (!attachment.download_url) {
+        throw new Error(
+          "Attachment download URL was not supplied"
+        )
+      }
+
+      const downloadResponse = await fetch(
+        attachment.download_url
+      )
+
+      if (!downloadResponse.ok) {
+        throw new Error(
+          `Attachment download failed: ${downloadResponse.status} ${downloadResponse.statusText}`
+        )
+      }
+
+      const fileBuffer = Buffer.from(
+        await downloadResponse.arrayBuffer()
+      )
+
+      const storedFilename =
+        buildAttachmentIdentity(
+          attachmentNumber,
+          originalFilename
+        )
+
+      const uploadedBy =
+        `${params.sender} via Field Photo Email`
+
+      const saved: any =
+        await saveJobAssetByTenantSlug({
+          tenantSlug: TENANT_SLUG,
+          jobId: params.jobId,
+          assetType: "photo_before",
+          originalName: storedFilename,
+          mimeType:
+            attachment.content_type || null,
+          note: [
+            "Imported from Field Photo Email.",
+            `Original filename: ${originalFilename}`,
+          ].join(" "),
+          uploadedBy,
+          fileBuffer,
+        })
+
+      outcome.imported.push({
+        attachment_number: attachmentNumber,
+        original_filename: originalFilename,
+        stored_filename: storedFilename,
+        asset_id: saved?.id || null,
+      })
+    } catch (error: any) {
+      outcome.failed.push({
+        attachment_number: attachmentNumber,
+        filename: originalFilename,
+        error:
+          error?.message ||
+          String(error),
+      })
+    }
+  }
+
+  return outcome
+}
+
+async function sendFieldPhotoReceipt(params: {
+  sender: string
+  success: boolean
+  subjectAddress: string
+  reason?: string | null
+  job?: any
+  importedCount?: number
+  attemptedCount?: number
+}) {
+  const senderRecipient =
+    extractEmailAddress(params.sender)
+
+  const sharedOfficeRecipient =
+    extractEmailAddress(
+      process.env.G2G_GMAIL_TO ||
+      process.env.ALERT_EMAIL_TO ||
+      ""
+    )
+
+  const recipient =
+    senderRecipient ||
+    sharedOfficeRecipient
+
+  if (!recipient) {
+    console.error(
+      "Field photo receipt skipped: no valid sender or office recipient"
+    )
+
+    return {
+      ok: false,
+      skipped: true,
+      reason:
+        "missing_field_photo_receipt_recipient",
+    }
+  }
+
+  const ccRecipient =
+    senderRecipient &&
+    sharedOfficeRecipient &&
+    senderRecipient !== sharedOfficeRecipient
+      ? sharedOfficeRecipient
+      : null
+
+  const symbol =
+    params.success ? "✅" : "❌"
+
+  const headline =
+    params.success
+      ? "Photos Uploaded"
+      : "Photos Not Uploaded"
+
+  const subject =
+    `${symbol} ${headline}: ${params.subjectAddress}`
+
+  const body = params.success
+    ? [
+        `${symbol} Field Photo Upload Complete`,
+        "",
+        `Property: ${
+          params.job?.address1 ||
+          params.subjectAddress
+        }`,
+        params.job?.city
+          ? `City: ${params.job.city}`
+          : null,
+        `Navigator Job: #${params.job?.id}`,
+        params.job?.customer_name
+          ? `Customer: ${params.job.customer_name}`
+          : null,
+        `Photos uploaded: ${Number(
+          params.importedCount || 0
+        )}`,
+        `Sent by: ${
+          senderRecipient ||
+          params.sender ||
+          "Unknown sender"
+        }`,
+        "",
+        "The photos are now available in Navigator.",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : [
+        `${symbol} Field Photos Were Not Uploaded`,
+        "",
+        `Subject / Property: ${params.subjectAddress}`,
+        `Reason: ${
+          params.reason ||
+          "Navigator could not safely identify one existing job."
+        }`,
+        "",
+        "No new Navigator job was created.",
+        "No photos were attached to another job.",
+      ].join("\n")
+
+  return await sendAlertEmail(
+    recipient,
+    subject,
+    body,
+    ccRecipient
+      ? {
+          cc: ccRecipient,
+        }
+      : undefined
+  )
+}
+
 async function retrieveReceivedEmailFromResend(
   email: any
 ) {
@@ -965,7 +1334,10 @@ async function findPreviouslyProcessedEmail(
       select job_id
       from timeline_events
       where tenant_id = $1
-        and kind = 'business_development_intake'
+        and kind in (
+          'business_development_intake',
+          'field_photo_email_import'
+        )
         and meta ->> 'external_reference' = $2
       order by id desc
       limit 1
@@ -1142,6 +1514,262 @@ export async function registerSalesEmailIntakeRoutes(
               ok: true,
               duplicate: true,
               job_id: priorJobId,
+            }
+          }
+        }
+
+        const senderEmail =
+          extractEmailAddress(
+            parsedPayload.from
+          )
+
+        const fieldPhotoSubject =
+          looksLikeFieldPhotoAddressSubject(
+            parsedPayload.subject
+          )
+
+        if (
+          senderEmail &&
+          isInternalG2GEmail(senderEmail) &&
+          fieldPhotoSubject
+        ) {
+          const emailId =
+            extractReceivedEmailId(
+              receivedEmail ||
+              initialPayload.raw
+            )
+
+          if (emailId) {
+            let listedAttachments:
+              ResendReceivedAttachment[] = []
+
+            try {
+              listedAttachments =
+                await listReceivedEmailAttachments(
+                  emailId
+                )
+            } catch (error: any) {
+              await sendFieldPhotoReceipt({
+                sender: parsedPayload.from,
+                success: false,
+                subjectAddress:
+                  parsedPayload.subject,
+                reason:
+                  `Navigator could not read the attached photos: ${
+                    error?.message ||
+                    String(error)
+                  }`,
+              })
+
+              return {
+                ok: true,
+                field_photo_upload: true,
+                success: false,
+                reason:
+                  "attachment_list_failed",
+              }
+            }
+
+            const fieldPhotos =
+              listedAttachments.filter(
+                (attachment) =>
+                  String(
+                    attachment.content_disposition ||
+                    ""
+                  ).toLowerCase() !== "inline" &&
+                  isFieldPhotoAttachment(
+                    attachment
+                  )
+              )
+
+            if (fieldPhotos.length > 0) {
+              const subjectProperty =
+                parseFieldPhotoSubject(
+                  parsedPayload.subject
+                )
+
+              if (!subjectProperty.address1) {
+                await sendFieldPhotoReceipt({
+                  sender: parsedPayload.from,
+                  success: false,
+                  subjectAddress:
+                    parsedPayload.subject,
+                  reason:
+                    "Navigator could not identify a property address from the subject line.",
+                })
+
+                return {
+                  ok: true,
+                  field_photo_upload: true,
+                  success: false,
+                  reason:
+                    "subject_address_not_parsed",
+                }
+              }
+
+              const matchResult =
+                await findUniqueFieldPhotoJob({
+                  tenantId,
+                  address1:
+                    subjectProperty.address1,
+                  city:
+                    subjectProperty.city,
+                  zip:
+                    subjectProperty.zip,
+                })
+
+              if (!matchResult.job) {
+                const reason =
+                  matchResult.matches.length === 0
+                    ? "No existing active Navigator job matched that address."
+                    : `More than one active Navigator job matched that address (${matchResult.matches.length} matches).`
+
+                await sendFieldPhotoReceipt({
+                  sender: parsedPayload.from,
+                  success: false,
+                  subjectAddress:
+                    parsedPayload.subject,
+                  reason,
+                })
+
+                console.warn(
+                  "FIELD_PHOTO_EMAIL_NOT_MATCHED",
+                  JSON.stringify({
+                    subject:
+                      parsedPayload.subject,
+                    sender: senderEmail,
+                    match_count:
+                      matchResult.matches.length,
+                  })
+                )
+
+                return {
+                  ok: true,
+                  field_photo_upload: true,
+                  success: false,
+                  reason:
+                    matchResult.matches.length === 0
+                      ? "no_existing_job_match"
+                      : "ambiguous_existing_job_match",
+                  match_count:
+                    matchResult.matches.length,
+                }
+              }
+
+              const job =
+                matchResult.job
+
+              const importResult =
+                await importFieldPhotoAttachments({
+                  emailId,
+                  jobId:
+                    Number(job.id),
+                  sender:
+                    senderEmail,
+                })
+
+              const complete =
+                importResult.attempted > 0 &&
+                importResult.imported.length ===
+                  importResult.attempted &&
+                importResult.failed.length === 0
+
+              await pool.query(
+                `
+                insert into timeline_events
+                  (
+                    tenant_id,
+                    job_id,
+                    kind,
+                    message,
+                    meta,
+                    created_at
+                  )
+                values
+                  (
+                    $1,
+                    $2,
+                    'field_photo_email_import',
+                    $3,
+                    $4::jsonb,
+                    now()
+                  )
+                `,
+                [
+                  tenantId,
+                  Number(job.id),
+                  complete
+                    ? `Field photos uploaded by email: ${importResult.imported.length} photo${importResult.imported.length === 1 ? "" : "s"}`
+                    : `Field photo email partially processed: ${importResult.imported.length} uploaded, ${importResult.failed.length} failed`,
+                  JSON.stringify({
+                    external_reference:
+                      externalReference,
+                    sender:
+                      senderEmail,
+                    subject:
+                      parsedPayload.subject,
+                    attempted:
+                      importResult.attempted,
+                    imported:
+                      importResult.imported.length,
+                    failed:
+                      importResult.failed.length,
+                  }),
+                ]
+              )
+
+              await sendFieldPhotoReceipt({
+                sender:
+                  parsedPayload.from,
+                success:
+                  complete,
+                subjectAddress:
+                  parsedPayload.subject,
+                job,
+                importedCount:
+                  importResult.imported.length,
+                attemptedCount:
+                  importResult.attempted,
+                reason:
+                  complete
+                    ? null
+                    : `${importResult.imported.length} photo(s) uploaded and ${importResult.failed.length} failed. Office review is required.`,
+              })
+
+              console.log(
+                complete
+                  ? "✅ FIELD_PHOTO_EMAIL_COMPLETE"
+                  : "❌ FIELD_PHOTO_EMAIL_INCOMPLETE",
+                JSON.stringify({
+                  job_id:
+                    Number(job.id),
+                  subject:
+                    parsedPayload.subject,
+                  sender:
+                    senderEmail,
+                  attempted:
+                    importResult.attempted,
+                  imported:
+                    importResult.imported.length,
+                  failed:
+                    importResult.failed.length,
+                })
+              )
+
+              return {
+                ok: true,
+                field_photo_upload: true,
+                success:
+                  complete,
+                job_id:
+                  Number(job.id),
+                attempted:
+                  importResult.attempted,
+                imported:
+                  importResult.imported.length,
+                failed:
+                  importResult.failed.length,
+              }
             }
           }
         }
