@@ -26,6 +26,8 @@ export default function JobDetail() {
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
+  const [photoRotations, setPhotoRotations] = useState<Record<string, number>>({})
+  const [photoLocations, setPhotoLocations] = useState<Record<string, string>>({})
   const [generatingPhotoReport, setGeneratingPhotoReport] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
@@ -741,6 +743,11 @@ export default function JobDetail() {
             photo_ids: requested.map((item) =>
               Number(item.asset.id)
             ),
+            photo_edits: requested.map((item) => ({
+              photo_id: Number(item.asset.id),
+              rotation: photoRotations[String(item.asset.id)] || 0,
+              location: photoLocations[String(item.asset.id)] || "",
+            })),
           }),
         }
       )
@@ -757,6 +764,8 @@ export default function JobDetail() {
       )
 
       setPhotoSequences({})
+      setPhotoRotations({})
+      setPhotoLocations({})
       await loadAssets()
     } catch (err: any) {
       errorToast(err?.message || "Photo report generation failed")
@@ -1775,6 +1784,97 @@ export default function JobDetail() {
               </div>
             ) : null}
 
+            {workspace ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPhotoRotations((current) => ({
+                      ...current,
+                      [String(asset.id)]:
+                        ((current[String(asset.id)] || 0) + 270) % 360,
+                    }))
+                  }
+                  style={secondaryButton}
+                >
+                  Rotate Left
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPhotoRotations((current) => ({
+                      ...current,
+                      [String(asset.id)]:
+                        ((current[String(asset.id)] || 0) + 90) % 360,
+                    }))
+                  }
+                  style={secondaryButton}
+                >
+                  Rotate Right
+                </button>
+
+                <label
+                  htmlFor={`photo-location-${asset.id}`}
+                  style={{ fontWeight: 800 }}
+                >
+                  Location in Photo
+                </label>
+
+                <select
+                  id={`photo-location-${asset.id}`}
+                  value={photoLocations[String(asset.id)] || ""}
+                  onChange={(e) =>
+                    setPhotoLocations((current) => ({
+                      ...current,
+                      [String(asset.id)]: e.target.value,
+                    }))
+                  }
+                  style={{
+                    ...input,
+                    width: "auto",
+                    minWidth: 170,
+                    margin: 0,
+                  }}
+                >
+                  <option value="">Not specified</option>
+                  <option value="Upper left">Upper left</option>
+                  <option value="Upper right">Upper right</option>
+                  <option value="Center">Center</option>
+                  <option value="Lower left">Lower left</option>
+                  <option value="Lower right">Lower right</option>
+                </select>
+
+                {(photoRotations[String(asset.id)] ||
+                  photoLocations[String(asset.id)]) ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoRotations((current) => ({
+                        ...current,
+                        [String(asset.id)]: 0,
+                      }))
+                      setPhotoLocations((current) => ({
+                        ...current,
+                        [String(asset.id)]: "",
+                      }))
+                    }}
+                    style={secondaryButton}
+                  >
+                    Reset Photo Options
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={() => openFile(asset)}
@@ -1790,7 +1890,11 @@ export default function JobDetail() {
                     asset.file_name ||
                     "Job photo"
                   }
-                  style={photoPreviewImage}
+                  style={{
+                    ...photoPreviewImage,
+                    transform: `rotate(${photoRotations[String(asset.id)] || 0}deg)`,
+                    transition: "transform 160ms ease",
+                  }}
                 />
               ) : (
                 <div style={photoPreviewPlaceholder}>

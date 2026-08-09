@@ -7,7 +7,7 @@ import { pipeline } from "stream/promises"
 import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
 import { getCurrentUserFromToken } from "../services/authService"
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib"
+import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -432,6 +432,59 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         Number(value)
       )
 
+      const allowedLocations = new Set([
+        "",
+        "Upper left",
+        "Upper right",
+        "Center",
+        "Lower left",
+        "Lower right",
+      ])
+
+      const rawPhotoEdits = Array.isArray(req.body?.photo_edits)
+        ? req.body.photo_edits
+        : []
+
+      const photoEdits = new Map<
+        number,
+        { rotation: number; location: string }
+      >()
+
+      for (const edit of rawPhotoEdits) {
+        const photoId = Number(edit?.photo_id)
+        const rotation = Number(edit?.rotation || 0)
+        const location = String(edit?.location || "").trim()
+
+        if (!Number.isInteger(photoId) || photoId <= 0) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Invalid photo edit identifier",
+          }
+        }
+
+        if (![0, 90, 180, 270].includes(rotation)) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Photo rotation must be 0, 90, 180, or 270 degrees",
+          }
+        }
+
+        if (!allowedLocations.has(location)) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Invalid Location in Photo value",
+          }
+        }
+
+        photoEdits.set(photoId, {
+          rotation,
+          location,
+        })
+      }
+
       if (
         photoIds.length === 0 ||
         photoIds.some(
@@ -750,10 +803,15 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           )
         )
 
+        const pairLocations = pair.map((photo: any) =>
+          photoEdits.get(Number(photo.id))?.location || ""
+        )
+
         const maxCaptionLines = Math.max(
           1,
           ...pairCaptions.map(
-            (lines: string[]) => lines.length
+            (lines: string[], index: number) =>
+              lines.length + (pairLocations[index] ? 1 : 0)
           )
         )
 
@@ -819,31 +877,69 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           const image =
             await pdfDoc.embedJpg(bytes)
 
-          const naturalWidth = image.width
-          const naturalHeight = image.height
+          const edit =
+            photoEdits.get(Number(photo.id)) || {
+              rotation: 0,
+              location: "",
+            }
+
+          const clockwiseRotation = edit.rotation
+          const rotated =
+            clockwiseRotation === 90 ||
+            clockwiseRotation === 270
+
+          const naturalBoxWidth = rotated
+            ? image.height
+            : image.width
+
+          const naturalBoxHeight = rotated
+            ? image.width
+            : image.height
 
           const scale = Math.min(
-            CELL_WIDTH / naturalWidth,
-            imageHeight / naturalHeight
+            CELL_WIDTH / naturalBoxWidth,
+            imageHeight / naturalBoxHeight
           )
 
-          const drawWidth =
-            naturalWidth * scale
-          const drawHeight =
-            naturalHeight * scale
+          const rawWidth = image.width * scale
+          const rawHeight = image.height * scale
 
-          const imageX =
+          const boxWidth = rotated
+            ? rawHeight
+            : rawWidth
+
+          const boxHeight = rotated
+            ? rawWidth
+            : rawHeight
+
+          const boxX =
             cellX +
-            (CELL_WIDTH - drawWidth) / 2
+            (CELL_WIDTH - boxWidth) / 2
 
-          const imageY =
-            currentY - drawHeight
+          const boxY =
+            currentY - boxHeight
+
+          const pdfRotation =
+            (360 - clockwiseRotation) % 360
+
+          let imageX = boxX
+          let imageY = boxY
+
+          if (pdfRotation === 90) {
+            imageX = boxX + rawHeight
+          } else if (pdfRotation === 180) {
+            imageX = boxX + rawWidth
+            imageY = boxY + rawHeight
+          } else if (pdfRotation === 270) {
+            imageY = boxY + rawWidth
+          }
 
           page.drawImage(image, {
             x: imageX,
             y: imageY,
-            width: drawWidth,
-            height: drawHeight,
+            width: rawWidth,
+            height: rawHeight,
+            rotate: degrees(pdfRotation),
           })
 
           const photoNumber =
@@ -894,6 +990,30 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               })
             }
           )
+
+          const location =
+            photoEdits.get(Number(photo.id))?.location || ""
+
+          if (location) {
+            page.drawText(
+              `Location in Photo: ${location}`,
+              {
+                x: cellX,
+                y:
+                  captionY -
+                  11 -
+                  captionLines.length *
+                    CAPTION_LINE_HEIGHT,
+                size: 7.4,
+                font: boldFont,
+                color: rgb(
+                  0.15,
+                  0.18,
+                  0.22
+                ),
+              }
+            )
+          }
         }
 
         currentY -= rowHeight + ROW_GAP
