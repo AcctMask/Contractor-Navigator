@@ -679,12 +679,32 @@ function isFieldPhotoAttachment(
     .extname(attachment.filename || "")
     .toLowerCase()
 
-  return (
+  const isJpeg =
     contentType === "image/jpeg" ||
     contentType === "image/jpg" ||
     extension === ".jpg" ||
     extension === ".jpeg"
+
+  if (!isJpeg) {
+    return false
+  }
+
+  const disposition = String(
+    attachment.content_disposition || ""
+  ).toLowerCase()
+
+  const size = Number(
+    attachment.size || 0
   )
+
+  if (
+    disposition === "inline" &&
+    size < 50_000
+  ) {
+    return false
+  }
+
+  return true
 }
 
 async function findUniqueFieldPhotoJob(params: {
@@ -786,9 +806,6 @@ async function importFieldPhotoAttachments(params: {
   const imageAttachments =
     listedAttachments.filter(
       (attachment) =>
-        String(
-          attachment.content_disposition || ""
-        ).toLowerCase() !== "inline" &&
         isFieldPhotoAttachment(attachment)
     )
 
@@ -1573,10 +1590,6 @@ export async function registerSalesEmailIntakeRoutes(
             const fieldPhotos =
               listedAttachments.filter(
                 (attachment) =>
-                  String(
-                    attachment.content_disposition ||
-                    ""
-                  ).toLowerCase() !== "inline" &&
                   isFieldPhotoAttachment(
                     attachment
                   )
