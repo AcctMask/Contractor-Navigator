@@ -22,6 +22,10 @@ export default function JobDetail() {
   const [editingAssetNote, setEditingAssetNote] = useState("")
   const [editingAssetCategory, setEditingAssetCategory] = useState("Documents")
   const [uploadCategory, setUploadCategory] = useState("Documents")
+  const [showAllPhotos, setShowAllPhotos] = useState(false)
+  const [showAllDocuments, setShowAllDocuments] = useState(false)
+  const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
+  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
   const [stage, setStage] = useState("lead")
@@ -161,6 +165,60 @@ export default function JobDetail() {
     await loadJob()
   }
 
+  async function loadPhotoPreviews(photoAssets: any[]) {
+    const token = getToken()
+
+    const missingPhotos = photoAssets.filter(
+      (asset) => !photoPreviewUrls[String(asset.id)]
+    )
+
+    if (missingPhotos.length === 0) return
+
+    const loaded = await Promise.all(
+      missingPhotos.map(async (asset) => {
+        try {
+          const assetUrl = asset.download_url
+            ? `${API_BASE}${asset.download_url}`
+            : asset.url
+
+          if (!assetUrl) return null
+
+          const res = await fetch(assetUrl, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          })
+
+          if (!res.ok) return null
+
+          const blob = await res.blob()
+
+          if (!blob.type.startsWith("image/")) return null
+
+          return [String(asset.id), URL.createObjectURL(blob)] as const
+        } catch {
+          return null
+        }
+      })
+    )
+
+    const validEntries = loaded.filter(
+      (entry): entry is readonly [string, string] => Boolean(entry)
+    )
+
+    if (validEntries.length === 0) return
+
+    setPhotoPreviewUrls((current) => {
+      const next = { ...current }
+
+      validEntries.forEach(([assetId, url]) => {
+        next[assetId] = url
+      })
+
+      return next
+    })
+  }
+
   async function loadAssets() {
     if (!id) return
 
@@ -177,7 +235,18 @@ export default function JobDetail() {
       return
     }
 
-    setAssets(data.assets || [])
+    const loadedAssets = data.assets || []
+    setAssets(loadedAssets)
+
+    const recentPhotos = loadedAssets
+      .filter(
+        (asset: any) =>
+          asset.asset_type === "photo" ||
+          String(asset.mime_type || "").startsWith("image/")
+      )
+      .slice(0, 3)
+
+    await loadPhotoPreviews(recentPhotos)
   }
 
   function setField(field: string, value: string) {
@@ -725,6 +794,18 @@ export default function JobDetail() {
   useEffect(() => {
     loadJob()
   }, [id])
+
+  useEffect(() => {
+    if (!showAllPhotos) return
+
+    const photos = assets.filter(
+      (asset: any) =>
+        asset.asset_type === "photo" ||
+        String(asset.mime_type || "").startsWith("image/")
+    )
+
+    void loadPhotoPreviews(photos)
+  }, [showAllPhotos, assets])
 
   useEffect(() => {
     if (!currentUser) {
@@ -1532,122 +1613,356 @@ export default function JobDetail() {
         </button>
       </section>
 
-      <section style={card}>
-        <h2>Files / Photos</h2>
+      {(() => {
+        const photos = assets.filter(
+          (asset: any) =>
+            asset.asset_type === "photo" ||
+            String(asset.mime_type || "").startsWith("image/")
+        )
 
-        {assets.length === 0 ? (
-          <p>No files uploaded yet.</p>
-        ) : (
-          assets.map((asset) => (
-            <div key={asset.id} style={row}>
-              <div style={{ flex: 1 }}>
-                {String(editingAssetId) === String(asset.id) ? (
-                  <>
-                    <label style={label}>Document Description</label>
-                    <textarea
-                      value={editingAssetNote}
-                      onChange={(e) => setEditingAssetNote(e.target.value)}
-                      style={textarea}
-                      placeholder="Enter a description for this file"
-                    />
+        const documents = assets.filter(
+          (asset: any) =>
+            !(
+              asset.asset_type === "photo" ||
+              String(asset.mime_type || "").startsWith("image/")
+            )
+        )
 
-                    <label style={label}>Category</label>
-                    <select
-                      value={editingAssetCategory}
-                      onChange={(e) => setEditingAssetCategory(e.target.value)}
-                      style={input}
+        const formatUploadDate = (value: any) => {
+          if (!value) return "Unknown upload time"
+
+          const date = new Date(value)
+
+          if (Number.isNaN(date.getTime())) {
+            return "Unknown upload time"
+          }
+
+          return date.toLocaleString()
+        }
+
+        const beginDescriptionEdit = (asset: any) => {
+          setEditingAssetId(asset.id)
+          setEditingAssetNote(asset.note || "")
+          setEditingAssetCategory(asset.asset_category || "Documents")
+        }
+
+        const renderPhoto = (asset: any, workspace = false) => (
+          <div key={asset.id} style={photoCard}>
+            {workspace ? (
+              <div style={photoSequenceRow}>
+                <label
+                  htmlFor={`photo-sequence-${asset.id}`}
+                  style={{ fontWeight: 800 }}
+                >
+                  Photo Sequence
+                </label>
+
+                <input
+                  id={`photo-sequence-${asset.id}`}
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={photoSequences[String(asset.id)] || ""}
+                  onChange={(e) => {
+                    const value = e.target.value
+
+                    setPhotoSequences((current) => ({
+                      ...current,
+                      [String(asset.id)]: value,
+                    }))
+                  }}
+                  placeholder="Blank = exclude"
+                  style={photoSequenceInput}
+                />
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => openFile(asset)}
+              style={photoPreviewButton}
+              title="Open full size"
+            >
+              {photoPreviewUrls[String(asset.id)] ? (
+                <img
+                  src={photoPreviewUrls[String(asset.id)]}
+                  alt={
+                    asset.note ||
+                    asset.original_name ||
+                    asset.file_name ||
+                    "Job photo"
+                  }
+                  style={photoPreviewImage}
+                />
+              ) : (
+                <div style={photoPreviewPlaceholder}>
+                  Loading photo...
+                </div>
+              )}
+            </button>
+
+            {String(editingAssetId) === String(asset.id) ? (
+              <>
+                <label style={{ ...label, marginTop: 12 }}>
+                  Description
+                </label>
+
+                <textarea
+                  value={editingAssetNote}
+                  onChange={(e) => setEditingAssetNote(e.target.value)}
+                  style={textarea}
+                  placeholder="Enter a description for this photo"
+                />
+
+                <div style={buttonRow}>
+                  <button
+                    onClick={() => saveAssetMetadata(asset.id)}
+                    style={button}
+                  >
+                    Save Description
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setEditingAssetId(null)
+                      setEditingAssetNote("")
+                      setEditingAssetCategory("Documents")
+                    }}
+                    style={secondaryButton}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={photoDescription}>
+                  <strong>Description:</strong>{" "}
+                  {asset.note || "No description"}
+                </p>
+
+                <p style={photoMeta}>
+                  <strong>Category:</strong>{" "}
+                  {asset.asset_category || "Documents"}
+                </p>
+
+                <p style={photoMeta}>
+                  <strong>Uploaded by:</strong>{" "}
+                  {asset.uploaded_by || "Unknown"} —{" "}
+                  {formatUploadDate(asset.created_at)}
+                </p>
+
+                <div style={buttonRow}>
+                  {workspace ? (
+                    <button
+                      onClick={() => beginDescriptionEdit(asset)}
+                      style={button}
                     >
-                      <option value="Documents">Documents</option>
-                      <option value="Roof">Roof</option>
-                      <option value="Tarp">Tarp</option>
-                      <option value="Repairs">Repairs</option>
-                    </select>
+                      Edit Description
+                    </button>
+                  ) : null}
 
-                    <div style={buttonRow}>
-                      <button
-                        onClick={() => saveAssetMetadata(asset.id)}
-                        style={button}
-                      >
-                        Save Details
-                      </button>
+                  <button
+                    onClick={() => openFile(asset)}
+                    style={button}
+                  >
+                    Open Full Size
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )
 
-                      <button
-                        onClick={() => {
-                          setEditingAssetId(null)
-                          setEditingAssetNote("")
-                          setEditingAssetCategory("Documents")
-                        }}
-                        style={secondaryButton}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <strong>
-                      {asset.note ||
-                        asset.original_name ||
+        const renderDocument = (asset: any) => (
+          <div key={asset.id} style={documentRow}>
+            <div style={{ flex: 1 }}>
+              {String(editingAssetId) === String(asset.id) ? (
+                <>
+                  <label style={label}>Document Description</label>
+                  <textarea
+                    value={editingAssetNote}
+                    onChange={(e) => setEditingAssetNote(e.target.value)}
+                    style={textarea}
+                    placeholder="Enter a description for this file"
+                  />
+
+                  <label style={label}>Category</label>
+                  <select
+                    value={editingAssetCategory}
+                    onChange={(e) =>
+                      setEditingAssetCategory(e.target.value)
+                    }
+                    style={input}
+                  >
+                    <option value="Documents">Documents</option>
+                    <option value="Roof">Roof</option>
+                    <option value="Tarp">Tarp</option>
+                    <option value="Repairs">Repairs</option>
+                  </select>
+
+                  <div style={buttonRow}>
+                    <button
+                      onClick={() => saveAssetMetadata(asset.id)}
+                      style={button}
+                    >
+                      Save Details
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setEditingAssetId(null)
+                        setEditingAssetNote("")
+                        setEditingAssetCategory("Documents")
+                      }}
+                      style={secondaryButton}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <strong>
+                    {asset.note ||
+                      asset.original_name ||
+                      asset.file_name ||
+                      "Document"}
+                  </strong>
+
+                  {asset.note ? (
+                    <p style={photoMeta}>
+                      <strong>Original file:</strong>{" "}
+                      {asset.original_name ||
                         asset.file_name ||
-                        "File"}
-                    </strong>
-
-                    {asset.note ? (
-                      <p>
-                        <strong>Original file:</strong>{" "}
-                        {asset.original_name || asset.file_name || "File"}
-                      </p>
-                    ) : null}
-
-                    <p>
-                      <strong>Category:</strong>{" "}
-                      {asset.asset_category || "Documents"}
+                        "Document"}
                     </p>
+                  ) : null}
 
-                    <p>
-                      {asset.mime_type || "file"} —{" "}
-                      {asset.size_bytes
-                        ? `${Math.round(Number(asset.size_bytes) / 1024)} KB`
-                        : "unknown size"}
-                    </p>
+                  <p style={photoMeta}>
+                    <strong>Category:</strong>{" "}
+                    {asset.asset_category || "Documents"}
+                  </p>
 
-                    <div style={buttonRow}>
-                      {asset.download_url || asset.url ? (
-                        <button
-                          onClick={() => openFile(asset)}
-                          style={button}
-                        >
-                          Open File
-                        </button>
-                      ) : null}
+                  <p style={photoMeta}>
+                    <strong>Uploaded by:</strong>{" "}
+                    {asset.uploaded_by || "Unknown"} —{" "}
+                    {formatUploadDate(asset.created_at)}
+                  </p>
 
+                  <div style={buttonRow}>
+                    <button
+                      onClick={() => openFile(asset)}
+                      style={button}
+                    >
+                      Open Document
+                    </button>
+
+                    {showAllDocuments ? (
                       <button
-                        onClick={() => {
-                          setEditingAssetId(asset.id)
-                          setEditingAssetNote(asset.note || "")
-                          setEditingAssetCategory(
-                            asset.asset_category || "Documents"
-                          )
-                        }}
+                        onClick={() => beginDescriptionEdit(asset)}
                         style={button}
                       >
                         Edit Description / Category
                       </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
 
+            {showAllDocuments ? (
               <button
                 onClick={() => deleteFile(asset.id)}
                 style={dangerButton}
               >
                 Delete File
               </button>
-            </div>
-          ))
-        )}
-      </section>
+            ) : null}
+          </div>
+        )
+
+        return (
+          <>
+            <section style={card}>
+              <div style={sectionHeader}>
+                <div>
+                  <h2 style={{ marginBottom: 4 }}>Photos</h2>
+                  <div style={sectionCount}>
+                    {photos.length} photo{photos.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+
+                {photos.length > 3 || showAllPhotos ? (
+                  <button
+                    onClick={() => setShowAllPhotos((current) => !current)}
+                    style={button}
+                  >
+                    {showAllPhotos ? "Show Recent Photos" : "View All Photos"}
+                  </button>
+                ) : null}
+              </div>
+
+              {photos.length === 0 ? (
+                <p>No photos uploaded yet.</p>
+              ) : showAllPhotos ? (
+                <>
+                  <p style={{ opacity: 0.8 }}>
+                    Enter a Photo Sequence only for photos you want in the
+                    future photo report. Leave it blank to exclude a photo.
+                  </p>
+
+                  <div style={photoGrid}>
+                    {photos.map((asset: any) =>
+                      renderPhoto(asset, true)
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={recentPhotoGrid}>
+                  {photos
+                    .slice(0, 3)
+                    .map((asset: any) => renderPhoto(asset, false))}
+                </div>
+              )}
+            </section>
+
+            <section style={card}>
+              <div style={sectionHeader}>
+                <div>
+                  <h2 style={{ marginBottom: 4 }}>Documents</h2>
+                  <div style={sectionCount}>
+                    {documents.length} document
+                    {documents.length === 1 ? "" : "s"}
+                  </div>
+                </div>
+
+                {documents.length > 3 || showAllDocuments ? (
+                  <button
+                    onClick={() =>
+                      setShowAllDocuments((current) => !current)
+                    }
+                    style={button}
+                  >
+                    {showAllDocuments
+                      ? "Show Recent Documents"
+                      : "View All Documents"}
+                  </button>
+                ) : null}
+              </div>
+
+              {documents.length === 0 ? (
+                <p>No documents uploaded yet.</p>
+              ) : (
+                (showAllDocuments
+                  ? documents
+                  : documents.slice(0, 3)
+                ).map((asset: any) => renderDocument(asset))
+              )}
+            </section>
+          </>
+        )
+      })()}
     </div>
   )
 }
@@ -1656,6 +1971,95 @@ const page: CSSProperties = { padding: 20, maxWidth: 1100, margin: "0 auto" }
 const card: CSSProperties = { background: "#111827", color: "white", borderRadius: 14, padding: 20, marginBottom: 20 }
 const sectionHeader: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }
 const row: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 20, background: "#1f2937", borderRadius: 10, padding: 14, marginBottom: 10 }
+
+const photoGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 18,
+  alignItems: "start",
+}
+
+const recentPhotoGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: 14,
+  alignItems: "start",
+}
+
+const photoCard: CSSProperties = {
+  background: "#1f2937",
+  borderRadius: 12,
+  padding: 12,
+  minWidth: 0,
+}
+
+const photoPreviewButton: CSSProperties = {
+  display: "block",
+  width: "100%",
+  border: "none",
+  padding: 0,
+  background: "#0b1220",
+  borderRadius: 10,
+  overflow: "hidden",
+  cursor: "pointer",
+}
+
+const photoPreviewImage: CSSProperties = {
+  display: "block",
+  width: "100%",
+  height: 280,
+  objectFit: "contain",
+  background: "#0b1220",
+}
+
+const photoPreviewPlaceholder: CSSProperties = {
+  height: 280,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  color: "#cbd5e1",
+}
+
+const photoSequenceRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  marginBottom: 10,
+}
+
+const photoSequenceInput: CSSProperties = {
+  width: 140,
+  padding: 9,
+  fontSize: 15,
+}
+
+const photoDescription: CSSProperties = {
+  whiteSpace: "pre-wrap",
+  lineHeight: 1.45,
+  marginBottom: 8,
+}
+
+const photoMeta: CSSProperties = {
+  margin: "6px 0",
+  opacity: 0.9,
+}
+
+const documentRow: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 20,
+  background: "#1f2937",
+  borderRadius: 10,
+  padding: 14,
+  marginBottom: 10,
+}
+
+const sectionCount: CSSProperties = {
+  fontSize: 13,
+  opacity: 0.72,
+}
+
 const badge: CSSProperties = {
   display: "inline-block",
   padding: "4px 9px",
