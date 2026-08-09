@@ -7,6 +7,7 @@ import { pipeline } from "stream/promises"
 import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
 import { getCurrentUserFromToken } from "../services/authService"
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -401,6 +402,663 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       console.error("UPLOAD ERROR:", err)
       reply.code(400)
       return { ok: false, error: err?.message || "Upload failed" }
+    }
+  })
+
+  app.post("/assets/:tenantSlug/job/:jobId/photo-report", async (req: any, reply) => {
+    try {
+      await ensureAssetCategoryColumn()
+
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const rawPhotoIds = Array.isArray(req.body?.photo_ids)
+        ? req.body.photo_ids
+        : []
+
+      const photoIds = rawPhotoIds.map((value: any) =>
+        Number(value)
+      )
+
+      if (
+        photoIds.length === 0 ||
+        photoIds.some(
+          (value: number) =>
+            !Number.isInteger(value) || value <= 0
+        )
+      ) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: "At least one valid photo is required",
+        }
+      }
+
+      if (new Set(photoIds).size !== photoIds.length) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: "Duplicate photos are not allowed",
+        }
+      }
+
+      const jobResult = await pool.query(
+        `
+        select
+          j.id,
+          j.address1,
+          j.city,
+          j.state,
+          j.zip,
+          j.carrier,
+          j.claim_number,
+          j.policy_holder,
+          j.adjuster_name,
+          j.adjuster_phone,
+          j.adjuster_email,
+          c.full_name as customer_name,
+          coalesce(
+            nullif(to_jsonb(t)->>'name', ''),
+            nullif(to_jsonb(t)->>'display_name', ''),
+            $3
+          ) as company_name
+        from jobs j
+        left join customers c
+          on c.id = j.customer_id
+         and c.tenant_id = j.tenant_id
+        join tenants t
+          on t.id = j.tenant_id
+        where j.tenant_id = $1
+          and j.id = $2
+        limit 1
+        `,
+        [tenantId, numericJobId, tenantSlug]
+      )
+
+      if (!jobResult.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Job not found" }
+      }
+
+      const photoResult = await pool.query(
+        `
+        select
+          id,
+          original_name,
+          stored_path,
+          mime_type,
+          note
+        from job_assets
+        where tenant_id = $1
+          and job_id = $2
+          and id = any($3::bigint[])
+        `,
+        [tenantId, numericJobId, photoIds]
+      )
+
+      if (photoResult.rows.length !== photoIds.length) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            "One or more selected photos could not be found on this job",
+        }
+      }
+
+      const photosById = new Map(
+        photoResult.rows.map((row: any) => [
+          Number(row.id),
+          row,
+        ])
+      )
+
+      const orderedPhotos = photoIds.map((photoId: number) =>
+        photosById.get(photoId)
+      )
+
+      for (const photo of orderedPhotos) {
+        if (!photo) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Selected photo could not be found",
+          }
+        }
+
+        const mimeType = String(photo.mime_type || "")
+          .toLowerCase()
+
+        if (
+          mimeType !== "image/jpeg" &&
+          mimeType !== "image/jpg"
+        ) {
+          reply.code(400)
+          return {
+            ok: false,
+            error:
+              `Photo ${photo.original_name || photo.id} is not a JPEG`,
+          }
+        }
+
+        if (
+          !photo.stored_path ||
+          !fs.existsSync(photo.stored_path)
+        ) {
+          reply.code(400)
+          return {
+            ok: false,
+            error:
+              `Photo file is missing: ${photo.original_name || photo.id}`,
+          }
+        }
+      }
+
+      const job = jobResult.rows[0]
+
+      const pdfDoc = await PDFDocument.create()
+      const regularFont = await pdfDoc.embedFont(
+        StandardFonts.Helvetica
+      )
+      const boldFont = await pdfDoc.embedFont(
+        StandardFonts.HelveticaBold
+      )
+
+      const PAGE_WIDTH = 612
+      const PAGE_HEIGHT = 792
+      const MARGIN_X = 36
+      const MARGIN_TOP = 30
+      const MARGIN_BOTTOM = 30
+      const COLUMN_GAP = 18
+      const ROW_GAP = 10
+      const HEADER_HEIGHT = 104
+      const CONTENT_TOP =
+        PAGE_HEIGHT - MARGIN_TOP - HEADER_HEIGHT
+      const CELL_WIDTH =
+        (PAGE_WIDTH - MARGIN_X * 2 - COLUMN_GAP) / 2
+
+      function safeText(value: any) {
+        return String(value ?? "").trim()
+      }
+
+      function cleanFilePart(value: any) {
+        const cleaned = safeText(value)
+          .replace(/[^a-zA-Z0-9_-]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+
+        return cleaned || "Job"
+      }
+
+      function wrapText(
+        text: string,
+        maxWidth: number,
+        fontSize: number
+      ) {
+        const normalized = safeText(text) || "No description"
+        const words = normalized.split(/\s+/)
+        const lines: string[] = []
+        let line = ""
+
+        for (const word of words) {
+          const candidate = line ? `${line} ${word}` : word
+
+          if (
+            regularFont.widthOfTextAtSize(
+              candidate,
+              fontSize
+            ) <= maxWidth
+          ) {
+            line = candidate
+            continue
+          }
+
+          if (line) {
+            lines.push(line)
+          }
+
+          line = word
+        }
+
+        if (line) {
+          lines.push(line)
+        }
+
+        return lines
+      }
+
+      function drawHeader(page: any) {
+        const companyName =
+          safeText(job.company_name) || tenantSlug
+
+        page.drawText(companyName, {
+          x: MARGIN_X,
+          y: PAGE_HEIGHT - 42,
+          size: 15,
+          font: boldFont,
+          color: rgb(0.08, 0.11, 0.16),
+        })
+
+        page.drawText("PHOTO REPORT", {
+          x: MARGIN_X,
+          y: PAGE_HEIGHT - 61,
+          size: 12,
+          font: boldFont,
+          color: rgb(0.08, 0.11, 0.16),
+        })
+
+        const address = [
+          job.address1,
+          job.city,
+          job.state,
+          job.zip,
+        ]
+          .filter(Boolean)
+          .join(", ")
+
+        const leftLines = [
+          `Customer: ${safeText(job.customer_name) || "—"}`,
+          `Property: ${address || "—"}`,
+        ]
+
+        const rightLines = [
+          `Carrier: ${safeText(job.carrier) || "—"}`,
+          `Claim #: ${safeText(job.claim_number) || "—"}`,
+        ]
+
+        leftLines.forEach((line, index) => {
+          page.drawText(line, {
+            x: MARGIN_X,
+            y: PAGE_HEIGHT - 79 - index * 12,
+            size: 8,
+            font: regularFont,
+            color: rgb(0.15, 0.18, 0.22),
+          })
+        })
+
+        rightLines.forEach((line, index) => {
+          page.drawText(line, {
+            x: 322,
+            y: PAGE_HEIGHT - 79 - index * 12,
+            size: 8,
+            font: regularFont,
+            color: rgb(0.15, 0.18, 0.22),
+          })
+        })
+
+        page.drawLine({
+          start: {
+            x: MARGIN_X,
+            y: PAGE_HEIGHT - MARGIN_TOP - HEADER_HEIGHT + 12,
+          },
+          end: {
+            x: PAGE_WIDTH - MARGIN_X,
+            y: PAGE_HEIGHT - MARGIN_TOP - HEADER_HEIGHT + 12,
+          },
+          thickness: 0.8,
+          color: rgb(0.72, 0.74, 0.77),
+        })
+      }
+
+      const MAX_IMAGE_HEIGHT = 150
+      const MIN_IMAGE_HEIGHT = 70
+      const CAPTION_TITLE_HEIGHT = 18
+      const CAPTION_LINE_HEIGHT = 9
+      const ROW_PADDING = 12
+      const AVAILABLE_PAGE_HEIGHT = CONTENT_TOP - MARGIN_BOTTOM
+
+      let page: any = null
+      let currentY = CONTENT_TOP
+
+      function startPhotoPage() {
+        page = pdfDoc.addPage([
+          PAGE_WIDTH,
+          PAGE_HEIGHT,
+        ])
+
+        drawHeader(page)
+        currentY = CONTENT_TOP
+      }
+
+      startPhotoPage()
+
+      for (
+        let pairStart = 0;
+        pairStart < orderedPhotos.length;
+        pairStart += 2
+      ) {
+        const pair = orderedPhotos.slice(
+          pairStart,
+          pairStart + 2
+        )
+
+        const pairCaptions = pair.map((photo: any) =>
+          wrapText(
+            safeText(photo.note),
+            CELL_WIDTH,
+            7.4
+          )
+        )
+
+        const maxCaptionLines = Math.max(
+          1,
+          ...pairCaptions.map(
+            (lines: string[]) => lines.length
+          )
+        )
+
+        const captionHeight =
+          CAPTION_TITLE_HEIGHT +
+          maxCaptionLines * CAPTION_LINE_HEIGHT
+
+        let imageHeight = MAX_IMAGE_HEIGHT
+
+        let rowHeight =
+          imageHeight +
+          captionHeight +
+          ROW_PADDING
+
+        if (rowHeight > AVAILABLE_PAGE_HEIGHT) {
+          imageHeight =
+            AVAILABLE_PAGE_HEIGHT -
+            captionHeight -
+            ROW_PADDING
+
+          if (imageHeight < MIN_IMAGE_HEIGHT) {
+            reply.code(400)
+
+            return {
+              ok: false,
+              error:
+                "One of the selected photo descriptions is too long to fit safely in the photo report. Shorten that description and generate the report again.",
+            }
+          }
+
+          rowHeight =
+            imageHeight +
+            captionHeight +
+            ROW_PADDING
+        }
+
+        const remainingHeight =
+          currentY - MARGIN_BOTTOM
+
+        if (rowHeight > remainingHeight) {
+          startPhotoPage()
+        }
+
+        for (
+          let pairIndex = 0;
+          pairIndex < pair.length;
+          pairIndex += 1
+        ) {
+          const photo = pair[pairIndex]
+          const reportIndex =
+            pairStart + pairIndex
+          const column = pairIndex
+
+          const cellX =
+            MARGIN_X +
+            column *
+              (CELL_WIDTH + COLUMN_GAP)
+
+          const bytes = fs.readFileSync(
+            photo.stored_path
+          )
+
+          const image =
+            await pdfDoc.embedJpg(bytes)
+
+          const naturalWidth = image.width
+          const naturalHeight = image.height
+
+          const scale = Math.min(
+            CELL_WIDTH / naturalWidth,
+            imageHeight / naturalHeight
+          )
+
+          const drawWidth =
+            naturalWidth * scale
+          const drawHeight =
+            naturalHeight * scale
+
+          const imageX =
+            cellX +
+            (CELL_WIDTH - drawWidth) / 2
+
+          const imageY =
+            currentY - drawHeight
+
+          page.drawImage(image, {
+            x: imageX,
+            y: imageY,
+            width: drawWidth,
+            height: drawHeight,
+          })
+
+          const photoNumber =
+            reportIndex + 1
+
+          const captionY =
+            currentY -
+            imageHeight -
+            13
+
+          page.drawText(
+            `Photo ${photoNumber}`,
+            {
+              x: cellX,
+              y: captionY,
+              size: 8.5,
+              font: boldFont,
+              color: rgb(
+                0.08,
+                0.11,
+                0.16
+              ),
+            }
+          )
+
+          const captionLines =
+            pairCaptions[pairIndex]
+
+          captionLines.forEach(
+            (
+              line: string,
+              lineIndex: number
+            ) => {
+              page.drawText(line, {
+                x: cellX,
+                y:
+                  captionY -
+                  11 -
+                  lineIndex *
+                    CAPTION_LINE_HEIGHT,
+                size: 7.4,
+                font: regularFont,
+                color: rgb(
+                  0.15,
+                  0.18,
+                  0.22
+                ),
+              })
+            }
+          )
+        }
+
+        currentY -= rowHeight + ROW_GAP
+      }
+
+      pdfDoc.setTitle(
+        `${safeText(job.customer_name) || "Job"} Photo Report`
+      )
+      pdfDoc.setSubject(
+        `Navigator photo report for job ${numericJobId}`
+      )
+      pdfDoc.setCreator("Contractor Navigator")
+      pdfDoc.setProducer("Contractor Navigator")
+
+      const pdfBytes = await pdfDoc.save()
+      const pdfBuffer = Buffer.from(pdfBytes)
+
+      const reportDate = new Date()
+        .toISOString()
+        .slice(0, 10)
+
+      const reportName =
+        `${cleanFilePart(job.customer_name)}_` +
+        `${cleanFilePart(job.claim_number || `Job_${numericJobId}`)}_` +
+        `Photo_Report_${reportDate}.pdf`
+
+      const relativeDir = path.join(
+        "job-assets",
+        tenantSlug,
+        String(numericJobId)
+      )
+
+      const jobDir = path.join(
+        getUploadRoot(),
+        relativeDir
+      )
+
+      fs.mkdirSync(jobDir, { recursive: true })
+
+      const storedName =
+        `${Date.now()}-${randomUUID()}.pdf`
+
+      const storedPath = path.join(
+        jobDir,
+        storedName
+      )
+
+      const relativePath = path.join(
+        relativeDir,
+        storedName
+      )
+
+      fs.writeFileSync(storedPath, pdfBuffer)
+
+      const assetResult = await pool.query(
+        `
+        insert into job_assets
+        (
+          tenant_id,
+          job_id,
+          asset_type,
+          asset_category,
+          bucket,
+          original_name,
+          stored_name,
+          stored_path,
+          relative_path,
+          mime_type,
+          file_size_bytes,
+          note,
+          uploaded_by,
+          created_at
+        )
+        values
+        (
+          $1,$2,'file','Documents','local',
+          $3,$4,$5,$6,'application/pdf',
+          $7,$8,$9,now()
+        )
+        returning
+          id,
+          job_id,
+          asset_type,
+          asset_category,
+          original_name,
+          mime_type,
+          file_size_bytes,
+          note,
+          uploaded_by,
+          created_at
+        `,
+        [
+          tenantId,
+          numericJobId,
+          reportName,
+          storedName,
+          storedPath,
+          relativePath,
+          pdfBuffer.length,
+          `Photo Report - ${orderedPhotos.length} photo${orderedPhotos.length === 1 ? "" : "s"}`,
+          String(
+            user.full_name ||
+              user.email ||
+              "Team"
+          ),
+        ]
+      )
+
+      await pool.query(
+        `
+        insert into timeline_events
+          (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+        values
+          (
+            $1,
+            $2,
+            'photo_report_generated',
+            $3,
+            $4::jsonb,
+            now()
+          )
+        `,
+        [
+          tenantId,
+          numericJobId,
+          `Photo report generated: ${reportName}`,
+          JSON.stringify({
+            asset_id: assetResult.rows[0].id,
+            photo_count: orderedPhotos.length,
+            photo_ids: photoIds,
+            generated_by: String(
+              user.full_name ||
+                user.email ||
+                "Team"
+            ),
+          }),
+        ]
+      )
+
+      return {
+        ok: true,
+        report: {
+          ...assetResult.rows[0],
+          download_url:
+            `/assets/${tenantSlug}/file/${assetResult.rows[0].id}`,
+        },
+      }
+    } catch (err: any) {
+      console.error("PHOTO REPORT ERROR:", err)
+
+      reply.code(400)
+
+      return {
+        ok: false,
+        error:
+          err?.message ||
+          "Photo report generation failed",
+      }
     }
   })
 

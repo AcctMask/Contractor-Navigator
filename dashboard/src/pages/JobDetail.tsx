@@ -26,6 +26,7 @@ export default function JobDetail() {
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
+  const [generatingPhotoReport, setGeneratingPhotoReport] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
   const [stage, setStage] = useState("lead")
@@ -664,6 +665,103 @@ export default function JobDetail() {
     } catch (err: any) {
       setStatus("")
       errorToast(err?.message || "Upload failed. Large files may require a stronger upload path.")
+    }
+  }
+
+  async function generatePhotoReport() {
+    if (!id) return
+
+    const photos = assets.filter(
+      (asset: any) =>
+        asset.asset_type === "photo" ||
+        String(asset.mime_type || "").startsWith("image/")
+    )
+
+    const requested: Array<{
+      asset: any
+      sequence: number
+    }> = []
+
+    for (const asset of photos) {
+      const raw = String(photoSequences[String(asset.id)] || "").trim()
+
+      if (!raw) continue
+
+      const sequence = Number(raw)
+
+      if (!Number.isInteger(sequence) || sequence <= 0) {
+        errorToast(
+          `Photo Sequence must be a positive whole number. Check ${asset.note || asset.original_name || "the selected photo"}.`
+        )
+        return
+      }
+
+      requested.push({ asset, sequence })
+    }
+
+    if (requested.length === 0) {
+      errorToast("Enter a Photo Sequence for at least one photo")
+      return
+    }
+
+    const duplicateSequences = requested
+      .map((item) => item.sequence)
+      .filter(
+        (sequence, index, all) =>
+          all.indexOf(sequence) !== index
+      )
+
+    if (duplicateSequences.length > 0) {
+      const duplicates = Array.from(
+        new Set(duplicateSequences)
+      ).sort((a, b) => a - b)
+
+      errorToast(
+        `Duplicate Photo Sequence number${duplicates.length === 1 ? "" : "s"}: ${duplicates.join(", ")}`
+      )
+      return
+    }
+
+    requested.sort((a, b) => a.sequence - b.sequence)
+
+    setGeneratingPhotoReport(true)
+
+    try {
+      const token = getToken()
+
+      const res = await fetch(
+        `${API_BASE}/assets/${getTenantSlug()}/job/${id}/photo-report`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            photo_ids: requested.map((item) =>
+              Number(item.asset.id)
+            ),
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        errorToast(data?.error || "Photo report generation failed")
+        return
+      }
+
+      successToast(
+        `Photo report generated with ${requested.length} photo${requested.length === 1 ? "" : "s"} and saved to Documents`
+      )
+
+      setPhotoSequences({})
+      await loadAssets()
+    } catch (err: any) {
+      errorToast(err?.message || "Photo report generation failed")
+    } finally {
+      setGeneratingPhotoReport(false)
     }
   }
 
@@ -1909,8 +2007,24 @@ export default function JobDetail() {
                 <>
                   <p style={{ opacity: 0.8 }}>
                     Enter a Photo Sequence only for photos you want in the
-                    future photo report. Leave it blank to exclude a photo.
+                    photo report. Leave it blank to exclude a photo.
                   </p>
+
+                  <div style={{ ...buttonRow, marginBottom: 16 }}>
+                    <button
+                      onClick={generatePhotoReport}
+                      disabled={generatingPhotoReport}
+                      style={{
+                        ...button,
+                        fontWeight: 900,
+                        opacity: generatingPhotoReport ? 0.65 : 1,
+                      }}
+                    >
+                      {generatingPhotoReport
+                        ? "Generating Photo Report..."
+                        : "Generate Photo Report"}
+                    </button>
+                  </div>
 
                   <div style={photoGrid}>
                     {photos.map((asset: any) =>
