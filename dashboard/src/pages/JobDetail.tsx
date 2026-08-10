@@ -30,6 +30,7 @@ export default function JobDetail() {
   const [photoLocations, setPhotoLocations] = useState<Record<string, string>>({})
   const [savingPhotoSequence, setSavingPhotoSequence] = useState(false)
   const [generatingPhotoReport, setGeneratingPhotoReport] = useState(false)
+  const [downloadingPhotos, setDownloadingPhotos] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
   const [stage, setStage] = useState("lead")
@@ -880,6 +881,225 @@ export default function JobDetail() {
       errorToast(err?.message || "Photo report generation failed")
     } finally {
       setGeneratingPhotoReport(false)
+    }
+  }
+
+  async function downloadSequencedPhotos() {
+    if (!id) return
+
+    setDownloadingPhotos(true)
+
+    try {
+      const token = getToken()
+      const tenantSlug =
+        getTenantSlug()
+
+      const res = await fetch(
+        `${API_BASE}/assets/${tenantSlug}/job/${id}/photo-download`,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (!res.ok) {
+        let message =
+          "Photo download failed"
+
+        try {
+          const data =
+            await res.json()
+
+          message =
+            data?.error ||
+            message
+        } catch {
+          // Preserve generic error for non-JSON responses.
+        }
+
+        errorToast(message)
+        return
+      }
+
+      const contentType =
+        String(
+          res.headers.get(
+            "Content-Type"
+          ) || ""
+        ).toLowerCase()
+
+      if (
+        contentType.includes(
+          "application/json"
+        )
+      ) {
+        const data =
+          await res.json()
+
+        if (
+          !data?.ok ||
+          data?.mode !==
+            "individual" ||
+          !Array.isArray(data?.files) ||
+          data.files.length === 0
+        ) {
+          errorToast(
+            data?.error ||
+            "Photo download failed"
+          )
+          return
+        }
+
+        for (
+          let index = 0;
+          index < data.files.length;
+          index += 1
+        ) {
+          const file =
+            data.files[index]
+
+          const assetId =
+            Number(file?.asset_id)
+
+          const filename =
+            String(
+              file?.filename ||
+              `Photo_${index + 1}.jpg`
+            )
+
+          if (
+            !Number.isInteger(assetId) ||
+            assetId <= 0
+          ) {
+            throw new Error(
+              "Navigator returned an invalid photo download"
+            )
+          }
+
+          const fileRes =
+            await fetch(
+              `${API_BASE}/assets/${tenantSlug}/file/${assetId}`,
+              {
+                headers: {
+                  Authorization:
+                    `Bearer ${token}`,
+                },
+              }
+            )
+
+          if (!fileRes.ok) {
+            throw new Error(
+              `Photo ${index + 1} download failed`
+            )
+          }
+
+          const blob =
+            await fileRes.blob()
+
+          const objectUrl =
+            URL.createObjectURL(blob)
+
+          const link =
+            document.createElement("a")
+
+          link.href =
+            objectUrl
+
+          link.download =
+            filename
+
+          document.body.appendChild(
+            link
+          )
+
+          link.click()
+          link.remove()
+
+          window.setTimeout(
+            () =>
+              URL.revokeObjectURL(
+                objectUrl
+              ),
+            1500
+          )
+
+          if (
+            index <
+            data.files.length - 1
+          ) {
+            await new Promise(
+              (resolve) =>
+                window.setTimeout(
+                  resolve,
+                  200
+                )
+            )
+          }
+        }
+
+        successToast(
+          `Downloaded ${data.files.length} sequenced photo${data.files.length === 1 ? "" : "s"}`
+        )
+
+        return
+      }
+
+      const blob =
+        await res.blob()
+
+      const disposition =
+        res.headers.get(
+          "Content-Disposition"
+        ) || ""
+
+      const filenameMatch =
+        disposition.match(
+          /filename="?([^"]+)"?/i
+        )
+
+      const filename =
+        filenameMatch?.[1] ||
+        `Job_${id}_Photos.zip`
+
+      const objectUrl =
+        URL.createObjectURL(blob)
+
+      const link =
+        document.createElement("a")
+
+      link.href =
+        objectUrl
+
+      link.download =
+        filename
+
+      document.body.appendChild(
+        link
+      )
+
+      link.click()
+      link.remove()
+
+      window.setTimeout(
+        () =>
+          URL.revokeObjectURL(
+            objectUrl
+          ),
+        1500
+      )
+
+      successToast(
+        "Sequenced photos downloaded as ZIP"
+      )
+    } catch (err: any) {
+      errorToast(
+        err?.message ||
+        "Photo download failed"
+      )
+    } finally {
+      setDownloadingPhotos(false)
     }
   }
 
@@ -2250,6 +2470,20 @@ export default function JobDetail() {
                       {generatingPhotoReport
                         ? "Generating Photo Report..."
                         : "Generate Photo Report"}
+                    </button>
+
+                    <button
+                      onClick={downloadSequencedPhotos}
+                      disabled={downloadingPhotos}
+                      style={{
+                        ...button,
+                        fontWeight: 900,
+                        opacity: downloadingPhotos ? 0.65 : 1,
+                      }}
+                    >
+                      {downloadingPhotos
+                        ? "Downloading Photos..."
+                        : "Download Photos"}
                     </button>
                   </div>
 

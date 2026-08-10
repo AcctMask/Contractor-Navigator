@@ -9,6 +9,7 @@ import { sendSMS } from "../services/twilioService"
 import { getCurrentUserFromToken } from "../services/authService"
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
 import sharp from "sharp"
+import archiver from "archiver"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -546,6 +547,327 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         error:
           err?.message ||
           "Photo sequence save failed",
+      }
+    }
+  })
+
+  app.get("/assets/:tenantSlug/job/:jobId/photo-download", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const sequenceResult = await pool.query(
+        `
+        select meta
+        from timeline_events
+        where tenant_id = $1
+          and job_id = $2
+          and kind = 'photo_report_sequence_saved'
+        order by created_at desc, id desc
+        limit 1
+        `,
+        [tenantId, numericJobId]
+      )
+
+      const savedPhotoIds =
+        sequenceResult.rows[0]?.meta?.photo_ids
+
+      if (
+        !Array.isArray(savedPhotoIds) ||
+        savedPhotoIds.length === 0
+      ) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            "Save Photo Sequencing before downloading photos",
+        }
+      }
+
+      const photoIds = savedPhotoIds.map(
+        (value: any) => Number(value)
+      )
+
+      if (
+        photoIds.some(
+          (value: number) =>
+            !Number.isInteger(value) ||
+            value <= 0
+        )
+      ) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: "Saved photo sequence is invalid",
+        }
+      }
+
+      const photoResult = await pool.query(
+        `
+        select
+          id,
+          original_name,
+          stored_name,
+          stored_path,
+          mime_type,
+          note
+        from job_assets
+        where tenant_id = $1
+          and job_id = $2
+          and id = any($3::bigint[])
+          and (
+            asset_type = 'photo'
+            or mime_type like 'image/%'
+          )
+        `,
+        [tenantId, numericJobId, photoIds]
+      )
+
+      if (
+        photoResult.rows.length !==
+        photoIds.length
+      ) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            "One or more sequenced photos could not be found on this job",
+        }
+      }
+
+      const photosById = new Map(
+        photoResult.rows.map(
+          (photo: any) => [
+            Number(photo.id),
+            photo,
+          ]
+        )
+      )
+
+      const orderedPhotos = photoIds.map(
+        (photoId: number) =>
+          photosById.get(photoId)
+      )
+
+      function safeDownloadName(
+        value: any
+      ) {
+        return String(value || "")
+          .replace(/[<>:"/\\|?*\x00-\x1F]/g, " ")
+          .replace(/\s+/g, " ")
+          .replace(/^\.+|\.+$/g, "")
+          .trim()
+          .slice(0, 100)
+      }
+
+      const width = Math.max(
+        2,
+        String(orderedPhotos.length).length
+      )
+
+      const usedNames = new Set<string>()
+
+      function uniqueZipName(
+        requestedName: string
+      ) {
+        if (!usedNames.has(requestedName)) {
+          usedNames.add(requestedName)
+          return requestedName
+        }
+
+        const ext =
+          path.extname(requestedName)
+
+        const stem =
+          requestedName.slice(
+            0,
+            requestedName.length -
+              ext.length
+          )
+
+        let suffix = 2
+
+        while (
+          usedNames.has(
+            `${stem} (${suffix})${ext}`
+          )
+        ) {
+          suffix += 1
+        }
+
+        const unique =
+          `${stem} (${suffix})${ext}`
+
+        usedNames.add(unique)
+        return unique
+      }
+
+      for (const photo of orderedPhotos) {
+        if (
+          !photo?.stored_path ||
+          !fs.existsSync(photo.stored_path)
+        ) {
+          reply.code(404)
+          return {
+            ok: false,
+            error:
+              "One of the sequenced source photos is missing from storage",
+          }
+        }
+      }
+
+      const downloadFiles =
+        orderedPhotos.map(
+          (photo: any, index: number) => {
+            const sequence =
+              String(index + 1).padStart(
+                width,
+                "0"
+              )
+
+            const sourceName =
+              photo.original_name ||
+              photo.stored_name ||
+              `Photo_${sequence}.jpg`
+
+            const sourceExt =
+              path.extname(sourceName) ||
+              (
+                String(
+                  photo.mime_type || ""
+                ).toLowerCase() ===
+                "image/png"
+                  ? ".png"
+                  : ".jpg"
+              )
+
+            const description =
+              safeDownloadName(photo.note)
+
+            const fallbackStem =
+              safeDownloadName(
+                path.basename(
+                  sourceName,
+                  path.extname(sourceName)
+                )
+              ) || `Photo_${sequence}`
+
+            const stem =
+              description ||
+              fallbackStem
+
+            const filename =
+              uniqueZipName(
+                `${sequence} - ${stem}${sourceExt.toLowerCase()}`
+              )
+
+            return {
+              asset_id: Number(photo.id),
+              stored_path:
+                photo.stored_path,
+              filename,
+            }
+          }
+        )
+
+      if (downloadFiles.length <= 5) {
+        return {
+          ok: true,
+          mode: "individual",
+          files: downloadFiles.map(
+            (file: any) => ({
+              asset_id:
+                file.asset_id,
+              filename:
+                file.filename,
+            })
+          ),
+        }
+      }
+
+      const zipName =
+        `Job_${numericJobId}_Photos.zip`
+
+      reply.header(
+        "Content-Type",
+        "application/zip"
+      )
+
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="${zipName}"`
+      )
+
+      const archive = archiver("zip", {
+        zlib: {
+          level: 6,
+        },
+      })
+
+      archive.on(
+        "warning",
+        (error: any) => {
+          console.warn(
+            "PHOTO ZIP WARNING:",
+            error
+          )
+        }
+      )
+
+      archive.on(
+        "error",
+        (error: any) => {
+          console.error(
+            "PHOTO ZIP ERROR:",
+            error
+          )
+
+          if (!reply.sent) {
+            reply.code(500)
+          }
+        }
+      )
+
+      reply.send(archive)
+
+      downloadFiles.forEach(
+        (file: any) => {
+          archive.file(
+            file.stored_path,
+            {
+              name: file.filename,
+            }
+          )
+        }
+      )
+
+      await archive.finalize()
+    } catch (err: any) {
+      console.error(
+        "PHOTO DOWNLOAD ERROR:",
+        err
+      )
+
+      if (!reply.sent) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            "Photo download failed",
+        }
       }
     }
   })
