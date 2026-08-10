@@ -9,7 +9,7 @@ import { sendSMS } from "../services/twilioService"
 import { getCurrentUserFromToken } from "../services/authService"
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
 import sharp from "sharp"
-import archiver from "archiver"
+import { ZipArchive } from "archiver"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -810,7 +810,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         `attachment; filename="${zipName}"`
       )
 
-      const archive = archiver("zip", {
+      const archive = new ZipArchive({
         zlib: {
           level: 6,
         },
