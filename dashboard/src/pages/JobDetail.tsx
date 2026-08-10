@@ -2424,7 +2424,7 @@ export default function JobDetail() {
                   </div>
                 </div>
 
-                {photos.length > 3 || showAllPhotos ? (
+                {photos.length > 0 ? (
                   <button
                     onClick={() => setShowAllPhotos((current) => !current)}
                     style={button}
