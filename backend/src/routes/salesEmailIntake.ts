@@ -623,6 +623,76 @@ async function importReceivedEmailAttachments(params: {
   return outcome
 }
 
+function extractFieldEmailNote(
+  email: any,
+  subject: string
+): string | null {
+  const rawText =
+    email?.text ||
+    email?.textBody ||
+    email?.text_body ||
+    ""
+
+  const rawHtml =
+    email?.html ||
+    email?.htmlBody ||
+    email?.html_body ||
+    ""
+
+  let body = String(
+    rawText ||
+    (rawHtml ? stripHtml(rawHtml) : "")
+  )
+    .replace(/\r/g, "")
+    .trim()
+
+  if (!body) {
+    return null
+  }
+
+  const subjectText = String(subject || "").trim()
+
+  if (subjectText) {
+    const lines = body.split("\n")
+
+    if (
+      String(lines[0] || "").trim().toLowerCase() ===
+      subjectText.toLowerCase()
+    ) {
+      body = lines.slice(1).join("\n").trim()
+    }
+  }
+
+  const stopPatterns = [
+    /^\s*--\s*$/im,
+    /^\s*sent from my (iphone|ipad|android).*$/im,
+    /^\s*get outlook for (ios|android).*$/im,
+    /^\s*on .+ wrote:\s*$/im,
+    /^\s*from:\s.+$/im,
+  ]
+
+  let stopIndex = body.length
+
+  for (const pattern of stopPatterns) {
+    const match = pattern.exec(body)
+
+    if (
+      match &&
+      typeof match.index === "number" &&
+      match.index < stopIndex
+    ) {
+      stopIndex = match.index
+    }
+  }
+
+  body = body
+    .slice(0, stopIndex)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+
+  return body || null
+}
+
 function normalizeFieldPhotoAddress(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -995,6 +1065,121 @@ async function sendFieldPhotoReceipt(params: {
         "",
         "No new Navigator job was created.",
         "No photos were attached to another job.",
+      ].join("\n")
+
+  return await sendAlertEmail(
+    recipient,
+    subject,
+    body,
+    ccRecipient
+      ? {
+          cc: ccRecipient,
+        }
+      : undefined
+  )
+}
+
+async function sendFieldEmailReceipt(params: {
+  sender: string
+  success: boolean
+  subjectAddress: string
+  reason?: string | null
+  job?: any
+  noteAdded?: boolean
+  importedCount?: number
+  failedCount?: number
+}) {
+  const senderRecipient =
+    extractEmailAddress(params.sender)
+
+  const sharedOfficeRecipient =
+    extractEmailAddress(
+      process.env.G2G_GMAIL_TO ||
+      process.env.ALERT_EMAIL_TO ||
+      ""
+    )
+
+  const recipient =
+    senderRecipient ||
+    sharedOfficeRecipient
+
+  if (!recipient) {
+    console.error(
+      "Field email receipt skipped: no valid sender or office recipient"
+    )
+
+    return {
+      ok: false,
+      skipped: true,
+      reason: "missing_field_email_receipt_recipient",
+    }
+  }
+
+  const ccRecipient =
+    senderRecipient &&
+    sharedOfficeRecipient &&
+    senderRecipient !== sharedOfficeRecipient
+      ? sharedOfficeRecipient
+      : null
+
+  const symbol =
+    params.success ? "✅" : "❌"
+
+  const headline =
+    params.success
+      ? "Navigator Field Update Complete"
+      : "Navigator Field Update Not Completed"
+
+  const subject =
+    `${symbol} ${headline}: ${params.subjectAddress}`
+
+  const body = params.success
+    ? [
+        `${symbol} Navigator Field Update Complete`,
+        "",
+        `Property: ${
+          params.job?.address1 ||
+          params.subjectAddress
+        }`,
+        params.job?.city
+          ? `City: ${params.job.city}`
+          : null,
+        `Navigator Job: #${params.job?.id}`,
+        params.job?.customer_name
+          ? `Customer: ${params.job.customer_name}`
+          : null,
+        `Sent by: ${
+          senderRecipient ||
+          params.sender ||
+          "Unknown sender"
+        }`,
+        `Note added: ${
+          params.noteAdded ? "Yes" : "No"
+        }`,
+        `Photos uploaded: ${Number(
+          params.importedCount || 0
+        )}`,
+        "",
+        "The field update is now available in Navigator.",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : [
+        `${symbol} Navigator Field Update Not Completed`,
+        "",
+        `Subject / Property: ${params.subjectAddress}`,
+        `Sent by: ${
+          senderRecipient ||
+          params.sender ||
+          "Unknown sender"
+        }`,
+        `Reason: ${
+          params.reason ||
+          "Navigator could not safely complete the field update."
+        }`,
+        "",
+        "No new Navigator job was created.",
+        "Navigator did not guess at a different job.",
       ].join("\n")
 
   return await sendAlertEmail(
@@ -1540,250 +1725,346 @@ export async function registerSalesEmailIntakeRoutes(
             parsedPayload.from
           )
 
-        const fieldPhotoSubject =
+        const fieldEmailSubject =
           looksLikeFieldPhotoAddressSubject(
             parsedPayload.subject
           )
 
         if (
           senderEmail &&
-          isInternalG2GEmail(senderEmail) &&
-          fieldPhotoSubject
+          fieldEmailSubject
         ) {
+          const subjectProperty =
+            parseFieldPhotoSubject(
+              parsedPayload.subject
+            )
+
+          if (!subjectProperty.address1) {
+            await sendFieldEmailReceipt({
+              sender: parsedPayload.from,
+              success: false,
+              subjectAddress:
+                parsedPayload.subject,
+              reason:
+                "Navigator could not identify a property address from the subject line.",
+            })
+
+            return {
+              ok: true,
+              field_email_intake: true,
+              success: false,
+              reason:
+                "subject_address_not_parsed",
+            }
+          }
+
+          const matchResult =
+            await findUniqueFieldPhotoJob({
+              tenantId,
+              address1:
+                subjectProperty.address1,
+              city:
+                subjectProperty.city,
+              zip:
+                subjectProperty.zip,
+            })
+
+          if (!matchResult.job) {
+            const reason =
+              matchResult.matches.length === 0
+                ? "No existing active Navigator job matched that address."
+                : `More than one active Navigator job matched that address (${matchResult.matches.length} matches).`
+
+            await sendFieldEmailReceipt({
+              sender: parsedPayload.from,
+              success: false,
+              subjectAddress:
+                parsedPayload.subject,
+              reason,
+            })
+
+            console.warn(
+              "FIELD_EMAIL_NOT_MATCHED",
+              JSON.stringify({
+                subject:
+                  parsedPayload.subject,
+                sender:
+                  senderEmail,
+                match_count:
+                  matchResult.matches.length,
+              })
+            )
+
+            return {
+              ok: true,
+              field_email_intake: true,
+              success: false,
+              reason:
+                matchResult.matches.length === 0
+                  ? "no_existing_job_match"
+                  : "ambiguous_existing_job_match",
+              match_count:
+                matchResult.matches.length,
+            }
+          }
+
+          const job =
+            matchResult.job
+
+          const fieldNote =
+            extractFieldEmailNote(
+              receivedEmail ||
+              initialPayload.raw,
+              parsedPayload.subject
+            )
+
           const emailId =
             extractReceivedEmailId(
               receivedEmail ||
               initialPayload.raw
             )
 
-          if (emailId) {
-            let listedAttachments:
-              ResendReceivedAttachment[] = []
+          let listedAttachments:
+            ResendReceivedAttachment[] = []
 
+          let attachmentListError:
+            string | null = null
+
+          if (emailId) {
             try {
               listedAttachments =
                 await listReceivedEmailAttachments(
                   emailId
                 )
             } catch (error: any) {
-              await sendFieldPhotoReceipt({
-                sender: parsedPayload.from,
-                success: false,
-                subjectAddress:
-                  parsedPayload.subject,
-                reason:
-                  `Navigator could not read the attached photos: ${
-                    error?.message ||
-                    String(error)
-                  }`,
-              })
-
-              return {
-                ok: true,
-                field_photo_upload: true,
-                success: false,
-                reason:
-                  "attachment_list_failed",
-              }
+              attachmentListError =
+                error?.message ||
+                String(error)
             }
+          }
 
-            const fieldPhotos =
-              listedAttachments.filter(
-                (attachment) =>
-                  isFieldPhotoAttachment(
-                    attachment
-                  )
-              )
-
-            if (fieldPhotos.length > 0) {
-              const subjectProperty =
-                parseFieldPhotoSubject(
-                  parsedPayload.subject
+          const fieldPhotos =
+            listedAttachments.filter(
+              (attachment) =>
+                isFieldPhotoAttachment(
+                  attachment
                 )
+            )
 
-              if (!subjectProperty.address1) {
-                await sendFieldPhotoReceipt({
-                  sender: parsedPayload.from,
-                  success: false,
-                  subjectAddress:
-                    parsedPayload.subject,
-                  reason:
-                    "Navigator could not identify a property address from the subject line.",
-                })
+          if (
+            !fieldNote &&
+            fieldPhotos.length === 0
+          ) {
+            await sendFieldEmailReceipt({
+              sender: parsedPayload.from,
+              success: false,
+              subjectAddress:
+                parsedPayload.subject,
+              job,
+              reason:
+                attachmentListError ||
+                "No field note text or qualifying JPEG photos were found in the email.",
+            })
 
-                return {
-                  ok: true,
-                  field_photo_upload: true,
-                  success: false,
-                  reason:
-                    "subject_address_not_parsed",
-                }
-              }
+            return {
+              ok: true,
+              field_email_intake: true,
+              success: false,
+              job_id:
+                Number(job.id),
+              reason:
+                "no_field_content",
+            }
+          }
 
-              const matchResult =
-                await findUniqueFieldPhotoJob({
-                  tenantId,
-                  address1:
-                    subjectProperty.address1,
-                  city:
-                    subjectProperty.city,
-                  zip:
-                    subjectProperty.zip,
-                })
+          let noteAdded = false
 
-              if (!matchResult.job) {
-                const reason =
-                  matchResult.matches.length === 0
-                    ? "No existing active Navigator job matched that address."
-                    : `More than one active Navigator job matched that address (${matchResult.matches.length} matches).`
-
-                await sendFieldPhotoReceipt({
-                  sender: parsedPayload.from,
-                  success: false,
-                  subjectAddress:
-                    parsedPayload.subject,
-                  reason,
-                })
-
-                console.warn(
-                  "FIELD_PHOTO_EMAIL_NOT_MATCHED",
-                  JSON.stringify({
-                    subject:
-                      parsedPayload.subject,
-                    sender: senderEmail,
-                    match_count:
-                      matchResult.matches.length,
-                  })
+          if (fieldNote) {
+            await pool.query(
+              `
+              insert into timeline_events
+                (
+                  tenant_id,
+                  job_id,
+                  kind,
+                  message,
+                  meta,
+                  created_at
                 )
-
-                return {
-                  ok: true,
-                  field_photo_upload: true,
-                  success: false,
-                  reason:
-                    matchResult.matches.length === 0
-                      ? "no_existing_job_match"
-                      : "ambiguous_existing_job_match",
-                  match_count:
-                    matchResult.matches.length,
-                }
-              }
-
-              const job =
-                matchResult.job
-
-              const importResult =
-                await importFieldPhotoAttachments({
-                  emailId,
-                  jobId:
-                    Number(job.id),
-                  sender:
-                    senderEmail,
-                })
-
-              const complete =
-                importResult.attempted > 0 &&
-                importResult.imported.length ===
-                  importResult.attempted &&
-                importResult.failed.length === 0
-
-              await pool.query(
-                `
-                insert into timeline_events
-                  (
-                    tenant_id,
-                    job_id,
-                    kind,
-                    message,
-                    meta,
-                    created_at
-                  )
-                values
-                  (
-                    $1,
-                    $2,
-                    'field_photo_email_import',
-                    $3,
-                    $4::jsonb,
-                    now()
-                  )
-                `,
-                [
-                  tenantId,
-                  Number(job.id),
-                  complete
-                    ? `Field photos uploaded by email: ${importResult.imported.length} photo${importResult.imported.length === 1 ? "" : "s"}`
-                    : `Field photo email partially processed: ${importResult.imported.length} uploaded, ${importResult.failed.length} failed`,
-                  JSON.stringify({
-                    external_reference:
-                      externalReference,
-                    sender:
-                      senderEmail,
-                    subject:
-                      parsedPayload.subject,
-                    attempted:
-                      importResult.attempted,
-                    imported:
-                      importResult.imported.length,
-                    failed:
-                      importResult.failed.length,
-                  }),
-                ]
-              )
-
-              await sendFieldPhotoReceipt({
-                sender:
-                  parsedPayload.from,
-                success:
-                  complete,
-                subjectAddress:
-                  parsedPayload.subject,
-                job,
-                importedCount:
-                  importResult.imported.length,
-                attemptedCount:
-                  importResult.attempted,
-                reason:
-                  complete
-                    ? null
-                    : `${importResult.imported.length} photo(s) uploaded and ${importResult.failed.length} failed. Office review is required.`,
-              })
-
-              console.log(
-                complete
-                  ? "✅ FIELD_PHOTO_EMAIL_COMPLETE"
-                  : "❌ FIELD_PHOTO_EMAIL_INCOMPLETE",
+              values
+                (
+                  $1,
+                  $2,
+                  'staff_note',
+                  $3,
+                  $4::jsonb,
+                  now()
+                )
+              `,
+              [
+                tenantId,
+                Number(job.id),
+                fieldNote,
                 JSON.stringify({
-                  job_id:
-                    Number(job.id),
-                  subject:
-                    parsedPayload.subject,
-                  sender:
+                  author:
                     senderEmail,
-                  attempted:
-                    importResult.attempted,
-                  imported:
-                    importResult.imported.length,
-                  failed:
-                    importResult.failed.length,
-                })
-              )
+                  author_email:
+                    senderEmail,
+                  source:
+                    "field_email",
+                  external_reference:
+                    externalReference,
+                }),
+              ]
+            )
 
-              return {
-                ok: true,
-                field_photo_upload: true,
-                success:
-                  complete,
-                job_id:
+            noteAdded = true
+          }
+
+          let importResult = {
+            attempted: 0,
+            imported: [] as Array<any>,
+            failed: [] as Array<any>,
+          }
+
+          if (
+            emailId &&
+            fieldPhotos.length > 0
+          ) {
+            importResult =
+              await importFieldPhotoAttachments({
+                emailId,
+                jobId:
                   Number(job.id),
+                sender:
+                  senderEmail,
+              })
+          }
+
+          const photosComplete =
+            importResult.failed.length === 0 &&
+            importResult.imported.length ===
+              importResult.attempted
+
+          const complete =
+            !attachmentListError &&
+            photosComplete &&
+            (
+              noteAdded ||
+              importResult.imported.length > 0
+            )
+
+          await pool.query(
+            `
+            insert into timeline_events
+              (
+                tenant_id,
+                job_id,
+                kind,
+                message,
+                meta,
+                created_at
+              )
+            values
+              (
+                $1,
+                $2,
+                'field_photo_email_import',
+                $3,
+                $4::jsonb,
+                now()
+              )
+            `,
+            [
+              tenantId,
+              Number(job.id),
+              complete
+                ? `Field update received by email from ${senderEmail}.`
+                : `Field email partially processed from ${senderEmail}.`,
+              JSON.stringify({
+                external_reference:
+                  externalReference,
+                sender:
+                  senderEmail,
+                subject:
+                  parsedPayload.subject,
+                note_added:
+                  noteAdded,
                 attempted:
                   importResult.attempted,
                 imported:
                   importResult.imported.length,
                 failed:
                   importResult.failed.length,
-              }
-            }
+                attachment_list_error:
+                  attachmentListError,
+              }),
+            ]
+          )
+
+          const failureReason =
+            complete
+              ? null
+              : attachmentListError
+                ? `The note was ${
+                    noteAdded ? "added" : "not added"
+                  }, but Navigator could not read the email attachments: ${attachmentListError}`
+                : `${importResult.imported.length} photo(s) uploaded and ${importResult.failed.length} failed. Office review is required.`
+
+          await sendFieldEmailReceipt({
+            sender:
+              parsedPayload.from,
+            success:
+              complete,
+            subjectAddress:
+              parsedPayload.subject,
+            job,
+            noteAdded,
+            importedCount:
+              importResult.imported.length,
+            failedCount:
+              importResult.failed.length,
+            reason:
+              failureReason,
+          })
+
+          console.log(
+            complete
+              ? "✅ FIELD_EMAIL_COMPLETE"
+              : "❌ FIELD_EMAIL_INCOMPLETE",
+            JSON.stringify({
+              job_id:
+                Number(job.id),
+              subject:
+                parsedPayload.subject,
+              sender:
+                senderEmail,
+              note_added:
+                noteAdded,
+              attempted:
+                importResult.attempted,
+              imported:
+                importResult.imported.length,
+              failed:
+                importResult.failed.length,
+            })
+          )
+
+          return {
+            ok: true,
+            field_email_intake: true,
+            success:
+              complete,
+            job_id:
+              Number(job.id),
+            note_added:
+              noteAdded,
+            attempted:
+              importResult.attempted,
+            imported:
+              importResult.imported.length,
+            failed:
+              importResult.failed.length,
           }
         }
 
