@@ -537,6 +537,20 @@ function getWorkflowMessages(settings: DevSettings, job: JobRow) {
     }
   }
 
+  if (job.active_followup_workflow === "demo_scheduled") {
+    return {
+      workflowKey: "demo_scheduled",
+      messages: settings.demo_scheduled_messages || []
+    }
+  }
+
+  if (job.active_followup_workflow === "demo_completed_follow_up") {
+    return {
+      workflowKey: "demo_completed_follow_up",
+      messages: settings.demo_completed_follow_up_messages || []
+    }
+  }
+
   if (job.active_followup_workflow === "estimate_sent") {
     return {
       workflowKey: "estimate_sent",

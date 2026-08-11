@@ -491,12 +491,16 @@ export default function DeveloperSettings() {
 
       {renderTiming(
         "lead_timings_minutes",
-        `${prospectLabel} / Initial Interest`,
+        tenantSlug === "actual-assistant-llc"
+          ? "Demo Requested"
+          : `${prospectLabel} / Initial Interest`,
       )}
 
       {renderMessages(
         "lead_messages",
-        `${prospectLabel} / Initial Interest`,
+        tenantSlug === "actual-assistant-llc"
+          ? "Demo Requested"
+          : `${prospectLabel} / Initial Interest`,
       )}
 
       {renderTiming(

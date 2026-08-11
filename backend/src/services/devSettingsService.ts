@@ -10,12 +10,16 @@ export type DevSettings = {
   alert_sms_to?: string
 
   lead_messages: string[]
+  demo_scheduled_messages: string[]
+  demo_completed_follow_up_messages: string[]
   estimate_messages: string[]
   contract_messages: string[]
   tarp_messages: string[]
   weather_report_messages: string[]
 
   lead_timings_minutes: number[]
+  demo_scheduled_timings_minutes: number[]
+  demo_completed_follow_up_timings_minutes: number[]
   estimate_timings_minutes: number[]
   contract_timings_minutes: number[]
   tarp_timings_minutes: number[]
@@ -28,6 +32,8 @@ function defaultSettings(): DevSettings {
     alert_sms_to: "",
 
     lead_messages: ["", "", "", "", "", "", "", "", "", ""],
+    demo_scheduled_messages: ["", "", "", "", "", "", "", "", "", ""],
+    demo_completed_follow_up_messages: ["", "", "", "", "", "", "", "", "", ""],
     estimate_messages: ["", "", "", "", "", "", "", "", "", ""],
     contract_messages: ["", "", "", "", "", "", "", "", "", ""],
 
@@ -58,6 +64,8 @@ function defaultSettings(): DevSettings {
     ],
 
     lead_timings_minutes: [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
+    demo_scheduled_timings_minutes: [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
+    demo_completed_follow_up_timings_minutes: [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
     estimate_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
     contract_timings_minutes: [0, 1440, 4320, 7200, 10080, 20160, 30240, 43200, 64800, 129600],
 
@@ -95,10 +103,14 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
   return {
     ...merged,
     lead_messages: [...(merged.lead_messages || []), ...defaults.lead_messages].slice(0, 10),
+    demo_scheduled_messages: [...(merged.demo_scheduled_messages || []), ...defaults.demo_scheduled_messages].slice(0, 10),
+    demo_completed_follow_up_messages: [...(merged.demo_completed_follow_up_messages || []), ...defaults.demo_completed_follow_up_messages].slice(0, 10),
     estimate_messages: [...(merged.estimate_messages || []), ...defaults.estimate_messages].slice(0, 10),
     contract_messages: [...(merged.contract_messages || []), ...defaults.contract_messages].slice(0, 10),
     tarp_messages: [...(merged.tarp_messages || []), ...defaults.tarp_messages].slice(0, 10),
     lead_timings_minutes: [...(merged.lead_timings_minutes || []), ...defaults.lead_timings_minutes].slice(0, 10),
+    demo_scheduled_timings_minutes: [...(merged.demo_scheduled_timings_minutes || []), ...defaults.demo_scheduled_timings_minutes].slice(0, 10),
+    demo_completed_follow_up_timings_minutes: [...(merged.demo_completed_follow_up_timings_minutes || []), ...defaults.demo_completed_follow_up_timings_minutes].slice(0, 10),
     estimate_timings_minutes: [...(merged.estimate_timings_minutes || []), ...defaults.estimate_timings_minutes].slice(0, 10),
     contract_timings_minutes: [...(merged.contract_timings_minutes || []), ...defaults.contract_timings_minutes].slice(0, 10),
     tarp_timings_minutes: [...(merged.tarp_timings_minutes || []), ...defaults.tarp_timings_minutes].slice(0, 10),
