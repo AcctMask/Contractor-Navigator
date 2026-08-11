@@ -10,6 +10,20 @@ const STAGES = [
   "completed", "tarp_complete", "invoiced", "paid", "disqualified", "dnc",
 ]
 
+const ACTUAL_ASSISTANT_STAGES = [
+  { value: "demo_requested", label: "Demo Requested" },
+  { value: "prospect", label: "Prospect" },
+  { value: "demo_scheduled", label: "Demo Scheduled" },
+  { value: "demo_completed_follow_up", label: "Demo Completed Follow-Up" },
+  { value: "proposal_sent", label: "Proposal Sent" },
+  { value: "agreement_sent", label: "Agreement Sent" },
+  { value: "company_dna", label: "Company DNA" },
+  { value: "provisioning", label: "Provisioning" },
+  { value: "active_tenant", label: "Active Tenant" },
+  { value: "buying_signals", label: "Buying Signals" },
+  { value: "not_moving_forward", label: "Not Moving Forward" },
+]
+
 export default function JobDetail() {
   const { id } = useParams()
 
@@ -1797,9 +1811,15 @@ export default function JobDetail() {
           <div>
             <label style={label}>Stage</label>
             <select value={stage} onChange={(e) => setStage(e.target.value)} style={input}>
-              {STAGES.map((item) => (
-                <option key={item} value={item}>{item}</option>
-              ))}
+              {getTenantSlug() === "actual-assistant-llc"
+                ? ACTUAL_ASSISTANT_STAGES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))
+                : STAGES.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
             </select>
           </div>
 
