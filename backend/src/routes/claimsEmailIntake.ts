@@ -3,9 +3,14 @@ import { pool } from "../db/db"
 import { createLeadFromInboundCallByTenantSlug } from "../services/followupEngine"
 import {
   createDocumentPackageByTenantSlug,
-  sendDocumentPackage,
   upsertEstimateDetailsByTenantSlug,
 } from "../services/documentPipelineService"
+import {
+  queueInitialExternalResponse,
+} from "../services/initialResponseGraceService"
+import {
+  parseUniversalIntake,
+} from "../services/universalIntakeParser"
 
 const TENANT_SLUG = "g2g-roofing"
 const INBOUND_ADDRESS = "admin@g2groofing.com"
@@ -363,21 +368,108 @@ function parseClaimsEmail(text: string) {
       .join(" | ")
   )
 
+  /*
+   * Universal intake is a forgiveness/enrichment layer only.
+   *
+   * Claims-specific extraction remains authoritative.
+   * Universal parsing fills only values the claims parser
+   * could not reliably identify.
+   *
+   * This does not create a second intake path.
+   */
+  const universal =
+    parseUniversalIntake(text)
+
+  const universalAddress =
+    [
+      universal.address1,
+      universal.city,
+      universal.state,
+      universal.zip,
+    ]
+      .filter(Boolean)
+      .join(", ") || null
+
+  const claimsNotes =
+    cleanParsedValue(notes)
+
+  const universalNotes =
+    cleanParsedValue(universal.notes)
+
+  const enrichedNotes =
+    claimsNotes ||
+    universalNotes
+
+  const enrichedCustomerEmail =
+    cleanParsedValue(customerEmail) ||
+    (
+      isInternalG2GEmail(
+        cleanParsedValue(
+          universal.customerEmail
+        )
+      )
+        ? null
+        : cleanParsedValue(
+            universal.customerEmail
+          )
+    )
+
   return {
-    carrier: cleanParsedValue(carrier),
-    claimNumber: cleanParsedValue(claimNumber),
-    customerName: cleanParsedValue(customerName),
-    propertyAddress: cleanParsedValue(address),
-    customerPhone: cleanParsedValue(customerPhone),
-    customerEmail: cleanParsedValue(customerEmail),
-    adjusterName: cleanParsedValue(adjusterName),
-    adjusterPhone: cleanParsedValue(adjusterPhone),
-    adjusterEmail: cleanParsedValue(adjusterEmail),
-    notes,
+    carrier:
+      cleanParsedValue(carrier) ||
+      cleanParsedValue(universal.carrier),
+
+    claimNumber:
+      cleanParsedValue(claimNumber) ||
+      cleanParsedValue(
+        universal.claimNumber
+      ),
+
+    customerName:
+      cleanParsedValue(customerName) ||
+      cleanParsedValue(
+        universal.customerName
+      ),
+
+    propertyAddress:
+      cleanParsedValue(address) ||
+      cleanParsedValue(
+        universalAddress
+      ),
+
+    customerPhone:
+      cleanParsedValue(customerPhone) ||
+      cleanParsedValue(
+        universal.customerPhone
+      ),
+
+    customerEmail:
+      enrichedCustomerEmail,
+
+    /*
+     * Claims-only intelligence remains exclusively
+     * controlled by the specialized claims parser.
+     */
+    adjusterName:
+      cleanParsedValue(adjusterName),
+
+    adjusterPhone:
+      cleanParsedValue(adjusterPhone),
+
+    adjusterEmail:
+      cleanParsedValue(adjusterEmail),
+
+    notes:
+      enrichedNotes,
+
     serviceType,
     lossType,
     lossDate,
-    emergencySqft: emergencySqft ? Number(emergencySqft) : null,
+
+    emergencySqft:
+      emergencySqft
+        ? Number(emergencySqft)
+        : null,
   }
 }
 
@@ -512,35 +604,25 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         "ems_tarp"
       )
 
-      let sendResult: any = null
-
-      try {
-        sendResult = await sendDocumentPackage(
-          TENANT_SLUG,
-          jobId,
-          Number(documentPackage.id)
-        )
-      } catch (err: any) {
-        sendResult = {
-          ok: false,
-          error: err?.message || String(err),
-        }
-
-        await addTimelineEvent(
+      const sendResult =
+        await queueInitialExternalResponse({
           tenantId,
           jobId,
-          "ems_tarp_package_not_sent",
-          `EMS package was created but not sent automatically: ${sendResult.error}`,
-          {
-            source: "inbound_email",
-            from: parsedPayload.from,
-            subject: parsedPayload.subject,
-            parsed,
-            package_id: documentPackage.id,
-            reason: sendResult.error,
-          }
-        )
-      }
+          kind:
+            "ems_document_package",
+          payload: {
+            tenant_slug:
+              TENANT_SLUG,
+            package_id:
+              Number(documentPackage.id),
+            source:
+              "claims_email_intake",
+            from:
+              parsedPayload.from,
+            subject:
+              parsedPayload.subject,
+          },
+        })
 
       await addTimelineEvent(
         tenantId,
@@ -559,7 +641,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         tenantId,
         jobId,
         "ems_tarp_email_intake_processed",
-        "EMS tarp job created from inbound assessment email and work authorization sent.",
+        "EMS tarp job created from inbound assessment email; initial external response queued behind the five-minute grace period.",
         {
           from: parsedPayload.from,
           to: parsedPayload.to,

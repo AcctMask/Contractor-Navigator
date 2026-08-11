@@ -1,4 +1,10 @@
 import { pool } from "../db/db";
+import {
+  sendCustomerAcknowledgmentEmail,
+} from "./emailService";
+import {
+  sendDocumentPackage,
+} from "./documentPipelineService";
 
 type ScheduledActionRow = {
   id: number;
@@ -242,6 +248,188 @@ async function runWorkflowStep(action: ScheduledActionRow) {
   });
 }
 
+async function runInitialExternalResponse(
+  action: ScheduledActionRow
+) {
+  const tenantId = action.tenant_id
+  const jobId = action.job_id
+  const payload = action.payload || {}
+
+  if (!jobId) {
+    await timeline(
+      tenantId,
+      null,
+      "initial_external_response_skipped",
+      "Initial external response skipped because job_id is missing.",
+      {
+        action_id: action.id,
+      }
+    )
+    return
+  }
+
+  const jobResult = await pool.query(
+    `
+    select
+      j.id,
+      j.bot_paused,
+      j.bot_pause_reason,
+      j.stage
+    from jobs j
+    where j.tenant_id = $1
+      and j.id = $2
+    limit 1
+    `,
+    [
+      tenantId,
+      jobId,
+    ]
+  )
+
+  if (!jobResult.rowCount) {
+    await timeline(
+      tenantId,
+      jobId,
+      "initial_external_response_skipped",
+      "Initial external response skipped because job no longer exists.",
+      {
+        action_id: action.id,
+      }
+    )
+    return
+  }
+
+  const job = jobResult.rows[0]
+
+  if (
+    job.bot_paused ||
+    ["archived", "disqualified", "not_moving_forward"].includes(
+      String(job.stage || "")
+    )
+  ) {
+    await timeline(
+      tenantId,
+      jobId,
+      "initial_external_response_cancelled",
+      "Initial automated external response cancelled during the five-minute grace period.",
+      {
+        action_id: action.id,
+        bot_paused: Boolean(job.bot_paused),
+        bot_pause_reason:
+          job.bot_pause_reason || null,
+        stage:
+          job.stage || null,
+        kind:
+          payload.kind || null,
+      }
+    )
+    return
+  }
+
+  if (
+    payload.kind ===
+    "sales_customer_acknowledgment"
+  ) {
+    const customerEmail =
+      String(
+        payload.customer_email || ""
+      ).trim()
+
+    if (!customerEmail) {
+      await timeline(
+        tenantId,
+        jobId,
+        "initial_external_response_skipped",
+        "Sales acknowledgment skipped because customer email is unavailable.",
+        {
+          action_id: action.id,
+          kind: payload.kind,
+        }
+      )
+      return
+    }
+
+    const result =
+      await sendCustomerAcknowledgmentEmail(
+        customerEmail,
+        String(
+          payload.customer_name || "there"
+        ),
+        {
+          propertyAddress:
+            payload.property_address || "",
+          sourceDetail:
+            payload.source_detail || "",
+        }
+      )
+
+    await timeline(
+      tenantId,
+      jobId,
+      "initial_external_response_sent",
+      "Initial sales acknowledgment released after the five-minute grace period.",
+      {
+        action_id: action.id,
+        kind: payload.kind,
+        result,
+      }
+    )
+
+    return
+  }
+
+  if (
+    payload.kind ===
+    "ems_document_package"
+  ) {
+    const tenantSlug =
+      String(
+        payload.tenant_slug || ""
+      ).trim()
+
+    const packageId =
+      Number(payload.package_id)
+
+    if (
+      !tenantSlug ||
+      !Number.isFinite(packageId) ||
+      packageId <= 0
+    ) {
+      throw new Error(
+        "EMS initial response missing tenant_slug or package_id"
+      )
+    }
+
+    const result =
+      await sendDocumentPackage(
+        tenantSlug,
+        jobId,
+        packageId
+      )
+
+    await timeline(
+      tenantId,
+      jobId,
+      "initial_external_response_sent",
+      "Initial EMS customer communication released after the five-minute grace period.",
+      {
+        action_id: action.id,
+        kind: payload.kind,
+        package_id: packageId,
+        result,
+      }
+    )
+
+    return
+  }
+
+  throw new Error(
+    `Unsupported initial external response kind: ${String(
+      payload.kind || ""
+    )}`
+  )
+}
+
 async function runAction(action: ScheduledActionRow) {
   const tenantId = action.tenant_id;
   const jobId = action.job_id;
@@ -253,6 +441,15 @@ async function runAction(action: ScheduledActionRow) {
 
   if (action.action_key === "workflow_step") {
     await runWorkflowStep(action);
+  } else if (
+    action.action_key ===
+    "initial_external_response"
+  ) {
+    await runInitialExternalResponse(action);
+  } else {
+    throw new Error(
+      `Unsupported scheduled action: ${action.action_key}`
+    )
   }
 
   await timeline(tenantId, jobId, "scheduled_action_done", `${action.action_key} (job_id=${jobId})`, {

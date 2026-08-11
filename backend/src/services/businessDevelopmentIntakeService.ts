@@ -17,6 +17,8 @@ export type BusinessDevelopmentIntakeInput = {
   city?: string | null
   state?: string | null
   zip?: string | null
+  carrier?: string | null
+  claimNumber?: string | null
   notes?: string | null
   externalReference?: string | null
   suppressStaffNotification?: boolean
@@ -292,6 +294,8 @@ export async function processBusinessDevelopmentIntake(
     city: clean(rawInput.city),
     state: clean(rawInput.state) || "FL",
     zip: clean(rawInput.zip),
+    carrier: clean(rawInput.carrier),
+    claimNumber: clean(rawInput.claimNumber),
     notes: clean(rawInput.notes),
     externalReference: clean(rawInput.externalReference),
     suppressStaffNotification:
@@ -509,6 +513,14 @@ export async function processBusinessDevelopmentIntake(
           lead_source_detail = coalesce(
             lead_source_detail,
             $4
+          ),
+          carrier = coalesce(
+            nullif(trim(carrier), ''),
+            $5
+          ),
+          claim_number = coalesce(
+            nullif(trim(claim_number), ''),
+            $6
           )
         where tenant_id = $1
           and id = $2
@@ -518,6 +530,8 @@ export async function processBusinessDevelopmentIntake(
           jobId,
           sourceLabel(input.source),
           input.sourceDetail || input.source,
+          input.carrier,
+          input.claimNumber,
         ]
       )
 
@@ -665,6 +679,8 @@ export async function processBusinessDevelopmentIntake(
             city,
             state,
             zip,
+            carrier,
+            claim_number,
             lead_source,
             lead_source_detail,
             created_at,
@@ -688,6 +704,8 @@ export async function processBusinessDevelopmentIntake(
             $11,
             $12,
             $13,
+            $14,
+            $15,
             now(),
             now()
           )
@@ -706,6 +724,8 @@ export async function processBusinessDevelopmentIntake(
           input.city,
           input.state,
           input.zip,
+          input.carrier,
+          input.claimNumber,
           sourceLabel(input.source),
           input.sourceDetail || input.source,
         ]

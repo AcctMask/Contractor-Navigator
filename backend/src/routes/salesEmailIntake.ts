@@ -6,8 +6,10 @@ import {
 } from "../services/businessDevelopmentIntakeService"
 import {
   sendAlertEmail,
-  sendCustomerAcknowledgmentEmail,
 } from "../services/emailService"
+import {
+  queueInitialExternalResponse,
+} from "../services/initialResponseGraceService"
 import {
   parseUniversalIntake,
 } from "../services/universalIntakeParser"
@@ -2115,6 +2117,10 @@ export async function registerSalesEmailIntakeRoutes(
               parsed.state,
             zip:
               parsed.zip,
+            carrier:
+              parsed.carrier,
+            claimNumber:
+              parsed.claimNumber,
             notes: [
               `Forwarded sales email from ${parsedPayload.from || "unknown sender"}.`,
               parsed.notes,
@@ -2151,11 +2157,19 @@ export async function registerSalesEmailIntakeRoutes(
 
         const customerEmailAcknowledgment =
           parsed.customerEmail
-            ? await sendCustomerAcknowledgmentEmail(
-                parsed.customerEmail,
-                customerName,
-                {
-                  propertyAddress: [
+            ? await queueInitialExternalResponse({
+                tenantId:
+                  Number(result.tenant_id),
+                jobId:
+                  Number(result.job_id),
+                kind:
+                  "sales_customer_acknowledgment",
+                payload: {
+                  customer_email:
+                    parsed.customerEmail,
+                  customer_name:
+                    customerName,
+                  property_address: [
                     parsed.address1,
                     parsed.city,
                     parsed.state,
@@ -2163,10 +2177,12 @@ export async function registerSalesEmailIntakeRoutes(
                   ]
                     .filter(Boolean)
                     .join(", "),
-                  sourceDetail:
+                  source_detail:
                     parsedPayload.subject,
-                }
-              )
+                  source:
+                    "sales_email_intake",
+                },
+              })
             : {
                 ok: false,
                 skipped: true,

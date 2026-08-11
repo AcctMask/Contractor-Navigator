@@ -6,14 +6,17 @@ export type UniversalIntakeResult = {
   city: string | null
   state: string | null
   zip: string | null
+  carrier: string | null
+  claimNumber: string | null
   notes: string | null
 }
 
 const FIELD_LABEL_PATTERN =
-  "(?:customer name|client name|homeowner name|insured name|contact name|name|" +
-  "customer phone|client phone|homeowner phone|insured phone|contact phone|phone|cell|" +
+  "(?:customer name|client name|homeowner name|homeowner|insured name|insured|policyholder|policy holder|contact name|name|" +
+  "primary phone|home phone|customer phone|client phone|homeowner phone|insured phone|contact phone|phone|home|cell|" +
   "customer email|client email|homeowner email|insured email|contact email|email|" +
   "property address|service address|job address|customer address|loss location|risk address|address|" +
+  "insurance company|insurance carrier|insurer|carrier|claim number|claim no\\.?|claim #|claim|" +
   "city|state|zip|postal code|" +
   "request|service requested|work requested|notes|comments|message|description)"
 
@@ -79,6 +82,19 @@ export function extractIntakeLabeledValue(
   return cleanIntakeValue(match?.[1])
 }
 
+function extractIntakeAddressValue(
+  text: string
+): string | null {
+  const normalized =
+    normalizeIntakeFieldBoundaries(text)
+
+  const match = normalized.match(
+    /(?:property address|service address|job address|customer address|loss location|risk address|address)\s*[:#-]\s*([^\n\r]+)/i
+  )
+
+  return cleanIntakeValue(match?.[1])
+}
+
 export function normalizeUsPhone(
   value: string | null
 ): string | null {
@@ -107,7 +123,7 @@ export function extractIntakePhone(
 ): string | null {
   const labeled = extractIntakeLabeledValue(
     text,
-    "customer phone|client phone|homeowner phone|insured phone|contact phone|phone|cell"
+    "primary phone|home phone|customer phone|client phone|homeowner phone|insured phone|contact phone|phone|home|cell"
   )
 
   const normalizedLabeled = normalizeUsPhone(labeled)
@@ -338,10 +354,8 @@ export function extractUniversalProperty(
 } {
   const normalized = normalizeIntakeFieldBoundaries(text)
 
-  const explicitAddress = extractIntakeLabeledValue(
-    normalized,
-    "property address|service address|job address|customer address|loss location|risk address|address"
-  )
+  const explicitAddress =
+    extractIntakeAddressValue(normalized)
 
   const explicitCity = extractIntakeLabeledValue(
     normalized,
@@ -360,12 +374,12 @@ export function extractUniversalProperty(
 
   const explicitName = extractIntakeLabeledValue(
     normalized,
-    "customer name|client name|homeowner name|insured name|contact name|name"
+    "customer name|client name|homeowner name|homeowner|insured name|insured|policyholder|policy holder|contact name|name"
   )
 
   if (explicitAddress) {
     const oneLine = explicitAddress.match(
-      /^(.+?),\s*([^,]+),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/i
+      /^(.+?),\s*([^,]+),?\s+([A-Z]{2})\s*,?\s*(\d{5}(?:-\d{4})?)$/i
     )
 
     if (oneLine) {
@@ -476,7 +490,7 @@ export function extractUniversalProperty(
   }
 
   const oneLine = normalized.match(
-    /(\d+[A-Z]?(?:[- ]\d+)?\s+[^\n\r,]+),\s*([^,\n\r]+),?\s+([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/i
+    /(\d+[A-Z]?(?:[- ]\d+)?\s+[^\n\r,]+),\s*([^,\n\r]+),?\s+([A-Z]{2})\s*,?\s*(\d{5}(?:-\d{4})?)/i
   )
 
   let inferredOneLineName: string | null = null
@@ -594,7 +608,7 @@ function extractUniversalNotes(
     }
 
     if (
-      /^(customer name|client name|homeowner name|insured name|contact name|name|customer phone|client phone|homeowner phone|insured phone|contact phone|phone|cell|customer email|client email|homeowner email|insured email|contact email|email|property address|service address|job address|customer address|loss location|risk address|address|city|state|zip|postal code)\s*[:#-]/i.test(
+      /^(customer name|client name|homeowner name|homeowner|insured name|insured|policyholder|policy holder|contact name|name|primary phone|home phone|customer phone|client phone|homeowner phone|insured phone|contact phone|phone|home|cell|customer email|client email|homeowner email|insured email|contact email|email|property address|service address|job address|customer address|loss location|risk address|address|insurance company|insurance carrier|insurer|carrier|claim number|claim no\.?|claim #|claim|city|state|zip|postal code)\s*[:#-]/i.test(
         line
       )
     ) {
@@ -626,6 +640,18 @@ export function parseUniversalIntake(
   const customerEmail =
     extractExternalIntakeEmail(normalized)
 
+  const carrier =
+    extractIntakeLabeledValue(
+      normalized,
+      "insurance company|insurer|carrier|insurance carrier"
+    )
+
+  const claimNumber =
+    extractIntakeLabeledValue(
+      normalized,
+      "claim number|claim #|claim no\\.?|claim"
+    )
+
   const baseResult = {
     customerName,
     customerPhone,
@@ -634,6 +660,8 @@ export function parseUniversalIntake(
     city: property.city,
     state: property.state,
     zip: property.zip,
+    carrier,
+    claimNumber,
   }
 
   return {
