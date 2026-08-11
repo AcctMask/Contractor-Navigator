@@ -194,6 +194,151 @@ const BUYING_SIGNAL_PATTERNS = [
   "lets do it",
 ]
 
+const CUSTOMER_FRUSTRATION_PATTERNS = [
+  "i am frustrated",
+  "i'm frustrated",
+  "im frustrated",
+  "getting frustrated",
+  "getting frustrating",
+  "this is frustrating",
+  "this is getting frustrating",
+  "very frustrating",
+
+  "i am annoyed",
+  "i'm annoyed",
+  "im annoyed",
+  "this is annoying",
+  "this is getting annoying",
+  "you are annoying",
+
+  "this is ridiculous",
+  "this is ludicrous",
+  "this is absurd",
+  "this is unbelievable",
+  "this is unacceptable",
+  "this is pathetic",
+  "this is useless",
+  "this is terrible",
+  "this is awful",
+  "this is garbage",
+  "this is a joke",
+  "what a joke",
+
+  "you are not listening",
+  "you're not listening",
+  "youre not listening",
+  "not listening to me",
+  "you don't listen",
+  "you dont listen",
+
+  "i already told you",
+  "already told you",
+  "i've already told you",
+  "ive already told you",
+  "you keep asking",
+  "keep asking me",
+  "same question",
+  "keep repeating",
+  "you keep repeating",
+  "why do you keep asking",
+
+  "are you a bot",
+  "is this a bot",
+  "talk to a real person",
+  "speak to a real person",
+  "real person please",
+  "talk to a human",
+  "speak to a human",
+  "let me talk to someone",
+  "get me a person",
+  "get me a human",
+  "get me a real person",
+  "human please",
+
+  "stop texting me",
+  "stop messaging me",
+  "stop contacting me",
+  "quit texting me",
+  "quit messaging me",
+  "leave me alone",
+  "stop bothering me",
+  "do not text me",
+  "don't text me",
+  "dont text me",
+  "do not message me",
+  "don't message me",
+  "dont message me",
+  "do not contact me",
+  "don't contact me",
+  "dont contact me",
+  "shut up",
+  "go away",
+
+  "i am pissed",
+  "i'm pissed",
+  "im pissed",
+  "pissed off",
+  "you pissed me off",
+  "this pisses me off",
+
+  "you are stupid",
+  "you're stupid",
+  "youre stupid",
+  "this is stupid",
+  "you are dumb",
+  "you're dumb",
+  "youre dumb",
+  "this is dumb",
+  "you are useless",
+  "you're useless",
+  "youre useless",
+  "you are an idiot",
+  "you're an idiot",
+  "youre an idiot",
+  "you are a moron",
+  "you're a moron",
+  "youre a moron",
+]
+
+const CUSTOMER_PROFANITY_PATTERNS = [
+  /\bfuck\b/i,
+  /\bfucks\b/i,
+  /\bfucking\b/i,
+  /\bfucked\b/i,
+  /\bfucker\b/i,
+  /\bfuckers\b/i,
+  /\bshit\b/i,
+  /\bshitty\b/i,
+  /\bbullshit\b/i,
+  /\bdamn\b/i,
+  /\bdammit\b/i,
+  /\bgoddamn\b/i,
+  /\basshole\b/i,
+  /\bassholes\b/i,
+  /\bass hole\b/i,
+  /\bbitch\b/i,
+  /\bbitches\b/i,
+  /\bbastard\b/i,
+  /\bbastards\b/i,
+  /\bcrap\b/i,
+  /\bidiot\b/i,
+  /\bidiots\b/i,
+  /\bmoron\b/i,
+  /\bmorons\b/i,
+  /\bstupid\b/i,
+  /\bdumb\b/i,
+  /\bpathetic\b/i,
+  /\buseless\b/i,
+  /\bridiculous\b/i,
+  /\bludicrous\b/i,
+  /\babsurd\b/i,
+  /\bpissed\b/i,
+  /\bpiss off\b/i,
+  /\bscrew you\b/i,
+  /\bgo to hell\b/i,
+  /\bwhat the hell\b/i,
+]
+
 function normalizePhone(phone: string | null | undefined) {
   if (!phone) return null
   const digits = phone.replace(/\D/g, "")
@@ -605,6 +750,39 @@ function detectBuyingSignals(message: string) {
   return BUYING_SIGNAL_PATTERNS.filter((pattern) => normalized.includes(pattern))
 }
 
+export function detectCustomerFrustration(
+  message: string
+) {
+  const normalized =
+    String(message || "")
+      .toLowerCase()
+      .replace(/[’]/g, "'")
+      .replace(/\s+/g, " ")
+      .trim()
+
+  const phraseMatches =
+    CUSTOMER_FRUSTRATION_PATTERNS.filter(
+      (pattern) =>
+        normalized.includes(pattern)
+    )
+
+  const profanityMatches =
+    CUSTOMER_PROFANITY_PATTERNS
+      .filter((pattern) =>
+        pattern.test(normalized)
+      )
+      .map((pattern) =>
+        pattern.source
+      )
+
+  return [
+    ...new Set([
+      ...phraseMatches,
+      ...profanityMatches,
+    ]),
+  ]
+}
+
 function containsAny(text: string, patterns: string[]) {
   return patterns.some((p) => text.includes(p))
 }
@@ -966,6 +1144,104 @@ async function sendBuyingSignalAlerts(
     sms: smsResult,
     email: emailResult,
     sms_preview: summary.sms,
+    alertTargets,
+  }
+}
+
+async function sendFrustratedCustomerAlert(
+  job: JobRow,
+  inboundMessage: string,
+  matchedPatterns: string[],
+  settings: DevSettings,
+  callbackNumber: string | null
+) {
+  const alertTargets =
+    resolveAlertTargets(settings)
+
+  const summary =
+    buildDispatcherSummary(
+      "FRUSTRATED CUSTOMER — HUMAN TAKEOVER",
+      job,
+      {
+        callbackNumber,
+        message:
+          inboundMessage,
+        nextAction:
+          "Automation has been paused. Contact customer personally as soon as possible.",
+        channel:
+          "sms",
+        classification:
+          "frustrated_customer",
+      }
+    )
+
+  const ownerSms =
+    `⚠️ FRUSTRATED CUSTOMER\n\n` +
+    `Customer: ${job.customer_name || "Unknown"}\n` +
+    `Job ID: ${job.id}\n` +
+    `Phone: ${callbackNumber || "Unknown"}\n` +
+    `Address: ${buildAddressLine(job)}\n\n` +
+    `Customer said:\n"${inboundMessage}"\n\n` +
+    `Automation has been paused. Please contact the customer personally.`
+
+  let smsResult: any = null
+  let emailResult: any = null
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult =
+        await sendSMS(
+          alertTargets.alert_sms_to,
+          ownerSms
+        )
+    } catch (err: any) {
+      smsResult = {
+        error:
+          err?.message ||
+          String(err),
+      }
+    }
+  } else {
+    smsResult = {
+      skipped: true,
+      reason:
+        "missing_alert_sms_to",
+    }
+  }
+
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult =
+        await sendAlertEmail(
+          alertTargets.alert_email_to,
+          `Frustrated customer: ${
+            job.customer_name ||
+            `Job #${job.id}`
+          }`,
+          summary.email
+        )
+    } catch (err: any) {
+      emailResult = {
+        error:
+          err?.message ||
+          String(err),
+      }
+    }
+  } else {
+    emailResult = {
+      skipped: true,
+      reason:
+        "missing_alert_email_to",
+    }
+  }
+
+  return {
+    sms:
+      smsResult,
+    email:
+      emailResult,
+    matched_patterns:
+      matchedPatterns,
     alertTargets,
   }
 }
@@ -1559,6 +1835,253 @@ export async function handleInboundMessageByTenantSlug(
       needs_attention: true,
     },
   })
+
+  /*
+   * Customer-frustration safety valve.
+   *
+   * This runs before normal intake, sales-intent,
+   * classification and AI-response handling.
+   *
+   * One final apology is allowed; all continuing
+   * automation is paused and pending scheduled
+   * actions are cancelled for human takeover.
+   */
+  const frustrationSignals =
+    detectCustomerFrustration(
+      trimmed
+    )
+
+  if (frustrationSignals.length) {
+    await pool.query(
+      `
+      update jobs
+      set
+        bot_paused = true,
+        bot_pause_reason =
+          'frustrated_customer',
+        crm_substatus =
+          'frustrated_customer',
+        crm_flow_key =
+          'human_takeover_frustration',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [
+        tenantId,
+        jobId,
+      ]
+    )
+
+    await pool.query(
+      `
+      update scheduled_actions
+      set
+        status = 'cancelled',
+        updated_at = now()
+      where tenant_id = $1
+        and job_id = $2
+        and status = 'pending'
+      `,
+      [
+        tenantId,
+        jobId,
+      ]
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "customer_frustration_detected",
+      "Customer frustration detected; automation paused for human takeover.",
+      {
+        from,
+        channel:
+          "sms",
+        message:
+          trimmed,
+        matched_patterns:
+          frustrationSignals,
+      }
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "bot_paused",
+      "Bot automatically paused because customer frustration was detected.",
+      {
+        reason:
+          "frustrated_customer",
+        from,
+        channel:
+          "sms",
+        matched_patterns:
+          frustrationSignals,
+      }
+    )
+
+    const firstName =
+      String(
+        job.customer_name ||
+        "there"
+      )
+        .trim()
+        .split(/\s+/)[0] ||
+      "there"
+
+    const apology =
+      `I'm sorry, ${firstName}. ` +
+      `It sounds like this automated conversation has been frustrating. ` +
+      `I've stopped the automated messages and asked a Good2Go representative to contact you directly.`
+
+    let apologyResult: any = null
+
+    if (callbackNumber) {
+      try {
+        const sms =
+          await sendSMS(
+            callbackNumber,
+            apology
+          )
+
+        apologyResult = {
+          sent: true,
+          to:
+            callbackNumber,
+          twilio_sid:
+            sms.sid,
+          twilio_status:
+            sms.status,
+        }
+
+        await addTimelineEvent(
+          tenantId,
+          jobId,
+          "ai_inbound_response_sent",
+          apology,
+          {
+            classification:
+              "frustrated_customer",
+            sender:
+              "Good2Go Roofing Team",
+            channel:
+              "sms",
+            to:
+              callbackNumber,
+            twilio_sid:
+              sms.sid,
+            twilio_status:
+              sms.status,
+            final_automated_message:
+              true,
+          }
+        )
+      } catch (err: any) {
+        apologyResult = {
+          sent: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+
+        await addTimelineEvent(
+          tenantId,
+          jobId,
+          "ai_message_send_failed",
+          `Frustration apology failed to send: ${
+            err?.message ||
+            String(err)
+          }`,
+          {
+            classification:
+              "frustrated_customer",
+            channel:
+              "sms",
+            to:
+              callbackNumber,
+          }
+        )
+      }
+    } else {
+      apologyResult = {
+        sent: false,
+        skipped: true,
+        reason:
+          "missing_phone",
+      }
+    }
+
+    const alertResult =
+      await sendFrustratedCustomerAlert(
+        job,
+        trimmed,
+        frustrationSignals,
+        settings,
+        callbackNumber
+      )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "frustrated_customer_alert_routed",
+      "Frustrated customer routed to Good2Go for human takeover.",
+      {
+        from,
+        channel:
+          "sms",
+        matched_patterns:
+          frustrationSignals,
+        apology_result:
+          apologyResult,
+        alert_result:
+          alertResult,
+      }
+    )
+
+    await logSystemEvent(
+      "customer_frustration_detected",
+      "job",
+      jobId,
+      {
+        tenant_slug:
+          tenantSlug,
+        from,
+        channel:
+          "sms",
+        message:
+          trimmed,
+        matched_patterns:
+          frustrationSignals,
+        bot_paused:
+          true,
+        apology_result:
+          apologyResult,
+        alert_result:
+          alertResult,
+      }
+    )
+
+    return {
+      ok: true,
+      tenant_id:
+        tenantId,
+      job_id:
+        jobId,
+      classification:
+        "frustrated_customer",
+      bot_paused:
+        true,
+      human_takeover_required:
+        true,
+      matched_patterns:
+        frustrationSignals,
+      apology:
+        apologyResult,
+      alert:
+        alertResult,
+    }
+  }
 
   const latestIntakeQuestion = await getLatestIntakeQuestion(tenantId, jobId)
 
@@ -2183,6 +2706,9 @@ export async function getAiConversationByTenantSlug(tenantSlug: string, jobId: n
         "ai_message_send_failed",
         "ai_message_skipped",
         "customer_reply",
+        "customer_frustration_detected",
+        "frustrated_customer_alert_routed",
+        "bot_paused",
         "buying_signal_detected",
         "alert_routed",
         "new_lead_alert_routed",
