@@ -16,7 +16,7 @@ const ACTUAL_ASSISTANT_STAGES = [
   { value: "demo_scheduled", label: "Demo Scheduled" },
   { value: "demo_completed_follow_up", label: "Demo Completed Follow-Up" },
   { value: "proposal_sent", label: "Proposal Sent" },
-  { value: "agreement_sent", label: "Agreement Sent" },
+  { value: "agreement_sent", label: "Purchase Made" },
   { value: "company_dna", label: "Company DNA" },
   { value: "provisioning", label: "Provisioning" },
   { value: "active_tenant", label: "Active Tenant" },
