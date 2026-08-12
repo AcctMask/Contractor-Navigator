@@ -43,6 +43,7 @@ async function setConversationMemory(
 
 import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
+import { composeNavigatorCandidate } from "./headquartersService"
 import { isPhoneDnc } from "./dncService"
 
 const PERMANENT_TWILIO_ERROR_CODES = new Set([
@@ -658,6 +659,167 @@ async function logSystemEvent(
   }
 }
 
+type NavigatorHeadquartersExecutionMode =
+  | "baseline"
+  | "headquarters"
+
+const NAVIGATOR_INBOUND_SMS_SWITCH_POINT =
+  "inbound_customer_sms_response"
+
+const NAVIGATOR_OUTBOUND_SMS_SWITCH_POINT_PREFIX =
+  "outbound_followup_sms"
+
+function buildNavigatorOutboundSmsSwitchPoint(
+  workflowKey: string
+) {
+  return `${NAVIGATOR_OUTBOUND_SMS_SWITCH_POINT_PREFIX}:${workflowKey}`
+}
+
+async function getTenantDisplayName(
+  tenantId: number,
+  tenantSlug: string
+): Promise<string> {
+  try {
+    const result =
+      await pool.query(
+        `
+        select
+          coalesce(
+            nullif(
+              d.branding
+                ->> 'business_display_name',
+              ''
+            ),
+            nullif(t.name, ''),
+            t.slug
+          ) as display_name
+        from tenants t
+        left join tenant_company_dna d
+          on d.tenant_id = t.id
+        where t.id = $1
+        limit 1
+        `,
+        [tenantId]
+      )
+
+    const displayName =
+      String(
+        result.rows?.[0]
+          ?.display_name || ""
+      ).trim()
+
+    if (displayName) {
+      return displayName
+    }
+  } catch (error: any) {
+    /*
+     * Older tenants may predate the Company DNA
+     * persistence table. Fall through to the
+     * authoritative tenants table rather than
+     * introducing a tenant-specific fallback.
+     */
+    if (error?.code !== "42P01") {
+      console.warn(
+        "Navigator tenant branding lookup failed; using tenant identity fallback.",
+        error
+      )
+    }
+  }
+
+  const fallback =
+    await pool.query(
+      `
+      select
+        coalesce(
+          nullif(name, ''),
+          slug
+        ) as display_name
+      from tenants
+      where id = $1
+      limit 1
+      `,
+      [tenantId]
+    )
+
+  return (
+    String(
+      fallback.rows?.[0]
+        ?.display_name ||
+      tenantSlug
+    ).trim() ||
+    tenantSlug
+  )
+}
+
+async function getNavigatorHeadquartersExecutionMode(
+  tenantId: number,
+  switchPoint: string
+): Promise<NavigatorHeadquartersExecutionMode> {
+  const result =
+    await pool.query(
+      `
+      select
+        count(*)::int as count
+      from timeline_events
+      where tenant_id = $1
+        and kind =
+          'headquarters_execution_selection'
+        and meta
+          ->> 'switch_point' = $2
+      `,
+      [
+        tenantId,
+        switchPoint,
+      ]
+    )
+
+  const priorSelections =
+    Number(
+      result.rows?.[0]?.count || 0
+    )
+
+  return priorSelections % 2 === 0
+    ? "baseline"
+    : "headquarters"
+}
+
+async function recordNavigatorHeadquartersExecutionSelection(
+  tenantId: number,
+  jobId: number,
+  input: {
+    switch_point: string
+    intended_selection_mode:
+      NavigatorHeadquartersExecutionMode
+    execution_mode:
+      NavigatorHeadquartersExecutionMode
+    headquarters_composition_status:
+      | "not_requested"
+      | "applied"
+      | "unavailable"
+    headquarters_learning_record_ids:
+      string[]
+  }
+) {
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "headquarters_execution_selection",
+    `Navigator ${input.switch_point} executed via ${input.execution_mode}.`,
+    {
+      switch_point:
+        input.switch_point,
+      intended_selection_mode:
+        input.intended_selection_mode,
+      execution_mode:
+        input.execution_mode,
+      headquarters_composition_status:
+        input.headquarters_composition_status,
+      headquarters_learning_record_ids:
+        input.headquarters_learning_record_ids,
+    }
+  )
+}
+
 function countExistingAiMessagesForStage(timeline: TimelineRow[], stage: string) {
   return countCompletedAiFollowups(timeline, stage)
 }
@@ -966,12 +1128,14 @@ function buildDispatcherSummary(
 }
 
 async function sendAutoClassificationReply(
+  tenantSlug: string,
   tenantId: number,
   jobId: number,
   job: JobRow,
   classification: InboundClassification,
   settings: DevSettings,
-  fallbackPhone: string | null
+  fallbackPhone: string | null,
+  inboundMessage: string
 ) {
   const phone = (await getCustomerPhone(tenantId, job.customer_id)) || fallbackPhone
   if (!phone) {
@@ -1008,7 +1172,113 @@ async function sendAutoClassificationReply(
     return { sent: false, reason: "dnc" }
   }
 
-  const replyMessage = buildClassificationReply(classification, job.customer_name, settings)
+  const tenantDisplayName =
+    await getTenantDisplayName(
+      tenantId,
+      tenantSlug
+    )
+
+  const baselineReplyMessage =
+    buildClassificationReply(
+      classification,
+      job.customer_name,
+      settings
+    )
+
+  const intendedSelectionMode =
+    await getNavigatorHeadquartersExecutionMode(
+      tenantId,
+      NAVIGATOR_INBOUND_SMS_SWITCH_POINT
+    )
+
+  let executionMode:
+    NavigatorHeadquartersExecutionMode =
+    intendedSelectionMode
+
+  let replyMessage =
+    baselineReplyMessage
+
+  let headquartersCompositionStatus:
+    | "not_requested"
+    | "applied"
+    | "unavailable" =
+    "not_requested"
+
+  let headquartersLearningRecordIds:
+    string[] = []
+
+  /*
+   * Reuse the proven Universal Outreach pattern:
+   *
+   * baseline
+   * → Headquarters
+   * → baseline
+   * → Headquarters
+   *
+   * If Headquarters is due but unavailable,
+   * this execution alone falls back to baseline
+   * and the Headquarters turn does NOT advance.
+   */
+  if (
+    intendedSelectionMode ===
+      "headquarters"
+  ) {
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug,
+          task:
+            NAVIGATOR_INBOUND_SMS_SWITCH_POINT,
+          channel:
+            "sms",
+          currentContext: {
+            inbound_message:
+              inboundMessage,
+            classification,
+            customer_name:
+              job.customer_name || null,
+            tenant_display_name:
+              tenantDisplayName,
+            job_id:
+              jobId,
+            job_stage:
+              job.stage || null,
+            crm_substatus:
+              job.crm_substatus || null,
+            crm_flow_key:
+              job.crm_flow_key || null,
+            baseline_reply:
+              baselineReplyMessage,
+          },
+        })
+
+      replyMessage =
+        candidate.text.trim()
+
+      headquartersCompositionStatus =
+        "applied"
+
+      if (
+        Array.isArray(
+          candidate.learning_record_ids
+        )
+      ) {
+        headquartersLearningRecordIds =
+          candidate.learning_record_ids
+      }
+    } catch (error) {
+      executionMode =
+        "baseline"
+
+      headquartersCompositionStatus =
+        "unavailable"
+
+      console.warn(
+        "Navigator Headquarters inbound SMS composition unavailable; existing Developer Settings response retained for this execution only.",
+        error
+      )
+    }
+  }
 
   await addTimelineEvent(
     tenantId,
@@ -1018,12 +1288,54 @@ async function sendAutoClassificationReply(
     {
       stage: job.stage,
       classification,
-      sender: "Good2Go Roofing Team",
+      sender:
+        tenantDisplayName,
+      headquarters_switch_point:
+        NAVIGATOR_INBOUND_SMS_SWITCH_POINT,
+      intended_selection_mode:
+        intendedSelectionMode,
+      execution_mode:
+        executionMode,
+      headquarters_composition:
+        headquartersCompositionStatus,
+      headquarters_learning_record_ids:
+        headquartersLearningRecordIds,
     }
   )
 
   try {
     const sms = await sendSMS(phone, replyMessage)
+
+    /*
+     * Advance alternation only when the intended
+     * execution was actually fulfilled.
+     *
+     * Headquarters failure falls back to baseline
+     * but leaves Headquarters due next time.
+     */
+    if (
+      intendedSelectionMode ===
+        "baseline" ||
+      headquartersCompositionStatus ===
+        "applied"
+    ) {
+      await recordNavigatorHeadquartersExecutionSelection(
+        tenantId,
+        jobId,
+        {
+          switch_point:
+            NAVIGATOR_INBOUND_SMS_SWITCH_POINT,
+          intended_selection_mode:
+            intendedSelectionMode,
+          execution_mode:
+            executionMode,
+          headquarters_composition_status:
+            headquartersCompositionStatus,
+          headquarters_learning_record_ids:
+            headquartersLearningRecordIds,
+        }
+      )
+    }
 
     await addTimelineEvent(
       tenantId,
@@ -1033,7 +1345,8 @@ async function sendAutoClassificationReply(
       {
         stage: job.stage,
         classification,
-        sender: "Good2Go Roofing Team",
+        sender:
+          tenantDisplayName,
         channel: "sms",
         to: phone,
         twilio_sid: sms.sid,
@@ -1042,7 +1355,7 @@ async function sendAutoClassificationReply(
     )
 
     await reportAaCustomerActivity({
-      tenant_slug: settings.tenant_slug || "g2g-roofing",
+      tenant_slug: tenantSlug,
       module_id: "ai_followup",
       module_name: "AI Follow-Up & After-Hours Assistant",
       activity_type: "ai_sms_sent",
@@ -1537,15 +1850,24 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     return { ok: true, skipped: true, reason: "stage_not_supported" }
   }
 
+  const tenantDisplayName =
+    await getTenantDisplayName(
+      tenantId,
+      tenantSlug
+    )
+
   await addTimelineEvent(
     tenantId,
     jobId,
     "ai_message_generated",
     aiMessage.message,
     {
-      stage: aiMessage.stage,
-      order: aiMessage.order,
-      sender: "Good2Go Roofing Team",
+      stage:
+        aiMessage.stage,
+      order:
+        aiMessage.order,
+      sender:
+        tenantDisplayName,
     }
   )
 
@@ -1610,8 +1932,125 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     }
   }
 
+  const outboundSwitchPoint =
+    buildNavigatorOutboundSmsSwitchPoint(
+      aiMessage.stage
+    )
+
+  const intendedSelectionMode =
+    await getNavigatorHeadquartersExecutionMode(
+      tenantId,
+      outboundSwitchPoint
+    )
+
+  let executionMode:
+    NavigatorHeadquartersExecutionMode =
+    intendedSelectionMode
+
+  let outboundMessage =
+    aiMessage.message
+
+  let headquartersCompositionStatus:
+    | "not_requested"
+    | "applied"
+    | "unavailable" =
+    "not_requested"
+
+  let headquartersLearningRecordIds:
+    string[] = []
+
+  if (
+    intendedSelectionMode ===
+      "headquarters"
+  ) {
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug,
+          task:
+            "outbound_followup_sms",
+          channel:
+            "sms",
+          currentContext: {
+            tenant_display_name:
+              tenantDisplayName,
+            customer_name:
+              job.customer_name || null,
+            job_id:
+              jobId,
+            job_stage:
+              job.stage || null,
+            crm_substatus:
+              job.crm_substatus || null,
+            crm_flow_key:
+              job.crm_flow_key || null,
+            followup_workflow:
+              aiMessage.stage,
+            followup_order:
+              aiMessage.order,
+            baseline_message:
+              aiMessage.message,
+          },
+        })
+
+      outboundMessage =
+        candidate.text.trim()
+
+      headquartersCompositionStatus =
+        "applied"
+
+      if (
+        Array.isArray(
+          candidate.learning_record_ids
+        )
+      ) {
+        headquartersLearningRecordIds =
+          candidate.learning_record_ids
+      }
+    } catch (error) {
+      executionMode =
+        "baseline"
+
+      headquartersCompositionStatus =
+        "unavailable"
+
+      console.warn(
+        "Navigator Headquarters outbound SMS composition unavailable; existing Developer Settings follow-up retained for this execution only.",
+        error
+      )
+    }
+  }
+
   try {
-    const sms = await sendSMS(callbackNumber, aiMessage.message)
+    const sms =
+      await sendSMS(
+        callbackNumber,
+        outboundMessage
+      )
+
+    if (
+      intendedSelectionMode ===
+        "baseline" ||
+      headquartersCompositionStatus ===
+        "applied"
+    ) {
+      await recordNavigatorHeadquartersExecutionSelection(
+        tenantId,
+        jobId,
+        {
+          switch_point:
+            outboundSwitchPoint,
+          intended_selection_mode:
+            intendedSelectionMode,
+          execution_mode:
+            executionMode,
+          headquarters_composition_status:
+            headquartersCompositionStatus,
+          headquarters_learning_record_ids:
+            headquartersLearningRecordIds,
+        }
+      )
+    }
 
     await setConversationMemory(
       tenantId,
@@ -1623,15 +2062,32 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       tenantId,
       jobId,
       "ai_message_sent",
-      aiMessage.message,
+      outboundMessage,
       {
-        stage: aiMessage.stage,
-        order: aiMessage.order,
-        sender: "Good2Go Roofing Team",
-        channel: "sms",
-        to: callbackNumber,
-        twilio_sid: sms.sid,
-        twilio_status: sms.status,
+        stage:
+          aiMessage.stage,
+        order:
+          aiMessage.order,
+        sender:
+          tenantDisplayName,
+        channel:
+          "sms",
+        to:
+          callbackNumber,
+        twilio_sid:
+          sms.sid,
+        twilio_status:
+          sms.status,
+        headquarters_switch_point:
+          outboundSwitchPoint,
+        intended_selection_mode:
+          intendedSelectionMode,
+        execution_mode:
+          executionMode,
+        headquarters_composition:
+          headquartersCompositionStatus,
+        headquarters_learning_record_ids:
+          headquartersLearningRecordIds,
       }
     )
 
@@ -1642,7 +2098,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       job_id: jobId,
       stage: aiMessage.stage,
       order: aiMessage.order,
-      message: aiMessage.message,
+      message: outboundMessage,
       sent: true,
       to: callbackNumber,
       twilio_sid: sms.sid,
@@ -1852,6 +2308,12 @@ export async function handleInboundMessageByTenantSlug(
     )
 
   if (frustrationSignals.length) {
+    const tenantDisplayName =
+      await getTenantDisplayName(
+        tenantId,
+        tenantSlug
+      )
+
     await pool.query(
       `
       update jobs
@@ -1933,7 +2395,7 @@ export async function handleInboundMessageByTenantSlug(
     const apology =
       `I'm sorry, ${firstName}. ` +
       `It sounds like this automated conversation has been frustrating. ` +
-      `I've stopped the automated messages and asked a Good2Go representative to contact you directly.`
+      `I've stopped the automated messages and asked a ${tenantDisplayName} representative to contact you directly.`
 
     let apologyResult: any = null
 
@@ -1964,7 +2426,7 @@ export async function handleInboundMessageByTenantSlug(
             classification:
               "frustrated_customer",
             sender:
-              "Good2Go Roofing Team",
+              tenantDisplayName,
             channel:
               "sms",
             to:
@@ -2194,9 +2656,15 @@ export async function handleInboundMessageByTenantSlug(
       email_result: intakeEmailResult,
     })
 
+    const intakeTenantDisplayName =
+      await getTenantDisplayName(
+        tenantId,
+        tenantSlug
+      )
+
     await sendSMS(
       callbackNumber,
-      "Thanks — we received your information and someone from Good2Go Roofing Team will follow up."
+      `Thanks — we received your information and someone from ${intakeTenantDisplayName} will follow up.`
     )
 
     return {
@@ -2673,12 +3141,14 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
   }
 
   await sendAutoClassificationReply(
+    tenantSlug,
     tenantId,
     jobId,
     job,
     classification,
     settings,
-    callbackNumber
+    callbackNumber,
+    trimmed
   )
 
   return {
