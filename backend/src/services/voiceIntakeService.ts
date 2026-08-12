@@ -24,7 +24,6 @@ type VoiceSummary = {
   customerName: string
   propertyAddress: string
   callbackNumber: string
-  callbackTime: string
   emergencyTarpRequested: boolean
 }
 
@@ -451,22 +450,6 @@ export async function saveVoiceCallbackNumber(
   return callbackNumber || "No callback number captured"
 }
 
-export async function saveVoiceCallbackTime(
-  tenantSlug: string,
-  jobId: number,
-  callbackTime: string
-) {
-  const ctx = await getJobContext(tenantSlug, jobId)
-
-  await addTimelineEvent(
-    ctx.tenant_id,
-    ctx.job_id,
-    "voice_callback_time_captured",
-    callbackTime,
-    { channel: "voice" }
-  )
-}
-
 export async function getVoiceSummary(
   tenantSlug: string,
   jobId: number
@@ -491,16 +474,11 @@ export async function getVoiceSummary(
     ctx.customer_phone ||
     "No callback number captured"
 
-  const callbackTime =
-    (await getLatestVoiceValue(ctx.tenant_id, ctx.job_id, "voice_callback_time_captured")) ||
-    "No callback time provided"
-
   return {
     reason,
     customerName,
     propertyAddress,
     callbackNumber,
-    callbackTime,
     emergencyTarpRequested: isEmergencyTarpReason(reason),
   }
 }
@@ -512,11 +490,49 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const summary = await getVoiceSummary(tenantSlug, jobId)
 
+  const jobStateResult = await pool.query(
+    `
+    select
+      job_type,
+      stage
+    from jobs
+    where tenant_id = $1
+      and id = $2
+    limit 1
+    `,
+    [
+      ctx.tenant_id,
+      ctx.job_id,
+    ]
+  )
+
+  const jobType =
+    String(
+      jobStateResult.rows[0]?.job_type ||
+      ""
+    )
+
+  const existingStage =
+    String(
+      jobStateResult.rows[0]?.stage ||
+      ""
+    )
+
+  const isVoiceIntakeJob =
+    jobType === "VOICE_INTAKE"
+
   const qualifiesAsLead =
     Boolean(summary.callbackNumber && summary.callbackNumber !== "No callback number captured") &&
     isMeaningfulVoiceReason(summary.reason)
 
-  const decidedStage = qualifiesAsLead ? "lead" : "intake_pending"
+  const decidedStage =
+    isVoiceIntakeJob
+      ? (
+          qualifiesAsLead
+            ? "lead"
+            : "intake_pending"
+        )
+      : existingStage
 
   console.log("[VOICE_DIAG] voice qualification", {
     tenantSlug,
@@ -544,7 +560,10 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     intakeSubstatus = "likely_solicitor"
   }
 
-  if (decidedStage === "intake_pending") {
+  if (
+    isVoiceIntakeJob &&
+    decidedStage === "intake_pending"
+  ) {
     await pool.query(
       `
       update jobs
@@ -559,14 +578,35 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
 
 
 
-  await updateVoiceIntakeStage(ctx.tenant_id, ctx.job_id, decidedStage)
+  if (isVoiceIntakeJob) {
+    await updateVoiceIntakeStage(
+      ctx.tenant_id,
+      ctx.job_id,
+      decidedStage
+    )
 
-  console.log("[VOICE_DIAG] voice stage updated", {
-    tenantSlug,
-    jobId,
-    tenant_id: ctx.tenant_id,
-    decidedStage,
-  })
+    console.log(
+      "[VOICE_DIAG] voice intake stage updated",
+      {
+        tenantSlug,
+        jobId,
+        tenant_id:
+          ctx.tenant_id,
+        decidedStage,
+      }
+    )
+  } else {
+    console.log(
+      "[VOICE_DIAG] existing project stage preserved",
+      {
+        tenantSlug,
+        jobId,
+        tenant_id:
+          ctx.tenant_id,
+        existingStage,
+      }
+    )
+  }
 
   await addTimelineEvent(
     ctx.tenant_id,
@@ -596,7 +636,6 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     `Need: ${summary.reason}\n` +
     `Phone: ${summary.callbackNumber}\n` +
     `Address: ${summary.propertyAddress}\n` +
-    `Best time: ${summary.callbackTime}\n` +
     `Next: ${nextAction}`
 
   const emailSubject = summary.emergencyTarpRequested
@@ -610,7 +649,6 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     `Service Need: ${summary.reason}\n` +
     `Callback Number: ${summary.callbackNumber}\n` +
     `Property Address / ZIP: ${summary.propertyAddress}\n` +
-    `Best Callback Time: ${summary.callbackTime}\n` +
     `Emergency Tarp: ${summary.emergencyTarpRequested ? "YES" : "NO"}\n` +
     `Recommended Next Action: ${nextAction}\n`
 
@@ -687,7 +725,10 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
 
     const workflowStage = decidedStage
 
-    if (workflowStage === "lead") {
+    if (
+      isVoiceIntakeJob &&
+      workflowStage === "lead"
+    ) {
       await planFollowUps({
         tenant_id: ctx.tenant_id,
         job_id: ctx.job_id,
@@ -721,21 +762,9 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
 }
 
 export async function getVoiceFinalConfirmation(tenantSlug: string, jobId: number) {
-  const summary = await getVoiceSummary(tenantSlug, jobId)
+  await getVoiceSummary(tenantSlug, jobId)
 
-  if (summary.emergencyTarpRequested) {
-    return (
-      `Thanks ${summary.customerName}. ` +
-      `We received your emergency tarp request. ` +
-      `Our team will call ${summary.callbackNumber} around ${summary.callbackTime}. Goodbye.`
-    )
-  }
-
-  return (
-    `Thanks ${summary.customerName}. ` +
-    `We received your request about ${summary.reason}. ` +
-    `We will call ${summary.callbackNumber} around ${summary.callbackTime}. Goodbye.`
-  )
+  return "Thank you. A representative will reach out shortly."
 }
 
 export async function getVoiceStatusResponse(tenantSlug: string, jobId: number, body: any) {

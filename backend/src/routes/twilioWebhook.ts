@@ -84,7 +84,6 @@ import {
   getVoiceSummary,
   saveVoiceAddress,
   saveVoiceCallbackNumber,
-  saveVoiceCallbackTime,
   saveVoiceName,
   saveVoiceReason,
   sendVoiceIntakeAlert,
@@ -191,7 +190,7 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
     />
   </Start>
 
-  ${sayBlock("This call may be recorded for quality and follow up purposes.")}
+  ${sayBlock("This call may be recorded for customer service and training purposes.")}
 
   <Gather input="speech dtmf" numDigits="1" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="${VOICE_LANGUAGE}">
     ${sayBlock(prompt)}
@@ -202,36 +201,33 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
 }
 
 function firstPrompt() {
-  return (
-    "Thanks for calling Good to Go Roofing. " +
-    "If this is an emergency tarp request, press 1 now. " +
-    "If you are a contractor, builder, or general contractor calling about working with Good to Go Roofing, press 2 now. " +
-    "Otherwise, briefly tell me what you need help with, such as an estimate, inspection, leak, roof age, or insurance concern."
-  )
+  return [
+    "Thank you for calling Good to Go Roofing.",
+    "For emergency tarp or emergency service, press 1.",
+    "For roofing service, an estimate, repair, production, or an existing project, press 2.",
+    "For contractor, vendor, or business partnership inquiries, press 3.",
+  ].join(" ")
 }
 
 function namePrompt() {
-  return "Got it. Let me grab a few quick details so the right person can call you back. First, please say your full name."
+  return "May I have your full name?"
 }
 
 function addressPrompt() {
-  return "Thanks. Now please say the property address. If you’d rather not say the full address right now, just say the zip code."
+  return "What is the street address for the property you're calling about?"
 }
 
 function callbackNumberPrompt(from: string | null) {
-  if (!from) {
-    return "What’s the best callback number for our team to reach you?"
+  const digits = String(from || "").replace(/\D/g, "")
+  const lastFour = digits.slice(-4)
+
+  if (lastFour.length === 4) {
+    return `We'll call you back at the number you're calling from, ending in ${lastFour}. Is that okay?`
   }
 
-  return (
-    "I can use the number you’re calling from as your callback number. " +
-    "If that works, just say yes. Otherwise, say the best callback number now."
-  )
+  return "We'll call you back at the number you're calling from. Is that okay?"
 }
 
-function callbackTimePrompt() {
-  return "And what’s the best time for our team to call you back?"
-}
 
 function emergencyTarpSpokenResponse() {
   return (
@@ -460,6 +456,358 @@ async function getOrCreateVoiceJob(tenantSlug: string, from: string | null, call
   }
 }
 
+
+type VoiceExistingProjectResolution = {
+  mode:
+    | "no_match"
+    | "unique_match"
+    | "ambiguous"
+  job_id: number | null
+  address1: string | null
+  match_count: number
+}
+
+async function resolveVoiceExistingProjectByAddress(
+  tenantId: number,
+  temporaryVoiceJobId: number,
+  spokenAddress: string
+): Promise<VoiceExistingProjectResolution> {
+  /*
+   * Reuses the normalized address semantics already proven
+   * in Business Development Intake.
+   *
+   * The temporary Voice job is excluded.
+   * Closed jobs are excluded.
+   * Two results are enough to prove ambiguity.
+   */
+  const result = await pool.query(
+    `
+    select
+      j.id,
+      j.customer_id,
+      j.address1,
+      j.stage
+    from jobs j
+    where j.tenant_id = $1
+      and j.id <> $3
+      and regexp_replace(
+            regexp_replace(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      regexp_replace(
+                        regexp_replace(
+                          regexp_replace(
+                            regexp_replace(
+                              regexp_replace(
+                                regexp_replace(
+                                  lower(coalesce(j.address1, '')),
+                                  '\\mstreet\\M',
+                                  'st',
+                                  'g'
+                                ),
+                                '\\mavenue\\M',
+                                'ave',
+                                'g'
+                              ),
+                              '\\mboulevard\\M',
+                              'blvd',
+                              'g'
+                            ),
+                            '\\mroad\\M',
+                            'rd',
+                            'g'
+                          ),
+                          '\\mdrive\\M',
+                          'dr',
+                          'g'
+                        ),
+                        '\\mlane\\M',
+                        'ln',
+                        'g'
+                      ),
+                      '\\mcourt\\M',
+                      'ct',
+                      'g'
+                    ),
+                    '\\mcircle\\M',
+                    'cir',
+                    'g'
+                  ),
+                  '\\mterrace\\M',
+                  'ter',
+                  'g'
+                ),
+                '\\mparkway\\M',
+                'pkwy',
+                'g'
+              ),
+              '\\mplace\\M',
+              'pl',
+              'g'
+            ),
+            '[^a-z0-9]+',
+            '',
+            'g'
+          ) = regexp_replace(
+            regexp_replace(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      regexp_replace(
+                        regexp_replace(
+                          regexp_replace(
+                            regexp_replace(
+                              regexp_replace(
+                                regexp_replace(
+                                  lower($2),
+                                  '\\mstreet\\M',
+                                  'st',
+                                  'g'
+                                ),
+                                '\\mavenue\\M',
+                                'ave',
+                                'g'
+                              ),
+                              '\\mboulevard\\M',
+                              'blvd',
+                              'g'
+                            ),
+                            '\\mroad\\M',
+                            'rd',
+                            'g'
+                          ),
+                          '\\mdrive\\M',
+                          'dr',
+                          'g'
+                        ),
+                        '\\mlane\\M',
+                        'ln',
+                        'g'
+                      ),
+                      '\\mcourt\\M',
+                      'ct',
+                      'g'
+                    ),
+                    '\\mcircle\\M',
+                    'cir',
+                    'g'
+                  ),
+                  '\\mterrace\\M',
+                  'ter',
+                  'g'
+                ),
+                '\\mparkway\\M',
+                'pkwy',
+                'g'
+              ),
+              '\\mplace\\M',
+              'pl',
+              'g'
+            ),
+            '[^a-z0-9]+',
+            '',
+            'g'
+          )
+      and coalesce(j.stage, '') not in (
+        'archived',
+        'disqualified',
+        'paid'
+      )
+    order by
+      j.updated_at desc nulls last,
+      j.id desc
+    limit 2
+    `,
+    [
+      tenantId,
+      spokenAddress,
+      temporaryVoiceJobId,
+    ]
+  )
+
+  if (!result.rowCount) {
+    return {
+      mode: "no_match",
+      job_id: null,
+      address1: null,
+      match_count: 0,
+    }
+  }
+
+  if (result.rowCount !== 1) {
+    return {
+      mode: "ambiguous",
+      job_id: null,
+      address1: null,
+      match_count: Number(result.rowCount),
+    }
+  }
+
+  return {
+    mode: "unique_match",
+    job_id: Number(result.rows[0].id),
+    address1: result.rows[0].address1 || null,
+    match_count: 1,
+  }
+}
+
+async function rebindVoiceCallToExistingProject(params: {
+  tenantId: number
+  temporaryVoiceJobId: number
+  existingJobId: number
+  callSid: string | null
+  from: string | null
+  spokenAddress: string
+  existingAddress: string | null
+}) {
+  const client = await pool.connect()
+
+  try {
+    await client.query("begin")
+
+    /*
+     * The temporary VOICE_INTAKE job belongs only to this call.
+     * Move its Voice timeline history—including voice_call_received
+     * containing call_sid—to the proven existing project.
+     */
+    await client.query(
+      `
+      update timeline_events
+      set job_id = $3
+      where tenant_id = $1
+        and job_id = $2
+        and kind like 'voice_%'
+      `,
+      [
+        params.tenantId,
+        params.temporaryVoiceJobId,
+        params.existingJobId,
+      ]
+    )
+
+    await client.query(
+      `
+      insert into timeline_events
+        (
+          tenant_id,
+          job_id,
+          kind,
+          message,
+          meta,
+          created_at
+        )
+      values
+        (
+          $1,
+          $2,
+          'voice_address_captured',
+          $3,
+          $4::jsonb,
+          now()
+        )
+      `,
+      [
+        params.tenantId,
+        params.existingJobId,
+        params.spokenAddress,
+        JSON.stringify({
+          channel: "voice",
+          matched_existing_project: true,
+          existing_property_address:
+            params.existingAddress,
+          temporary_voice_job_id:
+            params.temporaryVoiceJobId,
+          call_sid:
+            params.callSid,
+        }),
+      ]
+    )
+
+    await client.query(
+      `
+      insert into timeline_events
+        (
+          tenant_id,
+          job_id,
+          kind,
+          message,
+          meta,
+          created_at
+        )
+      values
+        (
+          $1,
+          $2,
+          'voice_existing_project_matched',
+          'Inbound Voice call matched to existing Navigator project by normalized property address',
+          $3::jsonb,
+          now()
+        )
+      `,
+      [
+        params.tenantId,
+        params.existingJobId,
+        JSON.stringify({
+          channel: "voice",
+          match_basis:
+            "normalized_property_address",
+          temporary_voice_job_id:
+            params.temporaryVoiceJobId,
+          spoken_address:
+            params.spokenAddress,
+          existing_property_address:
+            params.existingAddress,
+          call_sid:
+            params.callSid,
+          from:
+            params.from,
+        }),
+      ]
+    )
+
+    /*
+     * Do not delete the temporary job.
+     * Archive it for auditability only after a unique match.
+     */
+    await client.query(
+      `
+      update jobs
+      set
+        stage = 'archived',
+        crm_substatus =
+          'voice_rebound_existing_project',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+        and job_type = 'VOICE_INTAKE'
+      `,
+      [
+        params.tenantId,
+        params.temporaryVoiceJobId,
+      ]
+    )
+
+    await client.query("commit")
+  } catch (error) {
+    await client.query("rollback")
+    throw error
+  } finally {
+    client.release()
+  }
+
+  /*
+   * Conversation memory now points phone communication
+   * to the project that was proven by address.
+   */
+  await setActiveConversation(
+    params.tenantId,
+    params.from,
+    params.existingJobId
+  )
+}
 
 async function reportAaCustomerActivity(payload: {
   tenant_slug: string;
@@ -724,64 +1072,71 @@ async function registerTwilioWebhook(app: FastifyInstance) {
   app.post("/twilio/voice/reason", async (req, reply) => {
     const body = (req as any).body || {}
     const { tenantSlug, jobId, callSid } = (req as any).query || {}
-    const from = normalizePhone(body.From ? String(body.From) : null)
-    const reason = getSpeech(body)
-    const digits = getDigits(body)
+    const from = normalizePhone(body.From)
+    const digits = String(body.Digits || "").trim()
+    const speech = getSpeech(body).toLowerCase()
 
     if (!tenantSlug || !jobId) {
       return replyXml(
         reply,
         twimlResponse(`
-  ${sayBlock("We couldn’t capture your request. Please try again later.")}
+  ${sayBlock("We couldn't complete the call intake. A representative will follow up shortly.")}
   <Hangup/>`)
       )
     }
 
-    if (digits === "1") {
-      await saveVoiceReason(String(tenantSlug), Number(jobId), from, "Emergency tarp request")
-      const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId, callSid: String(callSid || "") })
-      return replyXml(
-        reply,
-        gatherSpeechXml(`${emergencyTarpSpokenResponse()} Please say your full name.`, actionUrl)
-      )
+    let routingReason = ""
+
+    if (
+      digits === "1" ||
+      /emergency|tarp|leak|water coming|water is coming/.test(speech)
+    ) {
+      routingReason =
+        "Emergency tarp or emergency service"
+    } else if (
+      digits === "2" ||
+      /roof|estimate|repair|production|project|inspection|customer/.test(speech)
+    ) {
+      routingReason =
+        "Roofing service, estimate, repair, production, or existing project"
+    } else if (
+      digits === "3" ||
+      /contractor|vendor|builder|business|partner|partnership/.test(speech)
+    ) {
+      routingReason =
+        "Contractor, vendor, or business partnership inquiry"
+    } else {
+      routingReason =
+        speech
+          ? `General roofing inquiry: ${speech}`
+          : "General roofing inquiry"
     }
 
-    if (digits === "2") {
-      await saveVoiceReason(
-        String(tenantSlug),
-        Number(jobId),
-        from,
-        "Commercial contractor / builder relationship inquiry"
+    await saveVoiceReason(
+      String(tenantSlug),
+      Number(jobId),
+      from,
+      routingReason
+    )
+
+    const actionUrl =
+      buildActionUrl(
+        "/twilio/voice/name",
+        {
+          tenantSlug,
+          jobId,
+          callSid:
+            String(callSid || ""),
+        }
       )
 
-      const actionUrl = buildActionUrl("/twilio/voice/name", {
-        tenantSlug,
-        jobId,
-        callSid: String(callSid || "")
-      })
-
-      return replyXml(
-        reply,
-        gatherSpeechXml(
-          "Thanks. I’ll route this as a contractor or builder relationship call. Please say your full name and company name.",
-          actionUrl
-        )
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        namePrompt(),
+        actionUrl
       )
-    }
-
-    if (!reason) {
-      return replyXml(
-        reply,
-        twimlResponse(`
-  ${sayBlock("I didn’t catch what you need help with. Please call back and try again.")}
-  <Hangup/>`)
-      )
-    }
-
-    await saveVoiceReason(String(tenantSlug), Number(jobId), from, reason)
-
-    const actionUrl = buildActionUrl("/twilio/voice/name", { tenantSlug, jobId, callSid: String(callSid || "") })
-    return replyXml(reply, gatherSpeechXml(namePrompt(), actionUrl))
+    )
   })
 
   app.post("/twilio/voice/name", async (req, reply) => {
@@ -819,57 +1174,292 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       )
     }
 
-    await saveVoiceAddress(String(tenantSlug), Number(jobId), address)
+    const tenantId =
+      await getTenantIdBySlug(
+        String(tenantSlug)
+      )
 
-    const actionUrl = buildActionUrl("/twilio/voice/callback-number", { tenantSlug, jobId, callSid: String(callSid || "") })
-    return replyXml(reply, gatherSpeechXml(callbackNumberPrompt(from), actionUrl))
+    const temporaryVoiceJobId =
+      Number(jobId)
+
+    const resolution =
+      await resolveVoiceExistingProjectByAddress(
+        tenantId,
+        temporaryVoiceJobId,
+        address
+      )
+
+    let resolvedJobId =
+      temporaryVoiceJobId
+
+    if (
+      resolution.mode === "unique_match" &&
+      resolution.job_id
+    ) {
+      resolvedJobId =
+        resolution.job_id
+
+      await rebindVoiceCallToExistingProject({
+        tenantId,
+        temporaryVoiceJobId,
+        existingJobId:
+          resolvedJobId,
+        callSid:
+          String(callSid || "").trim() ||
+          null,
+        from,
+        spokenAddress:
+          address,
+        existingAddress:
+          resolution.address1,
+      })
+
+      console.log(
+        "[VOICE_DIAG] existing Navigator project matched by property address",
+        {
+          tenantSlug,
+          temporaryVoiceJobId,
+          resolvedJobId,
+          spokenAddress:
+            address,
+          existingAddress:
+            resolution.address1,
+        }
+      )
+    } else {
+      /*
+       * NO MATCH:
+       * preserve the existing Voice-created prospect/job
+       * exactly as it already works.
+       *
+       * AMBIGUOUS:
+       * do not guess.
+       */
+      await saveVoiceAddress(
+        String(tenantSlug),
+        temporaryVoiceJobId,
+        address
+      )
+
+      if (
+        resolution.mode === "ambiguous"
+      ) {
+        await addTimelineEvent(
+          tenantId,
+          temporaryVoiceJobId,
+          "voice_address_match_ambiguous",
+          address,
+          {
+            channel: "voice",
+            match_count:
+              resolution.match_count,
+            call_sid:
+              String(callSid || ""),
+          }
+        )
+
+        console.warn(
+          "[VOICE_DIAG] multiple active projects matched property address; temporary Voice job retained",
+          {
+            tenantSlug,
+            temporaryVoiceJobId,
+            address,
+            matchCount:
+              resolution.match_count,
+          }
+        )
+      }
+    }
+
+    const actionUrl =
+      buildActionUrl(
+        "/twilio/voice/callback-number",
+        {
+          tenantSlug,
+          jobId:
+            resolvedJobId,
+          callSid:
+            String(callSid || ""),
+        }
+      )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        callbackNumberPrompt(from),
+        actionUrl
+      )
+    )
   })
 
   app.post("/twilio/voice/callback-number", async (req, reply) => {
     const body = (req as any).body || {}
     const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const from = normalizePhone(body.From)
     const spokenValue = getSpeech(body)
-    const from = normalizePhone(body.From ? String(body.From) : null)
+    const normalizedAnswer =
+      spokenValue.toLowerCase().trim()
 
     if (!tenantSlug || !jobId) {
       return replyXml(
         reply,
         twimlResponse(`
-  ${sayBlock("I couldn’t capture the callback number. Please call back and try again.")}
+  ${sayBlock("We couldn't complete the call intake. A representative will follow up shortly.")}
   <Hangup/>`)
       )
     }
 
-    let callbackValue = spokenValue || ""
+    const callerConfirmed =
+      /^(yes|yeah|yep|correct|right|okay|ok|sure|that is fine|that's fine)$/i.test(
+        normalizedAnswer
+      )
 
-    if (isAffirmative(spokenValue) && from) {
-      callbackValue = from
-    } else if (!callbackValue && from) {
-      callbackValue = from
+    const callerDeclined =
+      /^(no|nope|different|another number|not that number)$/i.test(
+        normalizedAnswer
+      )
+
+    if (callerDeclined) {
+      const actionUrl =
+        buildActionUrl(
+          "/twilio/voice/preferred-callback-number",
+          {
+            tenantSlug,
+            jobId,
+            callSid:
+              String(callSid || ""),
+          }
+        )
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          "Please provide the best phone number to reach you.",
+          actionUrl
+        )
+      )
     }
 
-    await saveVoiceCallbackNumber(String(tenantSlug), Number(jobId), from, callbackValue)
+    const callbackValue =
+      callerConfirmed || !spokenValue
+        ? from
+        : spokenValue
 
-    const actionUrl = buildActionUrl("/twilio/voice/callback-time", { tenantSlug, jobId, callSid: String(callSid || "") })
-    return replyXml(reply, gatherSpeechXml(callbackTimePrompt(), actionUrl))
+    await saveVoiceCallbackNumber(
+      String(tenantSlug),
+      Number(jobId),
+      from,
+      callbackValue
+    )
+
+    const actionUrl =
+      buildActionUrl(
+        "/twilio/voice/final-reason",
+        {
+          tenantSlug,
+          jobId,
+          callSid:
+            String(callSid || ""),
+        }
+      )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        "Lastly, please give me a brief reason for your call so I can route it to the proper recipient.",
+        actionUrl
+      )
+    )
   })
 
-  app.post("/twilio/voice/callback-time", async (req, reply) => {
+  app.post("/twilio/voice/preferred-callback-number", async (req, reply) => {
     const body = (req as any).body || {}
     const { tenantSlug, jobId, callSid } = (req as any).query || {}
-    const callbackTime = getSpeech(body)
-    const from = normalizePhone(body.From ? String(body.From) : null)
+    const from = normalizePhone(body.From)
+    const preferredNumber =
+      getSpeech(body)
 
-    if (!tenantSlug || !jobId || !callbackTime) {
+    if (
+      !tenantSlug ||
+      !jobId ||
+      !preferredNumber
+    ) {
+      await saveVoiceCallbackNumber(
+        String(tenantSlug),
+        Number(jobId),
+        from,
+        from
+      )
+
+      const actionUrl =
+        buildActionUrl(
+          "/twilio/voice/final-reason",
+          {
+            tenantSlug,
+            jobId,
+            callSid:
+              String(callSid || ""),
+          }
+        )
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          "Lastly, please give me a brief reason for your call so I can route it to the proper recipient.",
+          actionUrl
+        )
+      )
+    }
+
+    await saveVoiceCallbackNumber(
+      String(tenantSlug),
+      Number(jobId),
+      from,
+      preferredNumber
+    )
+
+    const actionUrl =
+      buildActionUrl(
+        "/twilio/voice/final-reason",
+        {
+          tenantSlug,
+          jobId,
+          callSid:
+            String(callSid || ""),
+        }
+      )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        "Lastly, please give me a brief reason for your call so I can route it to the proper recipient.",
+        actionUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/final-reason", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const from = normalizePhone(body.From)
+    const reason = getSpeech(body)
+
+    if (!tenantSlug || !jobId || !reason) {
       return replyXml(
         reply,
         twimlResponse(`
-  ${sayBlock("I couldn’t catch the best callback time. Please call back and try again.")}
+  ${sayBlock("I didn't catch the reason for your call. A representative will reach out shortly.")}
   <Hangup/>`)
       )
     }
 
-    await saveVoiceCallbackTime(String(tenantSlug), Number(jobId), callbackTime)
+    await saveVoiceReason(
+      String(tenantSlug),
+      Number(jobId),
+      from,
+      reason
+    )
+
     await sendVoiceIntakeAlert(String(tenantSlug), Number(jobId))
 
     const summary = await getVoiceSummary(String(tenantSlug), Number(jobId))
@@ -904,7 +1494,6 @@ async function registerTwilioWebhook(app: FastifyInstance) {
         customer_name: summary.customerName,
         property_address: summary.propertyAddress,
         callback_number: summary.callbackNumber,
-        callback_time: summary.callbackTime,
         reason: summary.reason,
         emergency_tarp_requested: summary.emergencyTarpRequested,
       },
@@ -926,8 +1515,14 @@ async function registerTwilioWebhook(app: FastifyInstance) {
   ${sayBlock("If you need anything else before we call, you can text this number.")}
   <Hangup/>`)
     )
-  })
 
+    return replyXml(
+      reply,
+      twimlResponse(`
+  ${sayBlock("Thank you. A representative will reach out shortly.")}
+  <Hangup/>`)
+    )
+  })
 
   app.post("/twilio/voice/recording-status", async (req, reply) => {
     const body = (req as any).body || {}
