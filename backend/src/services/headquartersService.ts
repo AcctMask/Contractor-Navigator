@@ -102,3 +102,80 @@ export async function composeNavigatorCandidate(input: {
 
   return candidate as HeadquartersCompositionCandidate
 }
+
+
+const HEADQUARTERS_OPERATIONAL_OBSERVATION_URL =
+  process.env.HEADQUARTERS_OPERATIONAL_OBSERVATION_URL ||
+  "https://actual-assistant-owner-controls.vercel.app/api/headquarters/operational-observation";
+
+
+export async function submitNavigatorObservation(
+  observation: {
+    id: string;
+    tenant_id: string;
+    tenant_slug: string;
+    assistant_type: string;
+    type: string;
+    summary: string;
+    observed_at: string;
+    approved_at: string;
+    evidence: Record<string, unknown>;
+  }
+): Promise<void> {
+
+  const response =
+    await fetch(
+      HEADQUARTERS_OPERATIONAL_OBSERVATION_URL,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json",
+          Accept:
+            "application/json",
+          "User-Agent":
+            "aa-navigator-observation-producer",
+        },
+        body: JSON.stringify({
+          status: "approved",
+          id:
+            observation.id,
+          tenant_id:
+            observation.tenant_id,
+          tenant_slug:
+            observation.tenant_slug,
+          application:
+            "navigator",
+          assistant_type:
+            observation.assistant_type,
+          type:
+            observation.type,
+          summary:
+            observation.summary,
+          source_system:
+            "aa-contractor-navigator",
+          observed_at:
+            observation.observed_at,
+          approved_at:
+            observation.approved_at,
+          evidence:
+            observation.evidence,
+        }),
+      }
+    );
+
+  if (!response.ok) {
+    throw new Error(
+      `Headquarters observation submission failed: ${response.status}`
+    );
+  }
+
+  const payload: any =
+    await response.json();
+
+  if (payload?.ok !== true) {
+    throw new Error(
+      "Headquarters observation submission did not return ok=true"
+    );
+  }
+}

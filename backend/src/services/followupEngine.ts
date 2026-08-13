@@ -43,7 +43,10 @@ async function setConversationMemory(
 
 import { sendAlertEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
-import { composeNavigatorCandidate } from "./headquartersService"
+import {
+  composeNavigatorCandidate,
+  submitNavigatorObservation,
+} from "./headquartersService"
 import { isPhoneDnc } from "./dncService"
 
 const PERMANENT_TWILIO_ERROR_CODES = new Set([
@@ -2091,6 +2094,73 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       }
     )
 
+    /*
+     * Return the completed outbound execution to Headquarters
+     * after Twilio has accepted the message.
+     *
+     * This remains fail-safe and cannot interrupt the existing
+     * Navigator follow-up workflow.
+     */
+    try {
+      const observedAt = new Date().toISOString()
+
+      await submitNavigatorObservation({
+        id:
+          `navigator-sms-outbound-${tenantId}-${jobId}-${sms.sid}`,
+        tenant_id:
+          String(tenantId),
+        tenant_slug:
+          tenantSlug,
+        assistant_type:
+          "ai_followup",
+        type:
+          "service_result",
+        summary:
+          `Navigator completed outbound AI follow-up SMS for workflow '${aiMessage.stage}' step ${aiMessage.order}.`,
+        observed_at:
+          observedAt,
+        approved_at:
+          observedAt,
+        evidence: {
+          job_id:
+            jobId,
+          channel:
+            "sms",
+          direction:
+            "outbound",
+          workflow:
+            aiMessage.stage,
+          followup_order:
+            aiMessage.order,
+          customer_name:
+            job.customer_name || null,
+          job_stage:
+            job.stage || null,
+          to:
+            callbackNumber,
+          message:
+            outboundMessage,
+          twilio_sid:
+            sms.sid,
+          twilio_status:
+            sms.status,
+          intended_selection_mode:
+            intendedSelectionMode,
+          execution_mode:
+            executionMode,
+          headquarters_composition_status:
+            headquartersCompositionStatus,
+          headquarters_learning_record_ids:
+            headquartersLearningRecordIds,
+        },
+      })
+    } catch (error) {
+      console.warn(
+        "Navigator outbound SMS Headquarters observation unavailable; existing SMS workflow continues unchanged.",
+        error
+      )
+    }
+
     return {
       ok: true,
       skipped: false,
@@ -3007,6 +3077,66 @@ if (isWeakMessage && (!hasName || !hasAddress)) {
     channel: "sms",
     matched_signals: matchedSignals,
   })
+
+  /*
+   * Navigator executes the customer interaction.
+   * Headquarters learns from the resulting evidence.
+   *
+   * Observation submission is deliberately fail-safe:
+   * Headquarters availability must never interrupt the
+   * existing SMS workflow.
+   */
+  try {
+    const observedAt = new Date().toISOString()
+
+    await submitNavigatorObservation({
+      id:
+        `navigator-sms-${tenantId}-${jobId}-${Date.now()}`,
+      tenant_id:
+        String(tenantId),
+      tenant_slug:
+        tenantSlug,
+      assistant_type:
+        "ai_followup",
+      type:
+        "customer_behavior",
+      summary:
+        `Navigator classified an inbound SMS reply as '${classification}'.`,
+      observed_at:
+        observedAt,
+      approved_at:
+        observedAt,
+      evidence: {
+        job_id:
+          jobId,
+        channel:
+          "sms",
+        direction:
+          "inbound",
+        customer_message:
+          trimmed,
+        from:
+          from,
+        customer_name:
+          job.customer_name || null,
+        job_stage:
+          job.stage || null,
+        classification:
+          classification,
+        crm_substatus:
+          routing.crm_substatus,
+        crm_flow_key:
+          routing.crm_flow_key,
+        matched_signals:
+          matchedSignals,
+      },
+    })
+  } catch (error) {
+    console.warn(
+      "Navigator inbound SMS Headquarters observation unavailable; existing SMS workflow continues unchanged.",
+      error
+    )
+  }
 
   await addTimelineEvent(
     tenantId,

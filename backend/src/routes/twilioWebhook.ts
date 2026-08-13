@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { sendSMS } from "../services/twilioService"
+import { submitNavigatorObservation } from "../services/headquartersService"
 
 
 async function ensureConversationMemoryTable() {
@@ -1506,6 +1507,70 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       from,
       finalMessage
     )
+
+    /*
+     * Voice V1 remains deterministic and unchanged.
+     *
+     * Headquarters observes only after Navigator has completed
+     * the intake, created/updated the job, captured the final
+     * summary, delivered the final Voice response, and initiated
+     * the existing post-call follow-up.
+     *
+     * Headquarters failure must never affect the completed call.
+     */
+    try {
+      const observedAt = new Date().toISOString()
+
+      await submitNavigatorObservation({
+        id:
+          `navigator-voice-${tenantId}-${Number(jobId)}-${String(callSid || "unknown")}`,
+        tenant_id:
+          String(tenantId),
+        tenant_slug:
+          String(tenantSlug),
+        assistant_type:
+          "ai_followup",
+        type:
+          "customer_behavior",
+        summary:
+          "Navigator completed Voice AI intake and captured caller details.",
+        observed_at:
+          observedAt,
+        approved_at:
+          observedAt,
+        evidence: {
+          job_id:
+            Number(jobId),
+          channel:
+            "voice",
+          direction:
+            "inbound",
+          call_sid:
+            String(callSid || ""),
+          caller:
+            from,
+          customer_name:
+            summary.customerName,
+          property_address:
+            summary.propertyAddress,
+          callback_number:
+            summary.callbackNumber,
+          reason:
+            summary.reason,
+          emergency_tarp_requested:
+            summary.emergencyTarpRequested,
+          final_response:
+            finalMessage,
+          intake_completed:
+            true,
+        },
+      })
+    } catch (error) {
+      console.warn(
+        "Navigator completed Voice intake Headquarters observation unavailable; existing Voice workflow continues unchanged.",
+        error
+      )
+    }
 
     return replyXml(
       reply,
