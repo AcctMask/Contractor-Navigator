@@ -1537,6 +1537,7 @@ export default function JobDetail() {
 
                   <p><strong>Carrier:</strong> {job.carrier || "—"}</p>
                   <p><strong>Claim #:</strong> {job.claim_number || "—"}</p>
+                  <p><strong>DOL:</strong> {job.date_of_loss || "—"}</p>
                   <p><strong>Policy Holder:</strong> {job.policy_holder || "—"}</p>
                   <p><strong>Adjuster:</strong> {job.adjuster_name || "—"}</p>
                   <p><strong>Adjuster Phone:</strong> {job.adjuster_phone || "—"}</p>
@@ -1720,6 +1721,14 @@ export default function JobDetail() {
 
               <label style={label}>Claim #</label>
               <input value={form.claim_number || ""} onChange={(e) => setField("claim_number", e.target.value)} style={input} />
+
+              <label style={label}>DOL</label>
+              <input
+                type="date"
+                value={form.date_of_loss ? String(form.date_of_loss).slice(0, 10) : ""}
+                onChange={(e) => setField("date_of_loss", e.target.value)}
+                style={input}
+              />
 
               <label style={label}>Policy Holder</label>
               <input value={form.policy_holder || ""} onChange={(e) => setField("policy_holder", e.target.value)} style={input} />
