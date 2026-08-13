@@ -1,7 +1,6 @@
 import { pool } from "../db/db"
 import { countCompletedAiFollowups } from "./followupProgress"
 import { sendSMS } from "./twilioService"
-import { pool } from "../db/db"
 
 async function setConversationMemory(
   tenantId: number,
@@ -147,6 +146,7 @@ type JobRow = {
   estimate_status: string | null
   manual_owner: string | null
   customer_name: string | null
+  customer_email: string | null
   address1?: string | null
   city?: string | null
   state?: string | null
@@ -568,7 +568,8 @@ async function getJob(tenantId: number, jobId: number): Promise<JobRow> {
       j.crm_substatus,
       j.active_followup_workflow,
       j.followup_workflow_started_at,
-      c.full_name as customer_name
+      c.full_name as customer_name,
+      c.email as customer_email
     from jobs j
     left join customers c
       on c.id = j.customer_id
@@ -832,6 +833,141 @@ function hasTimelineKind(timeline: TimelineRow[], kind: string) {
   return timeline.some((t) => String(t.kind || "").toLowerCase() === target)
 }
 
+async function getActiveEmsTarpAuthorization(
+  tenantId: number,
+  jobId: number
+) {
+  const result = await pool.query(
+    `
+    select
+      id,
+      document_title,
+      status,
+      sent_at
+    from job_document_packages
+    where tenant_id = $1
+      and job_id = $2
+      and package_type = 'ems_tarp'
+      and status = 'sent'
+      and signed_at is null
+    order by sent_at desc nulls last, created_at desc, id desc
+    limit 1
+    `,
+    [tenantId, jobId]
+  )
+
+  if (!result.rowCount) return null
+
+  const row = result.rows[0]
+  const signBaseUrl =
+    process.env.PUBLIC_SIGN_BASE_URL ||
+    process.env.FRONTEND_BASE_URL ||
+    "https://contractor-navigator.vercel.app"
+
+  return {
+    package_id: Number(row.id),
+    document_title: String(row.document_title || "Emergency Tarp Work Authorization"),
+    sign_url: `${signBaseUrl.replace(/\/$/, "")}/sign/${Number(row.id)}`,
+  }
+}
+
+async function maybeRecordAndRouteWaUtc(
+  tenantId: number,
+  jobId: number,
+  job: JobRow,
+  callbackNumber: string | null,
+  alertTargets: AlertTargets,
+  packageId: number,
+  attemptOrder: number
+) {
+  if (attemptOrder < 3) return
+
+  const existing = await pool.query(
+    `
+    select id
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'wa_utc_notified'
+      and coalesce(meta->>'package_id', '') = $3
+    limit 1
+    `,
+    [tenantId, jobId, String(packageId)]
+  )
+
+  if (existing.rowCount) return
+
+  const address = buildAddressLine(job)
+
+  const note =
+    `UTC — Unable To Contact after 3 attempts to obtain Emergency Tarp Work Authorization. ` +
+    `Staff notified to advise adjuster. Automated contact attempts will continue.`
+
+  const alert =
+    `UTC — EMERGENCY TARP AUTHORIZATION\n` +
+    `Customer: ${job.customer_name || "Unknown Customer"}\n` +
+    `Job ID: ${jobId}\n` +
+    `Address: ${address}\n` +
+    `Phone: ${callbackNumber || "Unknown"}\n` +
+    `Carrier: ${job.carrier || "Unknown"}\n` +
+    `Claim: ${job.claim_number || "Unknown"}\n\n` +
+    `Three successful outreach attempts have been made without receiving the signed Emergency Tarp Work Authorization.\n` +
+    `Action: Notify the adjuster that the insured is currently UTC — Unable To Contact.\n` +
+    `Navigator will continue automated attempts to obtain authorization.`
+
+  let smsResult: any = null
+  let emailResult: any = null
+
+  if (alertTargets.alert_sms_to) {
+    try {
+      smsResult = await sendSMS(
+        alertTargets.alert_sms_to,
+        alert
+      )
+    } catch (err: any) {
+      smsResult = { error: err?.message || String(err) }
+    }
+  } else {
+    smsResult = { skipped: true, reason: "missing_alert_sms_to" }
+  }
+
+  if (alertTargets.alert_email_to) {
+    try {
+      emailResult = await sendAlertEmail(
+        alertTargets.alert_email_to,
+        `UTC — Emergency Tarp Authorization — ${job.customer_name || `Job #${jobId}`}`,
+        alert
+      )
+    } catch (err: any) {
+      emailResult = { error: err?.message || String(err) }
+    }
+  } else {
+    emailResult = { skipped: true, reason: "missing_alert_email_to" }
+  }
+
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "wa_utc_notified",
+    note,
+    {
+      package_id: packageId,
+      workflow: "wa_sent",
+      attempt_count: attemptOrder,
+      utc: true,
+      adjuster_notification_required: true,
+      automated_followup_continues: true,
+      carrier: job.carrier || null,
+      claim_number: job.claim_number || null,
+      customer_phone: callbackNumber || null,
+      alert_sms_to: alertTargets.alert_sms_to,
+      alert_email_to: alertTargets.alert_email_to,
+      sms_result: smsResult,
+      email_result: emailResult,
+    }
+  )
+}
+
 function getWorkflowMessages(settings: DevSettings, job: JobRow) {
   if (job.crm_flow_key === "weather_evidence_report") {
     return {
@@ -872,6 +1008,20 @@ function getWorkflowMessages(settings: DevSettings, job: JobRow) {
     return {
       workflowKey: "contract_sent",
       messages: settings.contract_messages || []
+    }
+  }
+
+  if (job.active_followup_workflow === "wa_sent") {
+    return {
+      workflowKey: "wa_sent",
+      messages: settings.wa_sent_messages || []
+    }
+  }
+
+  if (job.active_followup_workflow === "tarp_active") {
+    return {
+      workflowKey: "tarp_active",
+      messages: settings.tarp_active_messages || []
     }
   }
 
@@ -1032,7 +1182,10 @@ function buildClassificationReply(
   customerName: string | null,
   settings: DevSettings
 ) {
-  const map = settings.inbound_auto_replies
+  const map =
+    settings.inbound_auto_replies ||
+    ({} as Partial<DevSettings["inbound_auto_replies"]>)
+
   const raw =
     map[classification] ||
     map.unknown ||
@@ -2024,6 +2177,50 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     }
   }
 
+  let activeEmsAuthorization:
+    | {
+        package_id: number
+        document_title: string
+        sign_url: string
+      }
+    | null = null
+
+  if (aiMessage.stage === "wa_sent") {
+    activeEmsAuthorization =
+      await getActiveEmsTarpAuthorization(
+        tenantId,
+        jobId
+      )
+
+    if (!activeEmsAuthorization) {
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "ai_message_send_failed",
+        "WA follow-up could not be sent because no active unsigned Emergency Tarp Work Authorization was found.",
+        {
+          stage: "wa_sent",
+          order: aiMessage.order,
+          reason: "missing_active_ems_authorization",
+        }
+      )
+
+      return {
+        ok: true,
+        skipped: true,
+        reason: "missing_active_ems_authorization",
+        tenant_id: tenantId,
+        job_id: jobId,
+        stage: aiMessage.stage,
+        order: aiMessage.order,
+      }
+    }
+
+    outboundMessage =
+      `${outboundMessage.trim()}\n\n` +
+      `Emergency Tarp Work Authorization: ${activeEmsAuthorization.sign_url}`
+  }
+
   try {
     const sms =
       await sendSMS(
@@ -2093,6 +2290,21 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
           headquartersLearningRecordIds,
       }
     )
+
+    if (
+      aiMessage.stage === "wa_sent" &&
+      activeEmsAuthorization
+    ) {
+      await maybeRecordAndRouteWaUtc(
+        tenantId,
+        jobId,
+        job,
+        callbackNumber,
+        alertTargets,
+        activeEmsAuthorization.package_id,
+        aiMessage.order
+      )
+    }
 
     /*
      * Return the completed outbound execution to Headquarters
@@ -2955,102 +3167,10 @@ export async function handleInboundMessageByTenantSlug(
     }
   }
 
-// =========================
-// 🧠 INTAKE ENGINE (LIGHT)
-// =========================
+// Customer replies proceed through the normal inbound routing path.
+// Explicit intake remains controlled by latestIntakeQuestion state above.
+// No message-length or "weak message" heuristic is applied.
 
-const hasName =
-  !!job.customer_name &&
-  job.customer_name.length > 3 &&
-  !isInvalidIntakeName(job.customer_name)
-
-const hasAddress = !!job.address1 && job.address1.length > 5
-
-const isWeakMessage =
-  (classification === "unknown" || classification === "callback_request") &&
-  trimmed.length < 35
-
-// If weak message AND we already know the customer → ask what they need today
-if (isWeakMessage && hasName) {
-  const firstName = String(job.customer_name || "there").trim().split(/\s+/)[0]
-  const question = `Hi ${firstName} — got your message. What can we help you with today?`
-
-  try {
-    await sendSMS(callbackNumber, question)
-
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "intake_question_sent",
-      question,
-      {
-        stage: "intake",
-        recognized_customer: true,
-        missing_name: false,
-        missing_address: !hasAddress,
-        missing_service_need: true,
-      }
-    )
-  } catch (err: any) {
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "intake_question_failed",
-      err?.message || String(err),
-      {}
-    )
-  }
-
-  return {
-    ok: true,
-    intake_in_progress: true,
-    reason: "recognized_customer_waiting_for_service_need",
-  }
-}
-
-// If weak message AND missing key info → ask intake question instead of alerting
-if (isWeakMessage && (!hasName || !hasAddress)) {
-  let question = ""
-  let meta: Record<string, unknown> = {
-    stage: "intake",
-    missing_name: !hasName,
-    missing_address: !hasAddress,
-  }
-
-  if (!hasName) {
-    question = "Got it — what’s your full name?"
-  } else if (!hasAddress) {
-    question = "Thanks — what’s the property address or ZIP?"
-  }
-
-  if (question) {
-    try {
-      await sendSMS(callbackNumber, question)
-
-      await addTimelineEvent(
-        tenantId,
-        jobId,
-        "intake_question_sent",
-        question,
-        meta
-      )
-    } catch (err: any) {
-      await addTimelineEvent(
-        tenantId,
-        jobId,
-        "intake_question_failed",
-        err?.message || String(err),
-        {}
-      )
-    }
-
-    return {
-      ok: true,
-      intake_in_progress: true,
-      reason: "waiting_for_customer_info",
-    }
-  }
-}
   const routing = await updateJobRoutingForClassification(tenantId, jobId, classification)
 
   await addTimelineEvent(

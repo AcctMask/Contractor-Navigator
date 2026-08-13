@@ -261,6 +261,13 @@ const defaultWorkspace: WorkspaceDefinition = {
         attention: false,
       },
       {
+        id: "wa-sent",
+        label: "WA Sent",
+        filter_type: "stage",
+        filter_value: "wa_sent",
+        attention: true,
+      },
+      {
         id: "tarp",
         label: "Tarp",
         filter_type: "stage",

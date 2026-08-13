@@ -14,12 +14,16 @@ type DevSettings = {
   lead_messages: string[]
   estimate_messages: string[]
   contract_messages: string[]
+  wa_sent_messages: string[]
+  tarp_active_messages: string[]
   tarp_messages: string[]
   weather_report_messages: string[]
 
   lead_timings_minutes: number[]
   estimate_timings_minutes: number[]
   contract_timings_minutes: number[]
+  wa_sent_timings_minutes: number[]
+  tarp_active_timings_minutes: number[]
   tarp_timings_minutes: number[]
   weather_report_timings_minutes: number[]
 }
@@ -49,6 +53,9 @@ export default function DeveloperSettings() {
 
   const [saveError, setSaveError] =
     useState("")
+
+  const [openFollowupPanel, setOpenFollowupPanel] =
+    useState<string | null>(null)
 
   const [currentPassword, setCurrentPassword] =
     useState("")
@@ -289,77 +296,127 @@ export default function DeveloperSettings() {
     setConfirmPassword("")
   }
 
-  const section = (
-    title: string,
-    content: React.ReactNode,
-  ) => (
-    <section style={sectionCard}>
-      <h2 style={sectionTitle}>
-        {title}
-      </h2>
-      {content}
-    </section>
-  )
-
-  const renderTiming = (
-    key: keyof DevSettings,
+  const renderFollowupCard = (
+    id: string,
     labelText: string,
-  ) =>
-    section(
-      `${labelText} Timing (minutes)`,
-      (settings?.[key] as number[]).map(
-        (value, index) => (
-          <div key={index}>
-            <label style={fieldLabel}>
-              Message {index + 1}
-            </label>
+    timingKey: keyof DevSettings,
+    messageKey: keyof DevSettings,
+  ) => {
+    const timingPanel = `${id}:timing`
+    const messagesPanel = `${id}:messages`
 
-            <input
-              type="number"
-              min="0"
-              value={value}
-              onChange={(event) =>
-                updateTiming(
-                  key,
-                  index,
-                  event.target.value,
-                )
-              }
-              style={input}
-            />
+    return (
+      <section style={sectionCard}>
+        <h2 style={sectionTitle}>
+          {labelText}
+        </h2>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setOpenFollowupPanel(
+                openFollowupPanel === timingPanel
+                  ? null
+                  : timingPanel,
+              )
+            }
+            style={{
+              ...button,
+              background:
+                openFollowupPanel === timingPanel
+                  ? "#2563eb"
+                  : "#334155",
+              color: "white",
+            }}
+          >
+            Timing Sequence
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setOpenFollowupPanel(
+                openFollowupPanel === messagesPanel
+                  ? null
+                  : messagesPanel,
+              )
+            }
+            style={{
+              ...button,
+              background:
+                openFollowupPanel === messagesPanel
+                  ? "#2563eb"
+                  : "#334155",
+              color: "white",
+            }}
+          >
+            Customer Messages
+          </button>
+        </div>
+
+        {openFollowupPanel === timingPanel ? (
+          <div style={{ marginTop: 18 }}>
+            {(settings?.[timingKey] as number[]).map(
+              (value, index) => (
+                <div key={index}>
+                  <label style={fieldLabel}>
+                    Message {index + 1}
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    value={value}
+                    onChange={(event) =>
+                      updateTiming(
+                        timingKey,
+                        index,
+                        event.target.value,
+                      )
+                    }
+                    style={input}
+                  />
+                </div>
+              ),
+            )}
           </div>
-        ),
-      ),
-    )
+        ) : null}
 
-  const renderMessages = (
-    key: keyof DevSettings,
-    labelText: string,
-  ) =>
-    section(
-      `${labelText} Messages`,
-      (settings?.[key] as string[]).map(
-        (value, index) => (
-          <div key={index}>
-            <label style={fieldLabel}>
-              Message {index + 1}
-            </label>
+        {openFollowupPanel === messagesPanel ? (
+          <div style={{ marginTop: 18 }}>
+            {(settings?.[messageKey] as string[]).map(
+              (value, index) => (
+                <div key={index}>
+                  <label style={fieldLabel}>
+                    Message {index + 1}
+                  </label>
 
-            <textarea
-              value={value}
-              onChange={(event) =>
-                updateMessage(
-                  key,
-                  index,
-                  event.target.value,
-                )
-              }
-              style={textarea}
-            />
+                  <textarea
+                    value={value}
+                    onChange={(event) =>
+                      updateMessage(
+                        messageKey,
+                        index,
+                        event.target.value,
+                      )
+                    }
+                    style={textarea}
+                  />
+                </div>
+              ),
+            )}
           </div>
-        ),
-      ),
+        ) : null}
+      </section>
     )
+  }
 
   if (loading) {
     return (
@@ -489,58 +546,55 @@ export default function DeveloperSettings() {
         ) : null}
       </div>
 
-      {renderTiming(
+      {renderFollowupCard(
+        "initial-interest",
+        tenantSlug === "actual-assistant-llc"
+          ? "Demo Requested"
+          : `${prospectLabel} / Initial Interest`,
         "lead_timings_minutes",
-        tenantSlug === "actual-assistant-llc"
-          ? "Demo Requested"
-          : `${prospectLabel} / Initial Interest`,
-      )}
-
-      {renderMessages(
         "lead_messages",
-        tenantSlug === "actual-assistant-llc"
-          ? "Demo Requested"
-          : `${prospectLabel} / Initial Interest`,
       )}
 
-      {renderTiming(
+      {renderFollowupCard(
+        "special-report",
+        "Special Report or Evidence",
         "weather_report_timings_minutes",
-        "Special Report or Evidence",
-      )}
-
-      {renderMessages(
         "weather_report_messages",
-        "Special Report or Evidence",
       )}
 
-      {renderTiming(
+      {renderFollowupCard(
+        "estimate-sent",
+        proposalLabel,
         "estimate_timings_minutes",
-        proposalLabel,
-      )}
-
-      {renderMessages(
         "estimate_messages",
-        proposalLabel,
       )}
 
-      {renderTiming(
+      {renderFollowupCard(
+        "contract-sent",
+        agreementLabel,
         "contract_timings_minutes",
-        agreementLabel,
-      )}
-
-      {renderMessages(
         "contract_messages",
-        agreementLabel,
       )}
 
-      {renderTiming(
+      {renderFollowupCard(
+        "wa-sent",
+        "WA Sent — Awaiting Authorization",
+        "wa_sent_timings_minutes",
+        "wa_sent_messages",
+      )}
+
+      {renderFollowupCard(
+        "tarp-active",
+        "Tarp — Awaiting Crew / Active EMS",
+        "tarp_active_timings_minutes",
+        "tarp_active_messages",
+      )}
+
+      {renderFollowupCard(
+        "tarp-complete",
+        "Tarp Complete / Post-Service",
         "tarp_timings_minutes",
-        "Post-Service or Next Step",
-      )}
-
-      {renderMessages(
         "tarp_messages",
-        "Post-Service or Next Step",
       )}
 
       <div style={saveBar}>

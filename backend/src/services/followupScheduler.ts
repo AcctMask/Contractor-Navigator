@@ -79,6 +79,14 @@ async function workflowDelaysForTenant(
     return timingsToMs(settings.contract_timings_minutes || [])
   }
 
+  if (activeWorkflow === "wa_sent") {
+    return timingsToMs(settings.wa_sent_timings_minutes || [])
+  }
+
+  if (activeWorkflow === "tarp_active") {
+    return timingsToMs(settings.tarp_active_timings_minutes || [])
+  }
+
   if (activeWorkflow === "tarp") {
     return timingsToMs(settings.tarp_timings_minutes || [])
   }
@@ -316,9 +324,38 @@ async function processJob(job: SchedJob) {
   )
 
   const stats = await getStageStats(job.id, automationKey)
-  if (stats.count >= delays.length) return
 
-  const gapMs = nextGapMs(delays, stats.count)
+  const continuousOperationalWorkflow =
+    automationKey === "wa_sent" ||
+    automationKey === "tarp_active"
+
+  if (
+    !continuousOperationalWorkflow &&
+    stats.count >= delays.length
+  ) {
+    return
+  }
+
+  let gapMs = nextGapMs(delays, stats.count)
+
+  if (
+    continuousOperationalWorkflow &&
+    gapMs == null &&
+    delays.length
+  ) {
+    gapMs =
+      delays.length >= 2
+        ? Math.max(
+            delays[delays.length - 1] -
+              delays[delays.length - 2],
+            60 * 1000
+          )
+        : Math.max(
+            delays[0],
+            60 * 1000
+          )
+  }
+
   if (gapMs == null) return
 
   const nowMs = Date.now()

@@ -417,6 +417,12 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         elsif new.stage = 'lead' then
           derived_workflow := 'lead';
 
+        elsif new.stage = 'wa_sent' then
+          derived_workflow := 'wa_sent';
+
+        elsif new.stage = 'tarp' then
+          derived_workflow := 'tarp_active';
+
         elsif new.stage = 'tarp_complete' then
           derived_workflow := 'tarp';
 

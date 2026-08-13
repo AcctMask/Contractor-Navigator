@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
+import {
+  createDocumentPackageByTenantSlug,
+  sendDocumentPackage,
+  setEmergencyTarpNeededByTenantSlug,
+} from "../services/documentPipelineService"
 import { getCurrentUserFromToken } from "../services/authService"
 
 // helper
@@ -297,12 +302,57 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
 
       const { stage, crm_substatus, bot_paused } = request.body || {}
 
+      const previousStageResult = await pool.query(
+        `
+        select stage
+        from jobs
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, Number(jobId)]
+      )
+
+      if (!previousStageResult.rowCount) {
+        throw new Error("Job not found")
+      }
+
+      const previousStage =
+        String(previousStageResult.rows[0]?.stage || "").trim()
+
+      if (stage === "wa_sent" && previousStage !== "wa_sent") {
+        await setEmergencyTarpNeededByTenantSlug(
+          tenantSlug,
+          Number(jobId),
+          true
+        )
+
+        const documentPackage =
+          await createDocumentPackageByTenantSlug(
+            tenantSlug,
+            Number(jobId),
+            "ems_tarp"
+          )
+
+        await sendDocumentPackage(
+          tenantSlug,
+          Number(jobId),
+          Number(documentPackage.id)
+        )
+      }
+
       await pool.query(
         `
         update jobs
         set
           stage = coalesce($3, stage),
-          crm_substatus = $4,
+          crm_substatus =
+            case
+              when $3 = 'wa_sent'
+               and nullif(btrim(coalesce($4::text, '')), '') is null
+                then coalesce(crm_substatus, 'ems_authorization_sent')
+              else $4
+            end,
           bot_paused = coalesce($5, bot_paused),
 
           bot_pause_reason =
@@ -324,6 +374,10 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
                 then 'demo_scheduled'
               when $3 = 'demo_completed_follow_up'
                 then 'demo_completed_follow_up'
+              when $3 = 'wa_sent'
+                then 'wa_sent'
+              when $3 = 'tarp'
+                then 'tarp_active'
               when $3 = 'tarp_complete'
                 then 'tarp'
               when $3 in ('estimate_sent', 'proposal_sent')
@@ -345,6 +399,12 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
                 then now()
               when $3 = 'demo_completed_follow_up'
                and active_followup_workflow is distinct from 'demo_completed_follow_up'
+                then now()
+              when $3 = 'wa_sent'
+               and active_followup_workflow is distinct from 'wa_sent'
+                then now()
+              when $3 = 'tarp'
+               and active_followup_workflow is distinct from 'tarp_active'
                 then now()
               when $3 = 'tarp_complete'
                and active_followup_workflow is distinct from 'tarp'

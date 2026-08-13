@@ -294,6 +294,51 @@ export async function upsertEstimateDetailsByTenantSlug(
   return getEstimateDetailsByTenantSlug(tenantSlug, jobId)
 }
 
+export async function setEmergencyTarpNeededByTenantSlug(
+  tenantSlug: string,
+  jobId: number,
+  needed: boolean
+) {
+  await ensureDocumentTables()
+  const tenantId = await getTenantIdBySlug(tenantSlug)
+
+  const updated = await pool.query(
+    `
+    update job_estimate_details
+    set
+      emergency_tarp_needed = $3,
+      updated_at = now()
+    where tenant_id = $1
+      and job_id = $2
+    returning job_id
+    `,
+    [tenantId, jobId, needed]
+  )
+
+  if (!updated.rowCount) {
+    await pool.query(
+      `
+      insert into job_estimate_details (
+        tenant_id,
+        job_id,
+        emergency_tarp_needed,
+        created_at,
+        updated_at
+      )
+      values ($1, $2, $3, now(), now())
+      `,
+      [tenantId, jobId, needed]
+    )
+  }
+
+  return {
+    ok: true,
+    tenant_id: tenantId,
+    job_id: jobId,
+    emergency_tarp_needed: needed,
+  }
+}
+
 export async function listDocumentPackagesByTenantSlug(tenantSlug: string, jobId: number) {
   await ensureDocumentTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -579,7 +624,15 @@ export async function sendDocumentPackage(
     "https://contractor-navigator.vercel.app"
 
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
-  const message = `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
+  const isEmsTarp = documentPackage.package_type === "ems_tarp"
+
+  const message = isEmsTarp
+    ? `Good2Go Roofing: We received your request for emergency tarp service. Before we can enter the property and dispatch a tarp crew, we need your signed Emergency Tarp Work Authorization.
+
+Please review and sign the authorization here: ${signUrl}
+
+Once we receive it, your job will move into our emergency tarp queue for crew assignment.`
+    : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
 
 Please review the project details, pricing, authorization language, and terms and conditions before signing.
 
@@ -621,16 +674,24 @@ Sign here: ${signUrl}`
     process.env.G2G_GMAIL_TO ||
     "good2goroofingandconstruction@gmail.com"
 
-  const internalAlertMsg =
-    `CONTRACT SENT\n` +
-    `${documentPackage.document_title}\n` +
-    `Job ID: ${jobId}\n` +
-    `Customer: ${job.customer_name || "Unknown"}\n` +
-    `Phone: ${job.customer_phone || "Unknown"}\n` +
-    `Email: ${job.customer_email || "Unknown"}\n` +
-    `Amount: ${documentPackage.payload?.contract_amount ?? documentPackage.payload?.proposal_amount ?? documentPackage.payload?.agreed_amount ?? "Unknown"}\n` +
-    `Sign Link: ${signUrl}\n\n` +
-    `Status: Waiting on customer signature.`
+  const internalAlertMsg = isEmsTarp
+    ? `EMERGENCY TARP WA SENT\n` +
+      `${documentPackage.document_title}\n` +
+      `Job ID: ${jobId}\n` +
+      `Customer: ${job.customer_name || "Unknown"}\n` +
+      `Phone: ${job.customer_phone || "Unknown"}\n` +
+      `Email: ${job.customer_email || "Unknown"}\n` +
+      `Sign Link: ${signUrl}\n\n` +
+      `Status: Waiting on Emergency Tarp Work Authorization signature.`
+    : `CONTRACT SENT\n` +
+      `${documentPackage.document_title}\n` +
+      `Job ID: ${jobId}\n` +
+      `Customer: ${job.customer_name || "Unknown"}\n` +
+      `Phone: ${job.customer_phone || "Unknown"}\n` +
+      `Email: ${job.customer_email || "Unknown"}\n` +
+      `Amount: ${documentPackage.payload?.contract_amount ?? documentPackage.payload?.proposal_amount ?? documentPackage.payload?.agreed_amount ?? "Unknown"}\n` +
+      `Sign Link: ${signUrl}\n\n` +
+      `Status: Waiting on customer signature.`
 
   try {
     if (process.env.ALERT_SMS_TO) {
@@ -640,7 +701,9 @@ Sign here: ${signUrl}`
     if (internalNotificationEmail) {
       internalEmailResult = await sendAlertEmail(
         internalNotificationEmail,
-        `Contract Sent: ${job.customer_name || `Job #${jobId}`}`,
+        documentPackage.package_type === "ems_tarp"
+          ? `Emergency Tarp WA Sent: ${job.customer_name || `Job #${jobId}`}`
+          : `Contract Sent: ${job.customer_name || `Job #${jobId}`}`,
         internalAlertMsg
       )
     }
@@ -648,19 +711,36 @@ Sign here: ${signUrl}`
     internalEmailResult = internalEmailResult || { error: err?.message || String(err) }
   }
 
-  await pool.query(
-    `
-    update jobs
-    set
-      stage = 'contract_sent',
-      crm_substatus = 'signature_requested',
-      contract_sent_at = coalesce(contract_sent_at, now()),
-      updated_at = now()
-    where tenant_id = $1
-      and id = $2
-    `,
-    [tenantId, jobId]
-  )
+  if (documentPackage.package_type === "ems_tarp") {
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'wa_sent',
+        crm_substatus = 'ems_authorization_sent',
+        wa_status = 'sent',
+        wa_sent_at = now(),
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [tenantId, jobId]
+    )
+  } else {
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'contract_sent',
+        crm_substatus = 'signature_requested',
+        contract_sent_at = coalesce(contract_sent_at, now()),
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [tenantId, jobId]
+    )
+  }
 
   await pool.query(
     `
@@ -672,7 +752,9 @@ Sign here: ${signUrl}`
     [
       tenantId,
       jobId,
-      `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
+      documentPackage.package_type === "ems_tarp"
+        ? `Emergency Tarp Work Authorization sent for electronic signature: ${documentPackage.document_title}`
+        : `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
       JSON.stringify({
         author: "ECO Document Pipeline",
         package_id: packageId,
@@ -683,8 +765,11 @@ Sign here: ${signUrl}`
         contract_amount: documentPackage.payload?.contract_amount ?? documentPackage.payload?.agreed_amount ?? null,
         discount_amount: documentPackage.payload?.discount_amount ?? null,
         discount_reason: documentPackage.payload?.discount_reason ?? null,
-        crm_stage: "contract_sent",
-        crm_substatus: "signature_requested",
+        crm_stage: documentPackage.package_type === "ems_tarp" ? "wa_sent" : "contract_sent",
+        crm_substatus:
+          documentPackage.package_type === "ems_tarp"
+            ? "ems_authorization_sent"
+            : "signature_requested",
         sms: smsResult,
         email: emailResult,
         internal_sms: internalSmsResult,
@@ -748,15 +833,41 @@ export async function signDocumentPackage(
       jobId: Number(doc.job_id),
       doc,
       payload: updatedPayload,
-      statusLabel: "Signed Proposal Contract",
+      statusLabel:
+        doc.package_type === "ems_tarp"
+          ? "Signed Emergency Tarp Work Authorization"
+          : "Signed Proposal Contract",
     })
   } catch (err) {
     console.error("Failed to save signed document snapshot:", err)
   }
 
-  const alertMsg = `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
+  const isEmsTarp = doc.package_type === "ems_tarp"
 
-  const customerAckMsg = `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
+  if (isEmsTarp) {
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'tarp',
+        crm_substatus = 'ems_authorized_ready_for_crew',
+        wa_status = 'signed',
+        wa_signed_at = now(),
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [Number(doc.tenant_id), Number(doc.job_id)]
+    )
+  }
+
+  const alertMsg = isEmsTarp
+    ? `EMS TARP AUTHORIZATION SIGNED\n${doc.document_title}\nSigned by: ${signerName}\nJob ID: ${doc.job_id}\nStatus: READY FOR CREW ASSIGNMENT`
+    : `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
+
+  const customerAckMsg = isEmsTarp
+    ? `Good2Go Roofing: Thank you. We received your Emergency Tarp Work Authorization and your property is now in our emergency tarp queue. We have not forgotten you. We will assign a crew and notify them of your needs. During a major storm, power outages, blocked roads, weather conditions, safety issues, and geographic crew routing can affect response times. If you have a tree on the roof, severe active water intrusion, unsafe access, or another urgent circumstance, reply to this message so our staff and crew can be notified.`
+    : `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
 
   try {
     if (process.env.ALERT_SMS_TO) {
@@ -771,7 +882,9 @@ export async function signDocumentPackage(
     if (signedNotificationEmail) {
       await sendAlertEmail(
         signedNotificationEmail,
-        "Document Signed",
+        isEmsTarp
+          ? "Emergency Tarp Work Authorization Signed — Ready for Crew"
+          : "Document Signed",
         alertMsg
       )
     }
@@ -779,7 +892,9 @@ export async function signDocumentPackage(
     if (updatedPayload.customer_email) {
       await sendAlertEmail(
         String(updatedPayload.customer_email),
-        "Good2Go Roofing received your signed Proposal / Contract",
+        isEmsTarp
+          ? "Good2Go Roofing received your Emergency Tarp Work Authorization"
+          : "Good2Go Roofing received your signed Proposal / Contract",
         customerAckMsg
       )
     }
@@ -801,7 +916,9 @@ export async function signDocumentPackage(
     [
       Number(doc.tenant_id),
       Number(doc.job_id),
-      `Proposal/Contract electronically signed: ${doc.document_title}`,
+      isEmsTarp
+        ? `Emergency Tarp Work Authorization signed — ready for crew: ${doc.document_title}`
+        : `Proposal/Contract electronically signed: ${doc.document_title}`,
       JSON.stringify({
         author: signerName || "Customer",
         package_id: packageId,
@@ -815,6 +932,9 @@ export async function signDocumentPackage(
         terms_accepted: updatedPayload.terms_accepted ?? null,
         terms_version: updatedPayload.terms_version ?? null,
         terms_url: updatedPayload.terms_url ?? null,
+        crm_stage: isEmsTarp ? "tarp" : null,
+        crm_substatus: isEmsTarp ? "ems_authorized_ready_for_crew" : null,
+        wa_status: isEmsTarp ? "signed" : null,
       }),
     ]
   )

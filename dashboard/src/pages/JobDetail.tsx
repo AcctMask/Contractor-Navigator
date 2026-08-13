@@ -5,7 +5,7 @@ import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
-  "intake_pending", "lead", "callback", "inspection", "roof_repair", "roof_replacement", "tarp",
+  "intake_pending", "lead", "callback", "inspection", "roof_repair", "roof_replacement", "wa_sent", "tarp",
   "estimate_sent", "contract_sent", "pre_production", "in_production",
   "completed", "tarp_complete", "invoiced", "paid", "disqualified", "dnc",
 ]
