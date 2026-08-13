@@ -760,6 +760,55 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     });
   });
 
+  app.get("/admin/recent-activity/:tenant_slug", async (req, reply) => {
+    const tenant_slug = String((req.params as any).tenant_slug || "")
+    const tenantId = await getTenantIdBySlug(tenant_slug)
+    const q: any = (req as any).query || {}
+    const limit = Math.max(1, Math.min(Number(q.limit || 20), 100))
+
+    const result = await pool.query(
+      `
+      select
+        te.id,
+        te.job_id,
+        te.kind,
+        te.message,
+        te.meta,
+        te.created_at,
+        c.full_name as customer_name
+      from timeline_events te
+      left join jobs j
+        on j.tenant_id = te.tenant_id
+       and j.id = te.job_id
+      left join customers c
+        on c.id = j.customer_id
+       and c.tenant_id = j.tenant_id
+      where te.tenant_id = $1
+        and te.kind in (
+          'manual_note',
+          'staff_note',
+          'lead_created',
+          'estimate_details',
+          'document_package_sent',
+          'document_package_signed',
+          'buying_signal_detected',
+          'customer_frustration_detected',
+          'human_takeover_frustration',
+          'frustrated_customer_alert_routed'
+        )
+      order by te.created_at desc
+      limit $2
+      `,
+      [tenantId, limit]
+    )
+
+    return reply.send({
+      ok: true,
+      count: result.rowCount,
+      rows: result.rows,
+    })
+  })
+
   app.post("/admin/job/:tenant_slug/:job_id/update", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);

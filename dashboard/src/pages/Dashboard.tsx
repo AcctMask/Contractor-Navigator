@@ -34,13 +34,27 @@ type DashboardJob = {
   has_buying_signal?: boolean | null
 }
 
-type SystemEventSummary = {
-  id: string
-  event_type: string
-  entity_type: string
-  entity_id?: string | null
+type RecentActivitySummary = {
+  id: string | number
+  job_id?: number | null
+  kind: string
+  message?: string | null
   metadata?: any
   created_at?: string | null
+  customer_name?: string | null
+  meta?: {
+    customer_name?: string
+    actor_name?: string
+    staff_name?: string
+    user_name?: string
+    author?: string
+    sent_by?: string
+    package_type?: string
+    document_type?: string
+    signer_name?: string
+    [key: string]: unknown
+  }
+
 }
 
 type CalendarEventSummary = {
@@ -94,7 +108,7 @@ export default function DashboardPage() {
 
   const [jobs, setJobs] = useState<DashboardJob[]>([])
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
-  const [systemEvents, setSystemEvents] = useState<SystemEventSummary[]>([])
+  const [recentActivity, setRecentActivity] = useState<RecentActivitySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
@@ -108,15 +122,15 @@ export default function DashboardPage() {
       setLoading(true)
       setError("")
 
-      const [jobsRes, eventsRes, systemEventsRes] = await Promise.all([
+      const [jobsRes, eventsRes, recentActivityRes] = await Promise.all([
         fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=250`),
         fetch(`${API_BASE}/admin/calendar/${getTenantSlug()}?limit=20`),
-        fetch(`${API_BASE}/events`)
+        fetch(`${API_BASE}/admin/recent-activity/${getTenantSlug()}?limit=10`)
       ])
 
       const jobsData = await jobsRes.json()
       const eventsData = await eventsRes.json()
-      const systemEventsData = await systemEventsRes.json().catch(() => ({ rows: [] }))
+      const recentActivityData = await recentActivityRes.json().catch(() => ({ rows: [] }))
 
       if (!jobsRes.ok || !jobsData?.ok) {
         throw new Error(jobsData?.error || "Dashboard load failed")
@@ -124,7 +138,7 @@ export default function DashboardPage() {
 
       setJobs(Array.isArray(jobsData.jobs) ? jobsData.jobs : [])
       setEvents(Array.isArray(eventsData?.events) ? eventsData.events : [])
-      setSystemEvents(Array.isArray(systemEventsData?.rows) ? systemEventsData.rows : [])
+      setRecentActivity(Array.isArray(recentActivityData?.rows) ? recentActivityData.rows : [])
     } catch (err: any) {
       setError(err?.message || "Dashboard load failed")
     } finally {
@@ -228,7 +242,64 @@ export default function DashboardPage() {
     })
     .slice(0, 6)
 
-  const recentSystemEvents = systemEvents.slice(0, 8)
+  const recentActivityItems = recentActivity.slice(0, 10)
+
+  function activityTitle(event: RecentActivitySummary) {
+    const customer =
+      event.customer_name ||
+      event.meta?.customer_name ||
+      "customer"
+
+    const actor =
+      event.meta?.actor_name ||
+      event.meta?.staff_name ||
+      event.meta?.user_name ||
+      event.meta?.author ||
+      event.meta?.sent_by ||
+      null
+
+    const packageType =
+      String(
+        event.meta?.package_type ||
+        event.meta?.document_type ||
+        ""
+      )
+        .replaceAll("_", " ")
+        .trim()
+
+    switch (event.kind) {
+      case "manual_note":
+      case "staff_note":
+        return actor
+          ? `${actor} added a note to ${customer}`
+          : `Note added to ${customer}`
+
+      case "document_package_sent":
+        return actor
+          ? `${actor} sent ${packageType || "a document"} to ${customer}`
+          : `${packageType || "Document"} sent to ${customer}`
+
+      case "document_package_signed":
+        return `${packageType || "Document"} signed by ${customer}`
+
+      case "buying_signal_detected":
+        return `Buying signal received from ${customer}`
+
+      case "customer_frustration_detected":
+      case "human_takeover_frustration":
+      case "frustrated_customer_alert_routed":
+        return `Customer agitation alert received from ${customer}`
+
+      case "estimate_details":
+        return `Estimate activity for ${customer}`
+
+      case "lead_created":
+        return `New lead created for ${customer}`
+
+      default:
+        return event.message || event.kind.replaceAll("_", " ")
+    }
+  }
 
   return (
     <div style={pageWrap}>
@@ -530,39 +601,37 @@ export default function DashboardPage() {
               </div>
 
               <div style={eventPanel}>
-                <h2 style={panelTitle}>Recent System Events</h2>
-                <div style={panelSub}>Live activity from GC mail, scheduler, voice, SMS, and intake workflows.</div>
+                <h2 style={panelTitle}>Recent Activity</h2>
+                <div style={panelSub}>
+                  Current customer, staff, document, estimate, and sales activity.
+                </div>
 
                 <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
                   {loading ? (
-                    <div style={selectedEmpty}>Loading system events…</div>
-                  ) : recentSystemEvents.length === 0 ? (
-                    <div style={selectedEmpty}>No system events logged yet.</div>
+                    <div style={selectedEmpty}>Loading recent activity…</div>
+                  ) : recentActivityItems.length === 0 ? (
+                    <div style={selectedEmpty}>No recent operational activity yet.</div>
                   ) : (
-                    recentSystemEvents.map((event) => (
+                    recentActivityItems.map((event) => (
                       <div key={event.id} style={systemEventCard}>
                         <div style={systemEventTopRow}>
-                          <span style={systemEventType}>{event.event_type.replaceAll("_", " ")}</span>
-                          <span style={systemEventTime}>{fmtDate(event.created_at)}</span>
+                          <span style={systemEventType}>
+                            {activityTitle(event)}
+                          </span>
+                          <span style={systemEventTime}>
+                            {fmtDate(event.created_at)}
+                          </span>
                         </div>
-                        <div style={systemEventMeta}>
-                          {event.entity_type}
-                          {event.entity_id ? ` #${event.entity_id}` : ""}
-                        </div>
-                        {event.metadata?.business_name ? (
-                          <div style={systemEventDetail}>{event.metadata.business_name}</div>
-                        ) : null}
-                        {event.metadata?.customer_name ? (
-                          <div style={systemEventDetail}>{event.metadata.customer_name}</div>
-                        ) : null}
-                        {event.metadata?.sent !== undefined ? (
+
+                        {event.message ? (
                           <div style={systemEventDetail}>
-                            Sent: {event.metadata.sent} • Failed: {event.metadata.failed || 0}
+                            {event.message}
                           </div>
                         ) : null}
-                        {event.metadata?.queued !== undefined ? (
-                          <div style={systemEventDetail}>
-                            Queued: {event.metadata.queued}
+
+                        {event.job_id ? (
+                          <div style={systemEventMeta}>
+                            Job #{event.job_id}
                           </div>
                         ) : null}
                       </div>
