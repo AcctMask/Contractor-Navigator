@@ -282,8 +282,51 @@ function extractNarrativeNotes(text: string) {
 }
 
 function extractServiceType(text: string) {
-  if (/\b(board up|board-up|boarding)\b/i.test(text)) return "Board Up"
-  if (/\b(emergency tarp|roof tarp|tarped|tarp)\b/i.test(text)) return "Emergency Tarp"
+  /*
+   * Assignment/service recognition only.
+   *
+   * Keep this deliberately tolerant because carrier and TPA assignment
+   * formats vary. This classifies the requested service for intake notes;
+   * it does NOT independently change job stage, routing, document flow,
+   * carrier, lead source, or any other proven workflow.
+   */
+
+  if (
+    /\b(peer review|peer-review|peer inspection|peer assessment)\b/i.test(text)
+  ) {
+    return "Peer Review"
+  }
+
+  if (
+    /\b(board up|board-up|boardup|boarding|board and secure|secure opening|secure openings)\b/i.test(text)
+  ) {
+    return "Board Up"
+  }
+
+  if (
+    /\b(roof replacement|replace roof|roof replace|full roof replacement|complete roof replacement|reroof|re-roof)\b/i.test(text)
+  ) {
+    return "Roof Replacement"
+  }
+
+  if (
+    /\b(roof repair|repair roof|roof leak repair|leak repair|temporary roof repair|permanent roof repair)\b/i.test(text)
+  ) {
+    return "Roof Repair"
+  }
+
+  if (
+    /\b(roof inspection|property inspection|damage inspection|storm inspection|inspection only|inspect roof|roof assessment|damage assessment)\b/i.test(text)
+  ) {
+    return "Inspection"
+  }
+
+  if (
+    /\b(emergency tarp|emergency tarping|roof tarp|roof tarping|tarp roof|tarping|tarped|tarp|temporary tarp|temporary roof covering|temporary roof cover|roof covering|roof cover|cover roof|plastic sheeting|plastic covering|plastic cover|plastic on roof|roof plastic|blue tarp|leaking roof|roof leaking|active leak|active leaking|water intrusion)\b/i.test(text)
+  ) {
+    return "Emergency Tarp"
+  }
+
   return null
 }
 
@@ -525,14 +568,78 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         parsed,
       }))
 
-      const customerName = parsed.customerName || "EMS Tarp Customer"
+      const customerName = parsed.customerName || "Claims Assignment Customer"
       const carrier = parsed.carrier || "Unknown Carrier"
       const claimNumber = parsed.claimNumber || null
+      const serviceType = parsed.serviceType || null
+
+      /*
+       * Preserve the proven EMS tarp workflow exactly for recognized
+       * tarp/emergency-cover assignments.
+       *
+       * Other confidently recognized services use existing Navigator
+       * stages where those stages already exist.
+       *
+       * Board Up, Peer Review, and unknown assignments remain
+       * intake_pending for staff review because no dedicated proven
+       * workflow currently exists for them.
+       */
+      const serviceRouting =
+        serviceType === "Emergency Tarp"
+          ? {
+              jobType: "TARP",
+              stage: "tarp",
+              crmSubstatus: "ems_authorization_requested",
+              crmFlowKey: "ems_tarp_email_intake",
+            }
+          : serviceType === "Roof Repair"
+            ? {
+                jobType: "ROOF REPAIR",
+                stage: "roof_repair",
+                crmSubstatus: "possible_roof_repair",
+                crmFlowKey: "claims_email_intake",
+              }
+            : serviceType === "Roof Replacement"
+              ? {
+                  jobType: "ROOF REPLACEMENT",
+                  stage: "roof_replacement",
+                  crmSubstatus: null,
+                  crmFlowKey: "claims_email_intake",
+                }
+              : serviceType === "Inspection"
+                ? {
+                    jobType: "INSPECTION",
+                    stage: "inspection",
+                    crmSubstatus: "inspection_requested",
+                    crmFlowKey: "claims_email_intake",
+                  }
+                : serviceType === "Board Up"
+                  ? {
+                      jobType: "BOARD UP",
+                      stage: "intake_pending",
+                      crmSubstatus: null,
+                      crmFlowKey: "claims_email_intake",
+                    }
+                  : serviceType === "Peer Review"
+                    ? {
+                        jobType: "PEER REVIEW",
+                        stage: "intake_pending",
+                        crmSubstatus: null,
+                        crmFlowKey: "claims_email_intake",
+                      }
+                    : {
+                        jobType: null,
+                        stage: "intake_pending",
+                        crmSubstatus: null,
+                        crmFlowKey: "claims_email_intake",
+                      }
+
+      const isEmsTarp = serviceType === "Emergency Tarp"
 
       const created = await createLeadFromInboundCallByTenantSlug(TENANT_SLUG, {
         callerPhone: parsed.customerPhone,
         callerName: customerName,
-        notes: `EMS tarp assessment email received from ${parsedPayload.from || "unknown sender"}.`,
+        notes: `Claims assignment email received from ${parsedPayload.from || "unknown sender"}.`,
         source: carrier,
       })
 
@@ -543,10 +650,10 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         `
         update jobs
         set
-          job_type = 'TARP',
-          stage = 'tarp',
-          crm_substatus = 'ems_authorization_requested',
-          crm_flow_key = 'ems_tarp_email_intake',
+          job_type = coalesce($12, job_type),
+          stage = $13,
+          crm_substatus = coalesce($14, crm_substatus),
+          crm_flow_key = $15,
           address1 = coalesce($3, address1),
           claim_number = coalesce($4, claim_number),
           carrier = coalesce($5, carrier),
@@ -573,6 +680,10 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           parsed.adjusterEmail,
           parsed.notes,
           parsed.lossType,
+          serviceRouting.jobType,
+          serviceRouting.stage,
+          serviceRouting.crmSubstatus,
+          serviceRouting.crmFlowKey,
         ]
       )
 
@@ -591,44 +702,49 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         )
       }
 
-      await upsertEstimateDetailsByTenantSlug(TENANT_SLUG, jobId, {
-        claim_number: claimNumber,
-        emergency_tarp_needed: true,
-        emergency_tarp_sqft: parsed.emergencySqft,
-        estimator_remarks: `EMS tarp intake created from forwarded assessment email. Carrier/source: ${carrier}.`,
-      })
+      let documentPackage: any = null
+      let sendResult: any = null
 
-      const documentPackage = await createDocumentPackageByTenantSlug(
-        TENANT_SLUG,
-        jobId,
-        "ems_tarp"
-      )
-
-      const sendResult =
-        await queueInitialExternalResponse({
-          tenantId,
-          jobId,
-          kind:
-            "ems_document_package",
-          payload: {
-            tenant_slug:
-              TENANT_SLUG,
-            package_id:
-              Number(documentPackage.id),
-            source:
-              "claims_email_intake",
-            from:
-              parsedPayload.from,
-            subject:
-              parsedPayload.subject,
-          },
+      if (isEmsTarp) {
+        await upsertEstimateDetailsByTenantSlug(TENANT_SLUG, jobId, {
+          claim_number: claimNumber,
+          emergency_tarp_needed: true,
+          emergency_tarp_sqft: parsed.emergencySqft,
+          estimator_remarks: `EMS tarp intake created from forwarded assessment email. Carrier/source: ${carrier}.`,
         })
+
+        documentPackage = await createDocumentPackageByTenantSlug(
+          TENANT_SLUG,
+          jobId,
+          "ems_tarp"
+        )
+
+        sendResult =
+          await queueInitialExternalResponse({
+            tenantId,
+            jobId,
+            kind:
+              "ems_document_package",
+            payload: {
+              tenant_slug:
+                TENANT_SLUG,
+              package_id:
+                Number(documentPackage.id),
+              source:
+                "claims_email_intake",
+              from:
+                parsedPayload.from,
+              subject:
+                parsedPayload.subject,
+            },
+          })
+      }
 
       await addTimelineEvent(
         tenantId,
         jobId,
-        "ems_tarp_intake_notes",
-        parsed.notes || `EMS tarp assessment email received from ${parsedPayload.from || "unknown sender"}.`,
+        isEmsTarp ? "ems_tarp_intake_notes" : "claims_assignment_intake_notes",
+        parsed.notes || `Claims assignment email received from ${parsedPayload.from || "unknown sender"}.`,
         {
           source: "inbound_email",
           from: parsedPayload.from,
@@ -640,14 +756,19 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       await addTimelineEvent(
         tenantId,
         jobId,
-        "ems_tarp_email_intake_processed",
-        "EMS tarp job created from inbound assessment email; initial external response queued behind the five-minute grace period.",
+        isEmsTarp
+          ? "ems_tarp_email_intake_processed"
+          : "claims_assignment_email_intake_processed",
+        isEmsTarp
+          ? "EMS tarp job created from inbound assessment email; initial external response queued behind the five-minute grace period."
+          : `Claims assignment processed as ${serviceType || "Unclassified"} and routed for Navigator review.`,
         {
           from: parsedPayload.from,
           to: parsedPayload.to,
           subject: parsedPayload.subject,
           parsed,
-          package_id: documentPackage.id,
+          service_type: serviceType,
+          package_id: documentPackage?.id || null,
           send_result: sendResult,
           received_email_id: receivedEmail?.id || initialPayload.raw?.email_id || null,
         }
