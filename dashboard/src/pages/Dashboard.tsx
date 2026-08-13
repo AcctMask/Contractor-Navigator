@@ -296,6 +296,24 @@ export default function DashboardPage() {
       case "lead_created":
         return `New lead created for ${customer}`
 
+      case "user_invitation_sent": {
+        const invitedUser = String(
+          event.meta?.full_name ||
+          event.meta?.email ||
+          "user"
+        )
+        return `User invitation sent to ${invitedUser}`
+      }
+
+      case "user_invitation_accepted": {
+        const invitedUser = String(
+          event.meta?.full_name ||
+          event.meta?.email ||
+          "User"
+        )
+        return `${invitedUser} accepted user invitation`
+      }
+
       default:
         return event.message || event.kind.replaceAll("_", " ")
     }

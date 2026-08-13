@@ -104,6 +104,35 @@ function cleanRole(value: unknown) {
   return "staff"
 }
 
+async function logUserInvitationActivity(
+  tenantId: number,
+  kind: "user_invitation_sent" | "user_invitation_accepted",
+  message: string,
+  meta: Record<string, unknown>
+) {
+  try {
+    await pool.query(
+      `
+      insert into timeline_events
+        (tenant_id, job_id, kind, message, meta, created_at)
+      values
+        ($1, null, $2, $3, $4::jsonb, now())
+      `,
+      [
+        tenantId,
+        kind,
+        message,
+        JSON.stringify(meta),
+      ]
+    )
+  } catch (error) {
+    console.error(
+      "User invitation activity logging failed",
+      error
+    )
+  }
+}
+
 export async function inviteUserByTenantSlug(
   tenantSlug: string,
   input: {
@@ -188,7 +217,23 @@ export async function inviteUserByTenantSlug(
       ]
     )
 
-    return result.rows[0]
+    const invite = result.rows[0]
+
+    await logUserInvitationActivity(
+      Number(tenantId),
+      "user_invitation_sent",
+      `User invitation sent to ${invite.full_name}`,
+      {
+        invitation_id: invite.id,
+        full_name: invite.full_name,
+        email: invite.email,
+        role: invite.role,
+        invited_by_user_id: invitedByUserId,
+        invitation_action: "refreshed",
+      }
+    )
+
+    return invite
   }
 
   const result = await pool.query(
@@ -209,7 +254,23 @@ export async function inviteUserByTenantSlug(
     ]
   )
 
-  return result.rows[0]
+  const invite = result.rows[0]
+
+  await logUserInvitationActivity(
+    Number(tenantId),
+    "user_invitation_sent",
+    `User invitation sent to ${invite.full_name}`,
+    {
+      invitation_id: invite.id,
+      full_name: invite.full_name,
+      email: invite.email,
+      role: invite.role,
+      invited_by_user_id: invitedByUserId,
+      invitation_action: "created",
+    }
+  )
+
+  return invite
 }
 
 export async function getInvitationByToken(inviteToken: string) {
@@ -306,6 +367,20 @@ export async function acceptInvitation(
   )
 
   const user = userResult.rows[0] as AppUser
+
+  await logUserInvitationActivity(
+    Number(invite.tenant_id),
+    "user_invitation_accepted",
+    `${invite.full_name} accepted user invitation`,
+    {
+      invitation_id: invite.id,
+      app_user_id: user.id,
+      full_name: invite.full_name,
+      email: invite.email,
+      role: invite.role,
+    }
+  )
+
   const token = signToken(user)
 
   return {

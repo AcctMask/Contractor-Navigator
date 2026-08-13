@@ -794,7 +794,9 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'buying_signal_detected',
           'customer_frustration_detected',
           'human_takeover_frustration',
-          'frustrated_customer_alert_routed'
+          'frustrated_customer_alert_routed',
+          'user_invitation_sent',
+          'user_invitation_accepted'
         )
       order by te.created_at desc
       limit $2
