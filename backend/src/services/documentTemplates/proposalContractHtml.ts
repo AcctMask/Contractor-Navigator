@@ -16,27 +16,55 @@ function escapeHtml(value: any) {
 }
 
 export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: string) {
-  const rows = [
+  const displayMode = String(payload.document_display_mode || "")
+
+  const rows: any[][] = [
     ["Document", doc.document_title],
     ["Package Type", doc.package_type],
     ["Customer", payload.customer_name],
     ["Phone", payload.customer_phone],
     ["Email", payload.customer_email],
     ["Address", payload.job_address],
-    ["Proposal Amount", moneyValue(payload.proposal_amount ?? payload.agreed_amount)],
-    ["Contract Amount", moneyValue(payload.contract_amount ?? payload.proposal_amount ?? payload.agreed_amount)],
-    ["Discount Amount", moneyValue(payload.discount_amount)],
-    ["Discount Reason", payload.discount_reason],
-    ["Roof Type", payload.roof_type],
-    ["Roof Squares", payload.roof_squares],
-    ["Carrier Approved Amount", moneyValue(payload.carrier_approved_amount)],
-    ["Claim Number", payload.claim_number],
-    ["Deductible", payload.deductible],
+  ]
+
+  if (displayMode === "retail_contract") {
+    rows.push(
+      ["Proposal / Contract Amount", moneyValue(
+        payload.proposal_contract_amount ??
+        payload.contract_amount ??
+        payload.proposal_amount ??
+        payload.agreed_amount
+      )],
+      ["Roof Type", payload.roof_type],
+      ["Roof Squares", payload.roof_squares]
+    )
+  }
+
+  if (displayMode === "insurance_contract") {
+    rows.push(
+      ["Carrier", payload.carrier],
+      ["Claim Number", payload.claim_number],
+      ["Date of Loss", payload.date_of_loss],
+      ["Carrier Approved Amount", moneyValue(payload.carrier_approved_amount)],
+      ["Deductible", payload.deductible]
+    )
+  }
+
+  if (displayMode === "ems_work_authorization") {
+    rows.push(
+      ["TPA", payload.tpa],
+      ["Carrier", payload.carrier],
+      ["Claim Number", payload.claim_number],
+      ["Date of Loss", payload.date_of_loss]
+    )
+  }
+
+  rows.push(
     ["Estimator Remarks", payload.estimator_remarks],
     ["Terms Accepted", payload.terms_accepted === true ? "Yes" : "No / Not signed yet"],
     ["Signed By", payload.signed_by],
-    ["Signed At", payload.signed_at],
-  ]
+    ["Signed At", payload.signed_at]
+  )
 
   return `<!doctype html>
 <html>

@@ -67,7 +67,8 @@ async function ensureDocumentTables() {
       add column if not exists proposal_amount numeric(12,2),
       add column if not exists contract_amount numeric(12,2),
       add column if not exists discount_amount numeric(12,2),
-      add column if not exists discount_reason text;
+      add column if not exists discount_reason text,
+      add column if not exists tpa text;
 
     create table if not exists job_document_packages (
       id bigserial primary key,
@@ -120,6 +121,9 @@ export async function getJobSummaryByTenantSlug(tenantSlug: string, jobId: numbe
       j.city,
       j.state,
       j.zip,
+      j.carrier,
+      j.claim_number as job_claim_number,
+      j.date_of_loss,
       c.full_name as customer_name,
       c.email as customer_email,
       c.phone as customer_phone
@@ -168,6 +172,7 @@ export async function getEstimateDetailsByTenantSlug(tenantSlug: string, jobId: 
       contract_amount,
       discount_amount,
       discount_reason,
+      tpa,
       created_at,
       updated_at
     from job_estimate_details
@@ -204,6 +209,7 @@ export async function upsertEstimateDetailsByTenantSlug(
     contract_amount?: number | null
     discount_amount?: number | null
     discount_reason?: string | null
+    tpa?: string | null
   }
 ) {
   await ensureDocumentTables()
@@ -233,11 +239,12 @@ export async function upsertEstimateDetailsByTenantSlug(
       contract_amount,
       discount_amount,
       discount_reason,
+      tpa,
       created_at,
       updated_at
     )
     values (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, false), $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20, $21, now(), now()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, coalesce($11, false), $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20, $21, $22, now(), now()
     )
     on conflict (tenant_id, job_id)
     do update set
@@ -260,6 +267,7 @@ export async function upsertEstimateDetailsByTenantSlug(
       contract_amount = excluded.contract_amount,
       discount_amount = excluded.discount_amount,
       discount_reason = excluded.discount_reason,
+      tpa = excluded.tpa,
       updated_at = now()
     `,
     [
@@ -288,6 +296,7 @@ export async function upsertEstimateDetailsByTenantSlug(
           : null
       ),
       input.discount_reason || null,
+      input.tpa || null,
     ]
   )
 
@@ -473,7 +482,7 @@ export async function createDocumentPackageByTenantSlug(
   let payload: Record<string, unknown> = {}
 
   if (packageType === "retail_estimate") {
-    documentTitle = `Retail Estimate - ${customerName}`
+    documentTitle = `Retail Estimate / Contract - ${customerName}`
     templateSource = "Roof Estimate - Bruno,J.pdf"
     payload = {
       customer_name: customerName,
@@ -493,6 +502,13 @@ export async function createDocumentPackageByTenantSlug(
       estimate_line_items: Array.isArray(details?.estimate_line_items) ? details.estimate_line_items : [],
       terms_and_conditions: details?.terms_and_conditions || null,
       estimator_remarks: details?.estimator_remarks || null,
+      proposal_contract_amount:
+        details?.contract_amount ??
+        details?.proposal_amount ??
+        details?.agreed_amount ??
+        null,
+      vip_benefits_included: true,
+      document_display_mode: "retail_contract",
       ready_for_signature: !!details?.agreed_amount,
     }
   } else if (packageType === "insurance_contract") {
@@ -503,7 +519,9 @@ export async function createDocumentPackageByTenantSlug(
       customer_email: job.customer_email || null,
       customer_phone: job.customer_phone || null,
       job_address: address,
-      claim_number: details?.claim_number || null,
+      carrier: job.carrier || null,
+      claim_number: details?.claim_number || job.job_claim_number || null,
+      date_of_loss: job.date_of_loss || null,
       carrier_approved_amount: details?.carrier_approved_amount || null,
       deductible: details?.deductible || null,
       proposal_type: details?.proposal_type || "insurance",
@@ -513,7 +531,8 @@ export async function createDocumentPackageByTenantSlug(
       discount_reason: details?.discount_reason || null,
       vip_benefits_included: true,
       estimator_remarks: details?.estimator_remarks || null,
-      ready_for_signature: !!details?.claim_number,
+      document_display_mode: "insurance_contract",
+      ready_for_signature: !!(details?.claim_number || job.job_claim_number),
     }
   } else if (packageType === "ems_tarp") {
     documentTitle = `EMS Tarp Work Authorization - ${customerName}`
@@ -523,12 +542,16 @@ export async function createDocumentPackageByTenantSlug(
       customer_email: job.customer_email || null,
       customer_phone: job.customer_phone || null,
       job_address: address,
-      claim_number: details?.claim_number || null,
+      tpa: details?.tpa || null,
+      carrier: job.carrier || null,
+      claim_number: details?.claim_number || job.job_claim_number || null,
+      date_of_loss: job.date_of_loss || null,
       emergency_tarp_needed: !!details?.emergency_tarp_needed,
       emergency_tarp_sqft: details?.emergency_tarp_sqft || null,
       mobilization_fee: 250,
       tarp_rate_per_sqft: 2.5,
       estimator_remarks: details?.estimator_remarks || null,
+      document_display_mode: "ems_work_authorization",
       ready_for_signature: !!details?.emergency_tarp_needed,
     }
   } else {

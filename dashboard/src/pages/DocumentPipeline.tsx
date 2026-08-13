@@ -15,6 +15,9 @@ type JobSummary = {
   customer_name?: string | null
   customer_email?: string | null
   customer_phone?: string | null
+  carrier?: string | null
+  job_claim_number?: string | null
+  date_of_loss?: string | null
 }
 
 type EstimateLineItem = {
@@ -31,6 +34,7 @@ type EstimateDetails = {
   carrier_approved_amount?: number | null
   claim_number?: string | null
   deductible?: string | null
+  tpa?: string | null
   emergency_tarp_needed?: boolean
   emergency_tarp_sqft?: number | null
   callback_notes?: string | null
@@ -61,10 +65,16 @@ function addressLine(job?: JobSummary | null) {
 
 function defaultEstimateLineItems(): EstimateLineItem[] {
   return [
-    { description: "Roof replacement / repair scope", amount: null },
-    { description: "Materials", amount: null },
-    { description: "Labor", amount: null },
-    { description: "Permit / disposal / misc.", amount: null },
+    {
+      description:
+        "Complete Roof Replacement - Complete roof replacement using high-end architectural shingles and underlayment from the manufacturer of the customer's choice. Re-nail all plywood.",
+      amount: null,
+    },
+    {
+      description:
+        "Added Value - Replace all vents / painted to match the new shingle. Starter strip on the entire perimeter to better protect the home from wind damage. Metal Valley to better protect the home from water damage. Up to 4 sheets of plywood.",
+      amount: null,
+    },
   ]
 }
 
@@ -104,6 +114,7 @@ export default function DocumentPipelinePage() {
     carrier_approved_amount: null,
     claim_number: "",
     deductible: "",
+    tpa: "",
     emergency_tarp_needed: false,
     emergency_tarp_sqft: null,
     callback_notes: "",
@@ -198,6 +209,7 @@ export default function DocumentPipelinePage() {
         carrier_approved_amount: d.carrier_approved_amount ?? null,
         claim_number: d.claim_number || "",
         deductible: d.deductible || "",
+        tpa: d.tpa || "",
         emergency_tarp_needed: !!d.emergency_tarp_needed,
         emergency_tarp_sqft: d.emergency_tarp_sqft ?? null,
         callback_notes: d.callback_notes || "",
@@ -411,6 +423,9 @@ export default function DocumentPipelinePage() {
             <div><strong>Email:</strong> {job.customer_email || "—"}</div>
             <div><strong>Phone:</strong> {job.customer_phone || "—"}</div>
             <div><strong>Address:</strong> {addressLine(job)}</div>
+            <div><strong>Carrier:</strong> {job.carrier || "—"}</div>
+            <div><strong>Claim #:</strong> {job.job_claim_number || "—"}</div>
+            <div><strong>Date of Loss:</strong> {job.date_of_loss ? String(job.date_of_loss).slice(0, 10) : "—"}</div>
             <div><strong>Stage:</strong> {job.stage || "—"}</div>
             <div><strong>CRM Substatus:</strong> {job.crm_substatus || "—"}</div>
           </div>
@@ -491,7 +506,7 @@ export default function DocumentPipelinePage() {
                 onChange={(e) => setField("proposal_type", e.target.value)}
                 style={inputStyle}
               >
-                <option value="retail">Retail Proposal / Contract</option>
+                <option value="retail">Retail Estimate / Contract</option>
                 <option value="insurance">Insurance Proposal / Contract</option>
               </select>
             </div>
@@ -599,6 +614,16 @@ export default function DocumentPipelinePage() {
             </div>
           </div>
 
+          <div>
+            <label style={labelStyle}>TPA / Third-Party Administrator</label>
+            <input
+              value={form.tpa || ""}
+              onChange={(e) => setField("tpa", e.target.value)}
+              placeholder="Hancock Claims, Altimeter Solutions Group, etc."
+              style={inputStyle}
+            />
+          </div>
+
           <label style={{ display: "flex", gap: "10px", alignItems: "center" }}>
             <input
               type="checkbox"
@@ -695,10 +720,10 @@ export default function DocumentPipelinePage() {
 
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
           <button onClick={() => createPackage("retail_estimate")} style={buttonStyle}>
-            Create Retail Proposal / Contract
+            Create Retail Estimate / Contract
           </button>
           <button onClick={() => createPackage("insurance_contract")} style={buttonStyle}>
-            Create Insurance Proposal / Contract
+            Create Insurance Contract
           </button>
           <button onClick={() => createPackage("ems_tarp")} style={buttonStyle}>
             Create EMS Tarp Authorization

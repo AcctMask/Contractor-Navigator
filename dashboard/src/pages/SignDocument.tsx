@@ -109,9 +109,11 @@ export default function SignDocument() {
   const agreedAmount = payload.agreed_amount
   const proposalAmount = payload.proposal_amount
   const contractAmount = payload.contract_amount ?? payload.proposal_amount ?? payload.agreed_amount
-  const discountAmount = payload.discount_amount
-  const discountReason = payload.discount_reason
   const vipBenefitsIncluded = !!payload.vip_benefits_included
+  const documentDisplayMode = String(payload.document_display_mode || "")
+  const isRetailContract = documentDisplayMode === "retail_contract"
+  const isInsuranceContract = documentDisplayMode === "insurance_contract"
+  const isEmsWorkAuthorization = documentDisplayMode === "ems_work_authorization"
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
@@ -188,9 +190,28 @@ export default function SignDocument() {
               <Info label="Phone" value={phone} />
               <Info label="Email" value={email} />
               <Info label="Property Address" value={propertyAddress} />
-              <Info label="Proposal Amount" value={moneyDisplay(proposalAmount) || amountDisplay} />
-              <Info label="Contract Amount" value={moneyDisplay(contractAmount) || amountDisplay} />
-              <Info label="Discount" value={moneyDisplay(discountAmount) || "—"} />
+              {isRetailContract ? (
+                <Info
+                  label="Proposal / Contract Amount"
+                  value={moneyDisplay(contractAmount) || moneyDisplay(proposalAmount) || amountDisplay}
+                />
+              ) : null}
+
+              {isInsuranceContract ? (
+                <>
+                  <Info label="Carrier" value={String(payload.carrier || "—")} />
+                  <Info label="Claim #" value={String(payload.claim_number || "—")} />
+                  <Info label="Date of Loss" value={String(payload.date_of_loss || "—")} />
+                </>
+              ) : null}
+
+              {isEmsWorkAuthorization ? (
+                <>
+                  <Info label="TPA" value={String(payload.tpa || "—")} />
+                  <Info label="Carrier" value={String(payload.carrier || "—")} />
+                  <Info label="Claim #" value={String(payload.claim_number || "—")} />
+                </>
+              ) : null}
             </div>
 
             <div style={docBox}>
@@ -200,24 +221,64 @@ export default function SignDocument() {
                 Property: {String(propertyAddress)}
               </p>
 
-              <p style={docText}>
-                Proposal Amount: {moneyDisplay(proposalAmount) || amountDisplay}
-              </p>
+              {isRetailContract ? (
+                <>
+                  <p style={docText}>
+                    Roof Type: {String(payload.roof_type || "—")}
+                  </p>
 
-              <p style={docText}>
-                Contract Amount: {moneyDisplay(contractAmount) || amountDisplay}
-              </p>
+                  <p style={docText}>
+                    Roof Squares: {String(payload.roof_squares || "—")}
+                  </p>
 
-              {discountAmount ? (
-                <p style={docText}>
-                  Discount: {moneyDisplay(discountAmount)}
-                </p>
+                  <p style={docText}>
+                    Proposal / Contract Amount: {moneyDisplay(contractAmount) || moneyDisplay(proposalAmount) || amountDisplay}
+                  </p>
+
+                  {Array.isArray(payload.estimate_line_items) && payload.estimate_line_items.length ? (
+                    <div style={docText}>
+                      <strong>Retail Estimate Line Items:</strong>
+                      <ul>
+                        {payload.estimate_line_items.map((item: any, index: number) => (
+                          <li key={index}>
+                            {String(item?.description || "")}
+                            {item?.amount !== null && item?.amount !== undefined
+                              ? ` — ${moneyDisplay(item.amount)}`
+                              : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
 
-              {discountReason ? (
-                <p style={docText}>
-                  Discount / negotiation note: {discountReason}
-                </p>
+              {isInsuranceContract ? (
+                <>
+                  <p style={docText}>
+                    Restore the Roof to its pre-loss condition which shall consist of the following, subject to written change orders including the modification in scope, price and time based on further inspection and disclosure of previously unknown, undiscovered or undisclosed conditions. The price for the services of Good2Go will be based upon the approved insurance estimate for the roof repairs/replacement.
+                  </p>
+
+                  <p style={docText}>
+                    This Agreement is contingent on the insurance company approval and payment, not including any deductible or non-recoverable depreciation on the policy.
+                  </p>
+                </>
+              ) : null}
+
+              {isEmsWorkAuthorization ? (
+                <>
+                  <p style={docText}>
+                    Good2Go Roofing and Construction LLC was assigned by {String(payload.tpa || "the assigning party")}, which was contracted by my insurance carrier to provide emergency services at my property.
+                  </p>
+
+                  <p style={docText}>
+                    By signing below, I authorize Good2Go Roofing and Construction LLC and their affiliates to provide a roof inspection and upon their assessment of damages, install a tarp in affected areas as deemed necessary.
+                  </p>
+
+                  <p style={docText}>
+                    I understand that all photos, invoices, and estimates for repairs and/or replacement will be processed through {String(payload.tpa || "the assigning party")} for the insurance carrier's authorization and payment.
+                  </p>
+                </>
               ) : null}
 
               <p style={docText}>
