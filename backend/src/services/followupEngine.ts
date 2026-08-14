@@ -1102,6 +1102,39 @@ function containsAny(text: string, patterns: string[]) {
   return patterns.some((p) => text.includes(p))
 }
 
+function detectDefinitiveDisengagement(
+  value: string | null | undefined
+) {
+  const text = String(value || "")
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (!text) return null
+
+  const patterns: Array<[RegExp, string]> = [
+    [/\bi already hired (someone|somebody|another (roofer|contractor|company))\b/i, "already_hired_someone"],
+    [/\bi've already hired (someone|somebody|another (roofer|contractor|company))\b/i, "already_hired_someone"],
+    [/\bwe already hired (someone|somebody|another (roofer|contractor|company))\b/i, "already_hired_someone"],
+    [/\bwent with (someone|somebody|another (roofer|contractor|company))\b/i, "went_with_someone_else"],
+    [/\busing another (roofer|contractor|company)\b/i, "using_another_company"],
+    [/\bhired another (roofer|contractor|company)\b/i, "hired_another_company"],
+    [/\bnot interested\b/i, "not_interested"],
+    [/\bno longer interested\b/i, "no_longer_interested"],
+    [/\bdon't need (it|this|service|the service|roofing|a roofer|a contractor|help) anymore\b/i, "service_no_longer_needed"],
+    [/\bdo not need (it|this|service|the service|roofing|a roofer|a contractor|help) anymore\b/i, "service_no_longer_needed"],
+    [/\bwe('re| are) all set\b/i, "customer_all_set"],
+    [/\bi('m| am) all set\b/i, "customer_all_set"],
+  ]
+
+  for (const [pattern, reason] of patterns) {
+    if (pattern.test(text)) return reason
+  }
+
+  return null
+}
+
 function classifyInboundMessage(message: string): InboundClassification {
   const text = message.toLowerCase()
 
@@ -2824,6 +2857,109 @@ export async function handleInboundMessageByTenantSlug(
         apologyResult,
       alert:
         alertResult,
+    }
+  }
+
+  const definitiveDisengagement =
+    detectDefinitiveDisengagement(trimmed)
+
+  if (definitiveDisengagement) {
+    await pool.query(
+      `
+      update jobs
+      set
+        bot_paused = true,
+        bot_pause_reason = $3,
+        crm_substatus = 'customer_disengaged',
+        crm_flow_key = 'human_review_customer_disengaged',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [
+        tenantId,
+        jobId,
+        definitiveDisengagement,
+      ]
+    )
+
+    await pool.query(
+      `
+      update scheduled_actions
+      set
+        status = 'cancelled',
+        updated_at = now()
+      where tenant_id = $1
+        and job_id = $2
+        and status = 'pending'
+      `,
+      [
+        tenantId,
+        jobId,
+      ]
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "customer_disengaged",
+      trimmed,
+      {
+        from,
+        channel: "sms",
+        reason:
+          definitiveDisengagement,
+        automation_paused:
+          true,
+      }
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "bot_paused",
+      "Automated follow-up stopped because customer indicated the opportunity is no longer active.",
+      {
+        from,
+        channel: "sms",
+        reason:
+          definitiveDisengagement,
+      }
+    )
+
+    await logSystemEvent(
+      "customer_disengaged",
+      "job",
+      jobId,
+      {
+        tenant_slug:
+          tenantSlug,
+        from,
+        channel:
+          "sms",
+        message:
+          trimmed,
+        reason:
+          definitiveDisengagement,
+        bot_paused:
+          true,
+      }
+    )
+
+    return {
+      ok: true,
+      tenant_id:
+        tenantId,
+      job_id:
+        jobId,
+      classification:
+        "customer_disengaged",
+      disengagement_reason:
+        definitiveDisengagement,
+      bot_paused:
+        true,
+      automated_followup_stopped:
+        true,
     }
   }
 

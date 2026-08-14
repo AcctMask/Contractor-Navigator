@@ -801,6 +801,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'customer_frustration_detected',
           'human_takeover_frustration',
           'frustrated_customer_alert_routed',
+          'customer_disengaged',
+          'bot_paused',
+          'voice_call_received',
+          'voice_ai_summary_created',
+          'voice_emergency_tarp_detected',
+          'voice_intake_alert_routed',
+          'voice_address_match_ambiguous',
           'user_invitation_sent',
           'user_invitation_accepted'
         )

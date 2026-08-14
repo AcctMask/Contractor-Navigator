@@ -649,7 +649,16 @@ export default function DashboardPage() {
 
                         {event.job_id ? (
                           <div style={systemEventMeta}>
-                            Job #{event.job_id}
+                            <Link
+                              to={`/job/${event.job_id}`}
+                              style={{
+                                color: "#a9cbff",
+                                fontWeight: 700,
+                                textDecoration: "none",
+                              }}
+                            >
+                              Job #{event.job_id} — Open Job
+                            </Link>
                           </div>
                         ) : null}
                       </div>
