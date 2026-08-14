@@ -630,39 +630,50 @@ export default function DashboardPage() {
                   ) : recentActivityItems.length === 0 ? (
                     <div style={selectedEmpty}>No recent operational activity yet.</div>
                   ) : (
-                    recentActivityItems.map((event) => (
-                      <div key={event.id} style={systemEventCard}>
-                        <div style={systemEventTopRow}>
-                          <span style={systemEventType}>
-                            {activityTitle(event)}
-                          </span>
-                          <span style={systemEventTime}>
-                            {fmtDate(event.created_at)}
-                          </span>
-                        </div>
-
-                        {event.message ? (
-                          <div style={systemEventDetail}>
-                            {event.message}
+                    recentActivityItems.map((event) => {
+                      const activityCard = (
+                        <div style={systemEventCard}>
+                          <div style={systemEventTopRow}>
+                            <span style={systemEventType}>
+                              {activityTitle(event)}
+                            </span>
+                            <span style={systemEventTime}>
+                              {fmtDate(event.created_at)}
+                            </span>
                           </div>
-                        ) : null}
 
-                        {event.job_id ? (
-                          <div style={systemEventMeta}>
-                            <Link
-                              to={`/job/${event.job_id}`}
-                              style={{
-                                color: "#a9cbff",
-                                fontWeight: 700,
-                                textDecoration: "none",
-                              }}
-                            >
+                          {event.message ? (
+                            <div style={systemEventDetail}>
+                              {event.message}
+                            </div>
+                          ) : null}
+
+                          {event.job_id ? (
+                            <div style={systemEventMeta}>
                               Job #{event.job_id} — Open Job
-                            </Link>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+
+                      return event.job_id ? (
+                        <Link
+                          key={event.id}
+                          to={`/job/${event.job_id}`}
+                          style={{
+                            display: "block",
+                            color: "inherit",
+                            textDecoration: "none",
+                          }}
+                        >
+                          {activityCard}
+                        </Link>
+                      ) : (
+                        <div key={event.id}>
+                          {activityCard}
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               </div>

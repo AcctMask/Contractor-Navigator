@@ -778,7 +778,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         te.id,
         te.job_id,
         te.kind,
-        te.message,
+        case
+          when te.kind = 'voice_intake_alert_routed' then
+            coalesce(
+              nullif(te.meta->'summary'->>'reason', ''),
+              te.message
+            )
+          else te.message
+        end as message,
         te.meta,
         te.created_at,
         c.full_name as customer_name
@@ -803,7 +810,6 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'frustrated_customer_alert_routed',
           'customer_disengaged',
           'bot_paused',
-          'voice_call_received',
           'voice_ai_summary_created',
           'voice_emergency_tarp_detected',
           'voice_intake_alert_routed',
