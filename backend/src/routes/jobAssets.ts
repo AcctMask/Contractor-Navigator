@@ -1337,17 +1337,33 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             column *
               (CELL_WIDTH + COLUMN_GAP)
 
+          /*
+           * Preserve the original job photo exactly as uploaded.
+           *
+           * The PDF displays each image in a relatively small report cell,
+           * so embedding the full-resolution phone image wastes substantial
+           * memory without improving the visible report.
+           *
+           * Create only a report-sized in-memory JPEG for PDF embedding.
+           * Nothing is written back over the source asset.
+           */
           const sourceBytes = fs.readFileSync(
             photo.stored_path
           )
 
-          const orientedBytes = await sharp(sourceBytes)
+          const reportImageBytes = await sharp(sourceBytes)
             .autoOrient()
-            .jpeg({ quality: 95 })
+            .resize({
+              width: 1400,
+              height: 1400,
+              fit: "inside",
+              withoutEnlargement: true,
+            })
+            .jpeg({ quality: 85 })
             .toBuffer()
 
           const image =
-            await pdfDoc.embedJpg(orientedBytes)
+            await pdfDoc.embedJpg(reportImageBytes)
 
           const edit =
             photoEdits.get(Number(photo.id)) || {
