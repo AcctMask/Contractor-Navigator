@@ -28,6 +28,18 @@ let schedulerStarted = false
 
 const POLL_MS = 60 * 1000
 
+/*
+ * Initial customer-contact grace period.
+ *
+ * The job is created / updated immediately so staff can see and act on it,
+ * but the FIRST automated lead follow-up must wait at least five minutes.
+ * This gives the office time to pause the bot before any initial AI SMS
+ * leaves Navigator.
+ *
+ * Later workflow messages retain their existing configured timing.
+ */
+const INITIAL_LEAD_GRACE_MS = 5 * 60 * 1000
+
 const QUIET_TIME_ZONE = "America/New_York"
 const QUIET_START_HOUR = 19
 const QUIET_END_HOUR = 7
@@ -357,6 +369,28 @@ async function processJob(job: SchedJob) {
   }
 
   if (gapMs == null) return
+
+  /*
+   * HARD RULE:
+   * Every newly-qualified lead gets at least five minutes before its
+   * first automated AI follow-up.
+   *
+   * The office can inspect the newly-created/updated Navigator job and
+   * pause the bot during this window. processJob() already exits above
+   * whenever job.bot_paused is true.
+   *
+   * This minimum applies ONLY to the first lead follow-up. Existing
+   * later-message timing remains unchanged.
+   */
+  if (
+    stats.count === 0 &&
+    automationKey === "lead"
+  ) {
+    gapMs = Math.max(
+      gapMs,
+      INITIAL_LEAD_GRACE_MS
+    )
+  }
 
   const nowMs = Date.now()
 

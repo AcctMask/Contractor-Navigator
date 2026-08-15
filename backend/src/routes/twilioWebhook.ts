@@ -471,7 +471,8 @@ type VoiceExistingProjectResolution = {
 async function resolveVoiceExistingProjectByAddress(
   tenantId: number,
   temporaryVoiceJobId: number,
-  spokenAddress: string
+  spokenAddress: string,
+  callerPhone: string | null
 ): Promise<VoiceExistingProjectResolution> {
   /*
    * Reuses the normalized address semantics already proven
@@ -630,6 +631,138 @@ async function resolveVoiceExistingProjectByAddress(
   )
 
   if (!result.rowCount) {
+    /*
+     * Voice transcription can slightly distort street/city names
+     * even when the caller supplies enough reliable identifying data.
+     *
+     * Property remains the job anchor. Phone alone NEVER selects a job.
+     *
+     * Fallback requires:
+     *   - same normalized caller phone,
+     *   - same house number,
+     *   - same ZIP when voice captured a ZIP,
+     *   - exactly one active Navigator job.
+     *
+     * This allows a call such as:
+     *   "1, 2, 3, 6 Lawnwood Drive ... 33596"
+     * to safely corroborate:
+     *   "1236 Lornewood Dr. ... 33596"
+     * without permitting phone-only merging.
+     */
+
+    const callerDigits =
+      String(callerPhone || "")
+        .replace(/\D/g, "")
+        .slice(-10)
+
+    const spacedHouseNumber =
+      String(spokenAddress || "").match(
+        /\b\d(?:[\s,.-]+\d){2,5}\b/
+      )
+
+    const directHouseNumber =
+      String(spokenAddress || "").match(
+        /\b\d{2,6}\b/
+      )
+
+    const houseNumber =
+      spacedHouseNumber
+        ? spacedHouseNumber[0].replace(/\D/g, "")
+        : directHouseNumber
+          ? directHouseNumber[0]
+          : null
+
+    const zipMatch =
+      String(spokenAddress || "").match(
+        /\b\d{5}(?:-\d{4})?\b/
+      )
+
+    const spokenZip =
+      zipMatch
+        ? zipMatch[0].slice(0, 5)
+        : null
+
+    if (
+      callerDigits &&
+      houseNumber
+    ) {
+      const corroborated =
+        await pool.query(
+          `
+          select
+            j.id,
+            j.customer_id,
+            j.address1,
+            j.stage
+          from jobs j
+          join customers c
+            on c.id = j.customer_id
+           and c.tenant_id = j.tenant_id
+          where j.tenant_id = $1
+            and j.id <> $2
+            and right(
+              regexp_replace(
+                coalesce(c.phone, ''),
+                '[^0-9]',
+                '',
+                'g'
+              ),
+              10
+            ) = $3
+            and substring(
+              coalesce(j.address1, '')
+              from '^\\s*([0-9]+)'
+            ) = $4
+            and (
+              $5::text is null
+              or nullif(trim(coalesce(j.zip, '')), '') = $5
+            )
+            and coalesce(j.stage, '') not in (
+              'archived',
+              'disqualified',
+              'paid'
+            )
+          order by
+            j.updated_at desc nulls last,
+            j.id desc
+          limit 2
+          `,
+          [
+            tenantId,
+            temporaryVoiceJobId,
+            callerDigits,
+            houseNumber,
+            spokenZip,
+          ]
+        )
+
+      if (corroborated.rowCount === 1) {
+        return {
+          mode: "unique_match",
+          job_id: Number(
+            corroborated.rows[0].id
+          ),
+          address1:
+            corroborated.rows[0].address1 ||
+            null,
+          match_count: 1,
+        }
+      }
+
+      if (
+        Number(corroborated.rowCount || 0) >
+        1
+      ) {
+        return {
+          mode: "ambiguous",
+          job_id: null,
+          address1: null,
+          match_count:
+            Number(corroborated.rowCount),
+        }
+      }
+    }
+
     return {
       mode: "no_match",
       job_id: null,
@@ -1187,7 +1320,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       await resolveVoiceExistingProjectByAddress(
         tenantId,
         temporaryVoiceJobId,
-        address
+        address,
+        from
       )
 
     let resolvedJobId =
