@@ -178,7 +178,7 @@ export async function registerSalesPerformanceReportingRoutes(
                         ''
                       ) <> 'ems_tarp'
                   )
-              )::int as signed_sold
+              )::int as signed_package_received
 
             from jobs j
 
@@ -255,7 +255,7 @@ export async function registerSalesPerformanceReportingRoutes(
                         ''
                       ) <> 'ems_tarp'
                   )
-              )::int as signed_sold
+              )::int as signed_package_received
 
             from jobs j
 
@@ -285,7 +285,7 @@ export async function registerSalesPerformanceReportingRoutes(
             opportunities: 0,
             estimates_sent: 0,
             contracts_sent: 0,
-            signed_sold: 0
+            signed_package_received: 0
           }
 
         const opportunities =
@@ -297,8 +297,8 @@ export async function registerSalesPerformanceReportingRoutes(
         const contractsSent =
           Number(summary.contracts_sent || 0)
 
-        const signedSold =
-          Number(summary.signed_sold || 0)
+        const signedPackageReceived =
+          Number(summary.signed_package_received || 0)
 
         const percent = (
           numerator: number,
@@ -324,8 +324,8 @@ export async function registerSalesPerformanceReportingRoutes(
             const sourceContracts =
               Number(row.contracts_sent || 0)
 
-            const sourceSigned =
-              Number(row.signed_sold || 0)
+            const sourcePackageReceived =
+              Number(row.signed_package_received || 0)
 
             return {
               source: row.source,
@@ -345,11 +345,11 @@ export async function registerSalesPerformanceReportingRoutes(
                   sourceContracts,
                   sourceOpportunities
                 ),
-              signed_sold:
-                sourceSigned,
-              sold_rate:
+              signed_package_received:
+                sourcePackageReceived,
+              package_received_rate:
                 percent(
-                  sourceSigned,
+                  sourcePackageReceived,
                   sourceOpportunities
                 )
             }
@@ -391,11 +391,11 @@ export async function registerSalesPerformanceReportingRoutes(
                 contractsSent,
                 opportunities
               ),
-            signed_sold:
-              signedSold,
-            sold_rate:
+            signed_package_received:
+              signedPackageReceived,
+            package_received_rate:
               percent(
-                signedSold,
+                signedPackageReceived,
                 opportunities
               )
           },
