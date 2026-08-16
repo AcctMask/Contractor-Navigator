@@ -12,6 +12,7 @@ const API_BASE =
 
 type DevSettings = {
   lead_messages: string[]
+  demo_completed_follow_up_messages: string[]
   estimate_messages: string[]
   contract_messages: string[]
   wa_sent_messages: string[]
@@ -20,6 +21,7 @@ type DevSettings = {
   weather_report_messages: string[]
 
   lead_timings_minutes: number[]
+  demo_completed_follow_up_timings_minutes: number[]
   estimate_timings_minutes: number[]
   contract_timings_minutes: number[]
   wa_sent_timings_minutes: number[]
@@ -553,6 +555,13 @@ export default function DeveloperSettings() {
           : `${prospectLabel} / Initial Interest`,
         "lead_timings_minutes",
         "lead_messages",
+      )}
+
+      {renderFollowupCard(
+        "demo-completed-follow-up",
+        "Demo Completed Follow-Up",
+        "demo_completed_follow_up_timings_minutes",
+        "demo_completed_follow_up_messages",
       )}
 
       {renderFollowupCard(
