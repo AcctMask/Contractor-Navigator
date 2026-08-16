@@ -21,6 +21,7 @@ import { registerClaimsEmailIntakeRoutes } from "./routes/claimsEmailIntake"
 import { registerSalesEmailIntakeRoutes } from "./routes/salesEmailIntake"
 import { registerBusinessDevelopmentIntakeRoutes } from "./routes/businessDevelopmentIntake"
 import { registerReportingRoutes } from "./routes/reporting"
+import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { commercialRoutes } from "./modules/commercial/routes"
@@ -66,6 +67,7 @@ await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)
 await registerCalendarRoutes(app)
 await registerReportingRoutes(app)
+await registerSalesPerformanceReportingRoutes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
 await registerSalesEmailIntakeRoutes(app)
