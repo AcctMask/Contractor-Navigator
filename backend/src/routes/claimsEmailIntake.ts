@@ -13,7 +13,7 @@ import {
 } from "../services/universalIntakeParser"
 
 const TENANT_SLUG = "g2g-roofing"
-const INBOUND_ADDRESS = "admin@g2groofing.com"
+const INBOUND_ADDRESS = "claims@g2groofing.com"
 
 function stripHtml(value: string) {
   return String(value || "")
@@ -571,7 +571,17 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       const customerName = parsed.customerName || "Claims Assignment Customer"
       const carrier = parsed.carrier || "Unknown Carrier"
       const claimNumber = parsed.claimNumber || null
-      const serviceType = parsed.serviceType || null
+      /*
+       * This endpoint is the dedicated claims@g2groofing.com EMS tarp lane.
+       *
+       * Arrival through this route is authoritative for service classification:
+       * carrier wording such as WIND, HURRICANE, STORM, or other cause-of-loss
+       * language describes the claim but does not need to explicitly say "tarp".
+       *
+       * Existing claims parsing remains responsible for extracting customer,
+       * property, carrier, claim, loss, adjuster, and narrative details.
+       */
+      const serviceType = "Emergency Tarp"
 
       /*
        * Preserve the proven EMS tarp workflow exactly for recognized
