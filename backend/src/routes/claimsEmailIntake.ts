@@ -738,6 +738,23 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       const parsedPayload = receivedEmail
         ? readTextPayload({ data: receivedEmail })
         : initialPayload
+
+      if (
+        parsedPayload.to &&
+        !parsedPayload.to
+          .toLowerCase()
+          .includes(
+            INBOUND_ADDRESS.toLowerCase()
+          )
+      ) {
+        return {
+          ok: true,
+          ignored: true,
+          reason:
+            "Email was not addressed to the claims intake mailbox",
+        }
+      }
+
       const parsed = parseClaimsEmail(parsedPayload.text)
 
       console.log("EMS_INTAKE_PARSE_DEBUG_JSON", JSON.stringify({
