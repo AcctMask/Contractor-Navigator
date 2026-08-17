@@ -13,7 +13,7 @@ import {
 } from "../services/universalIntakeParser"
 
 const TENANT_SLUG = "g2g-roofing"
-const INBOUND_ADDRESS = "claims@g2groofing.com"
+const INBOUND_ADDRESS = "claims@istaeriiul.resend.app"
 
 function stripHtml(value: string) {
   return String(value || "")
@@ -572,7 +572,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       const carrier = parsed.carrier || "Unknown Carrier"
       const claimNumber = parsed.claimNumber || null
       /*
-       * This endpoint is the dedicated claims@g2groofing.com EMS tarp lane.
+       * This endpoint is the dedicated claims@istaeriiul.resend.app EMS tarp ingress lane.
        *
        * Arrival through this route is authoritative for service classification:
        * carrier wording such as WIND, HURRICANE, STORM, or other cause-of-loss
