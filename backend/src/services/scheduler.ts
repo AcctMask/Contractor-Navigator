@@ -3,6 +3,7 @@ import {
   sendCustomerAcknowledgmentEmail,
 } from "./emailService";
 import {
+  createDocumentPackageByTenantSlug,
   sendDocumentPackage,
 } from "./documentPipelineService";
 
@@ -387,18 +388,21 @@ async function runInitialExternalResponse(
         payload.tenant_slug || ""
       ).trim()
 
-    const packageId =
-      Number(payload.package_id)
-
-    if (
-      !tenantSlug ||
-      !Number.isFinite(packageId) ||
-      packageId <= 0
-    ) {
+    if (!tenantSlug) {
       throw new Error(
-        "EMS initial response missing tenant_slug or package_id"
+        "EMS initial response missing tenant_slug"
       )
     }
+
+    const documentPackage =
+      await createDocumentPackageByTenantSlug(
+        tenantSlug,
+        jobId,
+        "ems_tarp"
+      )
+
+    const packageId =
+      Number(documentPackage.id)
 
     const result =
       await sendDocumentPackage(
@@ -411,7 +415,7 @@ async function runInitialExternalResponse(
       tenantId,
       jobId,
       "initial_external_response_sent",
-      "Initial EMS customer communication released after the five-minute grace period.",
+      "EMS WA created from current job data and sent after the five-minute grace period.",
       {
         action_id: action.id,
         kind: payload.kind,

@@ -3,7 +3,6 @@ import { Webhook } from "svix"
 import { pool } from "../db/db"
 import { createLeadFromInboundCallByTenantSlug } from "../services/followupEngine"
 import {
-  createDocumentPackageByTenantSlug,
   upsertEstimateDetailsByTenantSlug,
 } from "../services/documentPipelineService"
 import {
@@ -12,6 +11,11 @@ import {
 import {
   parseUniversalIntake,
 } from "../services/universalIntakeParser"
+import {
+  getDeveloperSettingsByTenantSlug,
+} from "../services/devSettingsService"
+import { sendSMS } from "../services/twilioService"
+import { sendAlertEmail } from "../services/emailService"
 
 const TENANT_SLUG = "g2g-roofing"
 const INBOUND_ADDRESS = "claims@istaeriiul.resend.app"
@@ -773,8 +777,8 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         serviceType === "Emergency Tarp"
           ? {
               jobType: "TARP",
-              stage: "tarp",
-              crmSubstatus: "ems_authorization_requested",
+              stage: "lead",
+              crmSubstatus: "ems_authorization_pending_grace",
               crmFlowKey: "ems_tarp_email_intake",
             }
           : serviceType === "Roof Repair"
@@ -895,18 +899,151 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       let sendResult: any = null
 
       if (isEmsTarp) {
+        const settings =
+          await getDeveloperSettingsByTenantSlug(
+            TENANT_SLUG
+          )
+
+        const alertSmsTo =
+          settings.alert_sms_to ||
+          process.env.ALERT_SMS_TO ||
+          process.env.ESCALATION_SMS_TO ||
+          process.env.TWILIO_ALERT_TO ||
+          ""
+
+        const alertEmailTo =
+          process.env.G2G_GMAIL_TO ||
+          settings.alert_email_to ||
+          process.env.ALERT_EMAIL_TO ||
+          process.env.ESCALATION_EMAIL_TO ||
+          "good2goroofingandconstruction@gmail.com"
+
+        const dispatchAddress =
+          parsed.propertyAddress ||
+          "Address not available"
+
+        const dispatchPhone =
+          parsed.customerPhone ||
+          "Phone not available"
+
+        const dispatchEmail =
+          parsed.customerEmail ||
+          "Email not available"
+
+        const dispatchLossDate =
+          parsed.lossDate ||
+          "Date of loss not available"
+
+        const dispatchAdjuster =
+          parsed.adjusterName ||
+          "Adjuster not available"
+
+        const dispatchMessage =
+          `URGENT DISPATCH SUMMARY\n\n` +
+          `Customer: ${customerName}\n` +
+          `Job ID: ${jobId}\n` +
+          `Service Need: Emergency Tarp\n` +
+          `Carrier: ${carrier}\n` +
+          `Claim: ${claimNumber || "Not available"}\n` +
+          `Date of Loss: ${dispatchLossDate}\n` +
+          `Phone: ${dispatchPhone}\n` +
+          `Email: ${dispatchEmail}\n` +
+          `Property: ${dispatchAddress}\n` +
+          `Adjuster / Examiner: ${dispatchAdjuster}\n\n` +
+          `Status: Navigator created this EMS assignment as Lead.\n` +
+          `Customer WA is being held for the five-minute review period.\n` +
+          `Action: Review immediately and correct or pause the job if needed.`
+
+        let dispatchSmsResult: any = null
+        let dispatchEmailResult: any = null
+
+        if (alertSmsTo) {
+          try {
+            dispatchSmsResult =
+              await sendSMS(
+                alertSmsTo,
+                dispatchMessage
+              )
+          } catch (err: any) {
+            dispatchSmsResult = {
+              error:
+                err?.message ||
+                String(err),
+            }
+          }
+        } else {
+          dispatchSmsResult = {
+            skipped: true,
+            reason:
+              "missing_alert_sms_to",
+          }
+        }
+
+        if (alertEmailTo) {
+          try {
+            dispatchEmailResult =
+              await sendAlertEmail(
+                alertEmailTo,
+                `URGENT dispatch: ${customerName}`,
+                dispatchMessage
+              )
+          } catch (err: any) {
+            dispatchEmailResult = {
+              error:
+                err?.message ||
+                String(err),
+            }
+          }
+        } else {
+          dispatchEmailResult = {
+            skipped: true,
+            reason:
+              "missing_alert_email_to",
+          }
+        }
+
+        await addTimelineEvent(
+          tenantId,
+          jobId,
+          "ems_urgent_dispatch_alert_routed",
+          `EMS urgent dispatch alert routed to ${alertSmsTo || "no SMS target"} and ${alertEmailTo || "no email target"}.`,
+          {
+            channel:
+              "claims_email",
+            alert_sms_to:
+              alertSmsTo || null,
+            alert_email_to:
+              alertEmailTo || null,
+            sms_result:
+              dispatchSmsResult,
+            email_result:
+              dispatchEmailResult,
+            customer_name:
+              customerName,
+            customer_phone:
+              parsed.customerPhone,
+            customer_email:
+              parsed.customerEmail,
+            property_address:
+              parsed.propertyAddress,
+            carrier,
+            claim_number:
+              claimNumber,
+            date_of_loss:
+              parsed.lossDate,
+            adjuster_name:
+              parsed.adjusterName,
+            five_minute_customer_grace:
+              true,
+          }
+        )
+
         await upsertEstimateDetailsByTenantSlug(TENANT_SLUG, jobId, {
           claim_number: claimNumber,
           emergency_tarp_needed: true,
           emergency_tarp_sqft: parsed.emergencySqft,
           estimator_remarks: `EMS tarp intake created from forwarded assessment email. Carrier/source: ${carrier}.`,
         })
-
-        documentPackage = await createDocumentPackageByTenantSlug(
-          TENANT_SLUG,
-          jobId,
-          "ems_tarp"
-        )
 
         sendResult =
           await queueInitialExternalResponse({
@@ -917,8 +1054,6 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
             payload: {
               tenant_slug:
                 TENANT_SLUG,
-              package_id:
-                Number(documentPackage.id),
               source:
                 "claims_email_intake",
               from:
@@ -949,7 +1084,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           ? "ems_tarp_email_intake_processed"
           : "claims_assignment_email_intake_processed",
         isEmsTarp
-          ? "EMS tarp job created from inbound assessment email; initial external response queued behind the five-minute grace period."
+          ? "EMS tarp intake created as Lead; WA creation and external response queued behind the five-minute grace period."
           : `Claims assignment processed as ${serviceType || "Unclassified"} and routed for Navigator review.`,
         {
           from: parsedPayload.from,
