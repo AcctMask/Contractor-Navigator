@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify"
+import { Webhook } from "svix"
 import { pool } from "../db/db"
 import { createLeadFromInboundCallByTenantSlug } from "../services/followupEngine"
 import {
@@ -541,20 +542,113 @@ async function getTenantIdBySlug(slug: string) {
 }
 
 export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
-  app.post("/webhooks/resend/claims-intake", async (request: any, reply) => {
-    const secret = process.env.CLAIMS_INBOUND_SECRET || ""
-    const provided =
-      String(request.headers["x-claims-inbound-secret"] || "") ||
-      String((request.query || {}).secret || "")
+  app.post(
+    "/webhooks/resend/claims-intake",
+    {
+      config: {
+        rawBody: true,
+      },
+    },
+    async (request: any, reply) => {
+      try {
+        const signingSecret =
+          process.env.RESEND_CLAIMS_WEBHOOK_SECRET ||
+          ""
 
-    if (secret && provided !== secret) {
-      reply.code(401)
-      return { ok: false, error: "Unauthorized" }
-    }
+        if (!signingSecret) {
+          reply.code(503)
 
-    try {
-      const webhookPayload = request.body || {}
-      const initialPayload = readTextPayload(webhookPayload)
+          return {
+            ok: false,
+            error:
+              "RESEND_CLAIMS_WEBHOOK_SECRET is not configured",
+          }
+        }
+
+        const rawPayload =
+          typeof request.rawBody === "string"
+            ? request.rawBody
+            : Buffer.isBuffer(request.rawBody)
+              ? request.rawBody.toString("utf8")
+              : ""
+
+        if (!rawPayload) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Raw webhook payload unavailable",
+          }
+        }
+
+        const svixId =
+          String(request.headers["svix-id"] || "")
+
+        const svixTimestamp =
+          String(
+            request.headers["svix-timestamp"] || ""
+          )
+
+        const svixSignature =
+          String(
+            request.headers["svix-signature"] || ""
+          )
+
+        if (
+          !svixId ||
+          !svixTimestamp ||
+          !svixSignature
+        ) {
+          reply.code(401)
+
+          return {
+            ok: false,
+            error:
+              "Missing Resend webhook signature headers",
+          }
+        }
+
+        let webhookPayload: any
+
+        try {
+          const webhook =
+            new Webhook(signingSecret)
+
+          webhookPayload =
+            webhook.verify(
+              rawPayload,
+              {
+                "svix-id": svixId,
+                "svix-timestamp":
+                  svixTimestamp,
+                "svix-signature":
+                  svixSignature,
+              }
+            )
+        } catch {
+          reply.code(401)
+
+          return {
+            ok: false,
+            error:
+              "Invalid Resend webhook signature",
+          }
+        }
+
+        if (
+          webhookPayload?.type !==
+          "email.received"
+        ) {
+          return {
+            ok: true,
+            ignored: true,
+            reason:
+              "Unsupported Resend webhook event",
+          }
+        }
+
+        const initialPayload =
+          readTextPayload(webhookPayload)
       const receivedEmail = await retrieveReceivedEmailFromResend(initialPayload.raw)
       const parsedPayload = receivedEmail
         ? readTextPayload({ data: receivedEmail })
