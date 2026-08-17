@@ -10,6 +10,12 @@ const STAGES = [
   "completed", "tarp_complete", "invoiced", "paid", "disqualified", "dnc",
 ]
 
+function stageDisplayLabel(stage: string) {
+  return stage === "callback"
+    ? "Estimate Needed"
+    : stage
+}
+
 const ACTUAL_ASSISTANT_STAGES = [
   { value: "demo_requested", label: "Demo Requested" },
   { value: "prospect", label: "Prospect" },
@@ -1827,7 +1833,9 @@ export default function JobDetail() {
                     </option>
                   ))
                 : STAGES.map((item) => (
-                    <option key={item} value={item}>{item}</option>
+                    <option key={item} value={item}>
+                      {stageDisplayLabel(item)}
+                    </option>
                   ))}
             </select>
           </div>

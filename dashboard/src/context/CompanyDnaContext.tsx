@@ -200,7 +200,7 @@ const defaultWorkspace: WorkspaceDefinition = {
       },
       {
         id: "callback",
-        label: "Callback",
+        label: "Estimate Needed",
         filter_type: "stage",
         filter_value: "callback",
         attention: false,
