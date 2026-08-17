@@ -24,6 +24,7 @@ import { registerReportingRoutes } from "./routes/reporting"
 import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
+import { schedulerTickEms } from "./services/scheduler"
 import { commercialRoutes } from "./modules/commercial/routes"
 
 dotenv.config()
@@ -80,6 +81,31 @@ app.listen({ port, host: "0.0.0.0" })
   .then(() => {
     console.log(`🚀 Server running on port ${port}`)
     startFollowupScheduler()
+
+    let emsSchedulerRunning = false
+
+    const runEmsScheduler = async () => {
+      if (emsSchedulerRunning) return
+
+      emsSchedulerRunning = true
+
+      try {
+        await schedulerTickEms()
+      } catch (err) {
+        console.error(
+          "EMS scheduled-action tick failed",
+          err
+        )
+      } finally {
+        emsSchedulerRunning = false
+      }
+    }
+
+    void runEmsScheduler()
+
+    setInterval(() => {
+      void runEmsScheduler()
+    }, 10_000)
   })
   .catch((err) => {
     app.log.error(err)

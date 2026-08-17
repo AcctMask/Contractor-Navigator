@@ -182,6 +182,106 @@ async function claimDueActions(limit = 25): Promise<ScheduledActionRow[]> {
   return rows as ScheduledActionRow[];
 }
 
+async function claimDueEmsActions(
+  limit = 25
+): Promise<ScheduledActionRow[]> {
+  const { rows } = await pool.query(
+    `
+    with cte as (
+      select id
+        from scheduled_actions
+       where status = 'pending'
+         and run_at <= now()
+         and action_key = 'initial_external_response'
+         and payload->>'kind' = 'ems_document_package'
+         and payload->>'source' = 'claims_email_intake'
+       order by run_at asc
+       limit $1
+       for update skip locked
+    )
+    update scheduled_actions sa
+       set status = 'running',
+           updated_at = now()
+      from cte
+     where sa.id = cte.id
+    returning
+      sa.id,
+      sa.tenant_id,
+      sa.job_id,
+      sa.action_key,
+      sa.run_at,
+      sa.status,
+      sa.payload
+    `,
+    [limit]
+  )
+
+  return rows as ScheduledActionRow[]
+}
+
+async function pushDueEmsActionsToQuietHoursEnd(
+  limit = 250
+) {
+  const nextRunAt = nextQuietHoursEndIso()
+
+  const result = await pool.query(
+    `
+    with cte as (
+      select id
+        from scheduled_actions
+       where status = 'pending'
+         and run_at <= now()
+         and action_key = 'initial_external_response'
+         and payload->>'kind' = 'ems_document_package'
+         and payload->>'source' = 'claims_email_intake'
+       order by run_at asc
+       limit $1
+       for update skip locked
+    )
+    update scheduled_actions sa
+       set run_at = $2::timestamptz,
+           updated_at = now(),
+           payload =
+             coalesce(sa.payload, '{}'::jsonb)
+             || $3::jsonb
+      from cte
+     where sa.id = cte.id
+    returning
+      sa.id,
+      sa.tenant_id,
+      sa.job_id,
+      sa.action_key
+    `,
+    [
+      limit,
+      nextRunAt,
+      JSON.stringify({
+        quiet_hours_delayed: true,
+        quiet_hours_timezone: QUIET_TIME_ZONE,
+        delayed_until: nextRunAt,
+      }),
+    ]
+  )
+
+  for (const row of result.rows) {
+    await timeline(
+      row.tenant_id,
+      row.job_id,
+      "scheduled_action_delayed_quiet_hours",
+      `EMS scheduled action delayed until ${nextRunAt} due to quiet hours.`,
+      {
+        action_id: row.id,
+        action_key: row.action_key,
+        delayed_until: nextRunAt,
+        timezone: QUIET_TIME_ZONE,
+        scheduler_lane: "ems_claims",
+      }
+    )
+  }
+
+  return result.rowCount || 0
+}
+
 async function markDone(actionId: number) {
   await pool.query(
     `update scheduled_actions
@@ -459,6 +559,65 @@ async function runAction(action: ScheduledActionRow) {
   await timeline(tenantId, jobId, "scheduled_action_done", `${action.action_key} (job_id=${jobId})`, {
     action_id: action.id,
   });
+}
+
+export async function schedulerTickEms(
+  limit = 25
+) {
+  if (isQuietHours()) {
+    const delayed =
+      await pushDueEmsActionsToQuietHoursEnd(limit)
+
+    if (delayed > 0) {
+      console.log(
+        `Quiet hours active — delayed ${delayed} EMS scheduled actions until 7 AM Eastern`
+      )
+    }
+
+    return {
+      ok: true,
+      delayed,
+      quiet_hours: true,
+      lane: "ems_claims",
+    }
+  }
+
+  const actions =
+    await claimDueEmsActions(limit)
+
+  for (const action of actions) {
+    try {
+      await runAction(action)
+      await markDone(action.id)
+    } catch (err: any) {
+      await timeline(
+        action.tenant_id,
+        action.job_id,
+        "scheduled_action_failed",
+        "EMS scheduler error",
+        {
+          error: String(
+            err?.message || err
+          ),
+          action_id: action.id,
+          scheduler_lane:
+            "ems_claims",
+        }
+      )
+
+      await markFailed(
+        action.id,
+        err
+      )
+    }
+  }
+
+  return {
+    ok: true,
+    processed: actions.length,
+    quiet_hours: false,
+    lane: "ems_claims",
+  }
 }
 
 export async function schedulerTick(limit = 25) {
