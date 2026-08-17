@@ -24,7 +24,10 @@ import { registerReportingRoutes } from "./routes/reporting"
 import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
-import { schedulerTickEms } from "./services/scheduler"
+import {
+  schedulerTick,
+  schedulerTickEms,
+} from "./services/scheduler"
 import { commercialRoutes } from "./modules/commercial/routes"
 
 dotenv.config()
@@ -81,6 +84,41 @@ app.listen({ port, host: "0.0.0.0" })
   .then(() => {
     console.log(`🚀 Server running on port ${port}`)
     startFollowupScheduler()
+
+    /*
+     * Restore the existing general scheduled_actions runner.
+     *
+     * This is the original schedulerTick() authority and remains
+     * separate from both:
+     *   - startFollowupScheduler() CRM / AI follow-up
+     *   - schedulerTickEms() Claims EMS authorization lane
+     *
+     * Do not merge these lanes.
+     */
+    let generalSchedulerRunning = false
+
+    const runGeneralScheduler = async () => {
+      if (generalSchedulerRunning) return
+
+      generalSchedulerRunning = true
+
+      try {
+        await schedulerTick()
+      } catch (err) {
+        console.error(
+          "General scheduled-action tick failed",
+          err
+        )
+      } finally {
+        generalSchedulerRunning = false
+      }
+    }
+
+    void runGeneralScheduler()
+
+    setInterval(() => {
+      void runGeneralScheduler()
+    }, 10_000)
 
     let emsSchedulerRunning = false
 
