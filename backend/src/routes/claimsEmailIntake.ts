@@ -159,6 +159,45 @@ function extractCarrierFromSubjectOnly(text: string) {
   ])
 }
 
+function extractCarrierFromForwardedFrom(text: string) {
+  const raw = firstMatch(text, [
+    /^from:\s*([^\n\r@]+)$/im,
+  ])
+
+  if (!raw) return null
+
+  return cleanParsedValue(
+    raw.replace(
+      /\s+-\s+(?:preferred repair|preferred contractor|managed repair).*$/i,
+      ""
+    )
+  )
+}
+
+function normalizeLossDateForDatabase(value: string | null) {
+  const cleaned = cleanParsedValue(value)
+
+  if (!cleaned) return null
+
+  const mdy = cleaned.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/
+  )
+
+  if (mdy) {
+    const month = mdy[1].padStart(2, "0")
+    const day = mdy[2].padStart(2, "0")
+    const year = mdy[3]
+
+    return `${year}-${month}-${day}`
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+    return cleaned
+  }
+
+  return null
+}
+
 function extractAddressBlock(text: string) {
   const lines = textLines(text)
 
@@ -344,6 +383,7 @@ function parseClaimsEmail(text: string) {
   const carrier =
     subjectCarrierClaim.carrier ||
     cleanParsedValue(extractCarrierFromSubjectOnly(text)) ||
+    extractCarrierFromForwardedFrom(text) ||
     firstMatch(text, [
       /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
     ])
@@ -360,37 +400,74 @@ function parseClaimsEmail(text: string) {
 
   const address =
     firstMatch(text, [
-      /(?:property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
+      /(?:location of property|property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || addressBlock.propertyAddress
 
   const customerPhone =
     firstMatch(text, [
-      /(?:primary phone|customer phone|homeowner phone|insured phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
+      /(?:evening phone|primary phone|customer phone|homeowner phone|insured phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || extractPhone(text)
 
-  const foundCustomerEmail =
+  const explicitCustomerEmailField =
     firstMatch(text, [
-      /(?:customer email|homeowner email|insured email|email)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) || extractEmail(text)
+      /(?:email address|customer email|homeowner email|insured email)\s*[:#-]\s*([^\n\r]+)/i,
+    ])
 
-  const customerEmail = isInternalG2GEmail(cleanParsedValue(foundCustomerEmail))
-    ? null
-    : foundCustomerEmail
+  const explicitCustomerEmail =
+    extractEmail(
+      explicitCustomerEmailField || ""
+    )
+
+  const foundCustomerEmail =
+    explicitCustomerEmail ||
+    extractEmail(text)
+
+  const customerEmail =
+    explicitCustomerEmail
+      ? cleanParsedValue(explicitCustomerEmail)
+      : (
+          isInternalG2GEmail(
+            cleanParsedValue(foundCustomerEmail)
+          )
+            ? null
+            : cleanParsedValue(foundCustomerEmail)
+        )
 
   const adjusterName =
     firstMatch(text, [
-      /(?:adjuster name|desk adjuster|field adjuster|adjuster|claims examiner|claim examiner)\s*[:#-]\s*([^\n\r]+)/i,
+      /(?:examiner name|adjuster name|desk adjuster|field adjuster|adjuster|claims examiner|claim examiner)\s*[:#-]\s*([^\n\r,]+)/i,
     ]) || adjusterDetails.adjusterName
 
-  const adjusterPhone =
+  const adjusterPhoneField =
     firstMatch(text, [
-      /(?:adjuster phone|adjuster cell|desk adjuster phone|field adjuster phone)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) || adjusterDetails.adjusterPhone
+      /(?:examiner phone|adjuster phone|adjuster cell|desk adjuster phone|field adjuster phone)\s*[:#-]\s*([^\n\r,]*)/i,
+    ])
+
+  const adjusterPhone =
+    extractPhone(adjusterPhoneField || "") ||
+    adjusterDetails.adjusterPhone
+
+  const adjusterEmailField =
+    firstMatch(text, [
+      /(?:examiner email|adjuster email|desk adjuster email|field adjuster email)\s*[:#-]\s*([^\n\r,]+)/i,
+    ])
+
+  const explicitAdjusterEmail =
+    extractEmail(adjusterEmailField || "")
 
   const adjusterEmail =
-    firstMatch(text, [
-      /(?:adjuster email|desk adjuster email|field adjuster email)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) || adjusterDetails.adjusterEmail
+    explicitAdjusterEmail ||
+    (
+      isInternalG2GEmail(
+        cleanParsedValue(
+          adjusterDetails.adjusterEmail
+        )
+      )
+        ? null
+        : cleanParsedValue(
+            adjusterDetails.adjusterEmail
+          )
+    )
 
   const emergencySqft = firstMatch(text, [
     /(?:tarp sqft|tarp square feet|emergency tarp sqft)\s*[:#-]\s*(\d+)/i,
@@ -445,18 +522,22 @@ function parseClaimsEmail(text: string) {
     universalNotes
 
   const enrichedCustomerEmail =
-    cleanParsedValue(customerEmail) ||
-    (
-      isInternalG2GEmail(
-        cleanParsedValue(
-          universal.customerEmail
-        )
-      )
-        ? null
-        : cleanParsedValue(
-            universal.customerEmail
+    explicitCustomerEmailField
+      ? cleanParsedValue(customerEmail)
+      : (
+          cleanParsedValue(customerEmail) ||
+          (
+            isInternalG2GEmail(
+              cleanParsedValue(
+                universal.customerEmail
+              )
+            )
+              ? null
+              : cleanParsedValue(
+                  universal.customerEmail
+                )
           )
-    )
+        )
 
   return {
     carrier:
@@ -768,6 +849,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           adjuster_email = coalesce($9, adjuster_email),
           assignment_notes = coalesce($10, assignment_notes),
           damage_summary = coalesce($11, damage_summary),
+          date_of_loss = coalesce($16::date, date_of_loss),
           updated_at = now()
         where tenant_id = $1
           and id = $2
@@ -788,6 +870,9 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           serviceRouting.stage,
           serviceRouting.crmSubstatus,
           serviceRouting.crmFlowKey,
+          normalizeLossDateForDatabase(
+            parsed.lossDate
+          ),
         ]
       )
 
