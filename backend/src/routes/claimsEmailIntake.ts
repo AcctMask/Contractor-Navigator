@@ -384,13 +384,19 @@ function parseClaimsEmail(text: string) {
   const addressBlock = extractAddressBlock(text)
   const adjusterDetails = extractAdjusterDetails(text)
 
-  const carrier =
-    subjectCarrierClaim.carrier ||
-    cleanParsedValue(extractCarrierFromSubjectOnly(text)) ||
-    extractCarrierFromForwardedFrom(text) ||
+  const assignmentSource =
+    extractCarrierFromForwardedFrom(text)
+
+  const explicitCarrier =
     firstMatch(text, [
       /(?:insurance company|insurer|carrier|insurance carrier)\s*[:#-]\s*([^\n\r]+)/i,
     ])
+
+  const carrier =
+    cleanParsedValue(explicitCarrier) ||
+    subjectCarrierClaim.carrier ||
+    cleanParsedValue(extractCarrierFromSubjectOnly(text)) ||
+    assignmentSource
 
   const claimNumber =
     firstMatch(text, [
@@ -547,6 +553,9 @@ function parseClaimsEmail(text: string) {
     carrier:
       cleanParsedValue(carrier) ||
       cleanParsedValue(universal.carrier),
+
+    assignmentSource:
+      cleanParsedValue(assignmentSource),
 
     claimNumber:
       cleanParsedValue(claimNumber) ||
@@ -766,6 +775,9 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
 
       const customerName = parsed.customerName || "Claims Assignment Customer"
       const carrier = parsed.carrier || "Unknown Carrier"
+      const assignmentSource =
+        parsed.assignmentSource ||
+        carrier
       const claimNumber = parsed.claimNumber || null
       /*
        * This endpoint is the dedicated claims@istaeriiul.resend.app EMS tarp ingress lane.
@@ -846,7 +858,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         callerPhone: parsed.customerPhone,
         callerName: customerName,
         notes: `Claims assignment email received from ${parsedPayload.from || "unknown sender"}.`,
-        source: carrier,
+        source: assignmentSource,
       })
 
       const tenantId = await getTenantIdBySlug(TENANT_SLUG)
@@ -863,7 +875,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           address1 = coalesce($3, address1),
           claim_number = coalesce($4, claim_number),
           carrier = coalesce($5, carrier),
-          lead_source = coalesce($5, lead_source),
+          lead_source = coalesce($17, lead_source),
           lead_source_detail = $6,
           adjuster_name = coalesce($7, adjuster_name),
           adjuster_phone = coalesce($8, adjuster_phone),
@@ -894,6 +906,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           normalizeLossDateForDatabase(
             parsed.lossDate
           ),
+          assignmentSource,
         ]
       )
 
@@ -1057,9 +1070,10 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
 
         await upsertEstimateDetailsByTenantSlug(TENANT_SLUG, jobId, {
           claim_number: claimNumber,
+          tpa: assignmentSource,
           emergency_tarp_needed: true,
           emergency_tarp_sqft: parsed.emergencySqft,
-          estimator_remarks: `EMS tarp intake created from forwarded assessment email. Carrier/source: ${carrier}.`,
+          estimator_remarks: `EMS tarp intake created from forwarded assessment email. Source: ${assignmentSource}. Carrier: ${carrier}.`,
         })
 
         sendResult =

@@ -35,6 +35,8 @@ async function saveDocumentSnapshotAsset(params: {
   })
 }
 
+const G2G_STANDARD_WA_TERMS = 'If the carrier does not approve the claim, or deems that damages are not under a covered loss, I acknowledge that I may be responsible for any balance due for the services provided.'
+
 async function ensureDocumentTables() {
   await pool.query(`
     create table if not exists job_estimate_details (
@@ -551,6 +553,7 @@ export async function createDocumentPackageByTenantSlug(
       mobilization_fee: 250,
       tarp_rate_per_sqft: 2.5,
       estimator_remarks: details?.estimator_remarks || null,
+      terms_and_conditions: G2G_STANDARD_WA_TERMS,
       document_display_mode: "ems_work_authorization",
       ready_for_signature: !!details?.emergency_tarp_needed,
     }

@@ -119,7 +119,13 @@ export default function SignDocument() {
   const remarks = payload.estimator_remarks || "None provided"
   const payloadTerms = String(payload.terms_and_conditions || "")
   const termsAndConditions =
-    payloadTerms.length > 500 ? payloadTerms : G2G_TERMS_AND_CONDITIONS
+    isEmsWorkAuthorization
+      ? payloadTerms
+      : (
+          payloadTerms.length > 500
+            ? payloadTerms
+            : G2G_TERMS_AND_CONDITIONS
+        )
   const amountDisplay = useMemo(() => {
     const agreed = moneyDisplay(agreedAmount)
     const low = moneyDisplay(lowAmount)
@@ -174,8 +180,24 @@ export default function SignDocument() {
     <div style={page}>
       <div style={shell}>
         <div style={headerCard}>
-          <div style={pill}>Good2Go Roofing</div>
+          <img
+            src="/branding/g2g-logo.png"
+            alt="Good2Go Roofing & Construction LLC"
+            style={{
+              display: "block",
+              width: "100%",
+              maxWidth: "220px",
+              height: "auto",
+              marginBottom: "14px",
+            }}
+          />
+          <div style={pill}>Good2Go Roofing & Construction LLC</div>
           <h1 style={title}>{doc?.document_title || "Document Review"}</h1>
+          <p style={subtext}>
+            855-766-3246 | info@g2groofing.com | www.g2groofing.com
+            <br />
+            Florida Licenses: CCC1331529 & CBC1259416
+          </p>
           <p style={subtext}>
             Please review the information below, confirm authorization, and sign to proceed.
           </p>
@@ -281,9 +303,11 @@ export default function SignDocument() {
                 </>
               ) : null}
 
-              <p style={docText}>
-                Additional remarks: {remarks}
-              </p>
+              {!isEmsWorkAuthorization ? (
+                <p style={docText}>
+                  Additional remarks: {remarks}
+                </p>
+              ) : null}
             </div>
 
             {vipBenefitsIncluded ? (
@@ -338,7 +362,9 @@ export default function SignDocument() {
                 onChange={(e) => setAgree(e.target.checked)}
               />
               <span>
-                I have read, understand, and agree to the Proposal / Contract terms and conditions included with this agreement.
+                {isEmsWorkAuthorization
+                  ? "I have read, understand, and agree to the Work Authorization terms and conditions included with this authorization."
+                  : "I have read, understand, and agree to the Proposal / Contract terms and conditions included with this agreement."}
               </span>
             </label>
 
