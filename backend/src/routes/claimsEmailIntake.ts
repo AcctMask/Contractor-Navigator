@@ -202,6 +202,45 @@ function normalizeLossDateForDatabase(value: string | null) {
   return null
 }
 
+function extractExplicitPropertyAddress(text: string) {
+  const lines = textLines(text)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    const match = line.match(
+      /^(?:location of property|property address|loss location|risk address|service address|property location|location|address)\s*[:#-]\s*(.*)$/i
+    )
+
+    if (!match) continue
+
+    const sameLine =
+      cleanParsedValue(match[1] || "")
+
+    if (
+      sameLine &&
+      !extractEmail(sameLine)
+    ) {
+      return sameLine
+    }
+
+    const nextLine =
+      cleanParsedValue(
+        lines[i + 1] || ""
+      )
+
+    if (
+      nextLine &&
+      !extractEmail(nextLine) &&
+      !/^(?:email|email address|customer email|homeowner email|insured email)\s*[:#-]/i.test(nextLine)
+    ) {
+      return nextLine
+    }
+  }
+
+  return null
+}
+
 function extractAddressBlock(text: string) {
   const lines = textLines(text)
 
@@ -292,6 +331,61 @@ function extractDirectTarpNarrative(text: string) {
   })
 
   return cleanParsedValue(useful.join(" "))
+}
+
+function extractAssignmentDirectives(text: string) {
+  const lines = textLines(text)
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    const match = line.match(
+      /^(?:directives|directive|special instructions|instructions|instruction)\s*[:#-]?\s*(.*)$/i
+    )
+
+    if (!match) continue
+
+    const sameLine =
+      cleanParsedValue(match[1] || "")
+
+    if (sameLine) {
+      return sameLine
+    }
+
+    const continuation: string[] = []
+
+    for (
+      let offset = 1;
+      offset <= 4 && i + offset < lines.length;
+      offset++
+    ) {
+      const candidate =
+        cleanParsedValue(
+          lines[i + offset]
+        )
+
+      if (!candidate) continue
+
+      /*
+       * Stop when the next recognizable intake field begins.
+       */
+      if (
+        /^(?:carrier|insurance carrier|insurer|source|tpa|claim|claim number|homeowner|insured|customer|phone|email|email address|location|address|property address|date of loss|loss date|dol|cause of loss|loss type|col|adjuster|examiner)\s*[:#-]/i.test(
+          candidate
+        )
+      ) {
+        break
+      }
+
+      continuation.push(candidate)
+    }
+
+    return cleanParsedValue(
+      continuation.join(" ")
+    )
+  }
+
+  return null
 }
 
 function extractNarrativeNotes(text: string) {
@@ -462,9 +556,8 @@ function parseClaimsEmail(text: string) {
     ]) || addressBlock.customerName
 
   const address =
-    firstMatch(text, [
-      /(?:location of property|property address|loss location|risk address|service address|address)\s*[:#-]\s*([^\n\r]+)/i,
-    ]) || addressBlock.propertyAddress
+    extractExplicitPropertyAddress(text) ||
+    addressBlock.propertyAddress
 
   const customerPhone =
     firstMatch(text, [
@@ -535,9 +628,7 @@ function parseClaimsEmail(text: string) {
   const narrativeNotes = extractDirectTarpNarrative(text) || extractNarrativeNotes(text)
 
   const directives =
-    firstMatch(text, [
-      /(?:directives|directive|special instructions|instructions|instruction)\s*[:#-]\s*([^\n\r]+)/i,
-    ])
+    extractAssignmentDirectives(text)
 
   const notes = cleanParsedValue(
     [
@@ -1147,11 +1238,34 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           })
       }
 
+      const originalAssignmentEmail =
+        String(
+          receivedEmail?.text_body ||
+          receivedEmail?.text ||
+          initialPayload.raw?.text_body ||
+          initialPayload.raw?.text ||
+          receivedEmail?.html_body ||
+          receivedEmail?.html ||
+          initialPayload.raw?.html_body ||
+          initialPayload.raw?.html ||
+          ""
+        ).trim()
+
+      const intakeNoteMessage =
+        [
+          parsed.notes,
+          originalAssignmentEmail
+            ? `Original Assignment Email:\n${originalAssignmentEmail}`
+            : `Claims assignment email received from ${parsedPayload.from || "unknown sender"}.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+
       await addTimelineEvent(
         tenantId,
         jobId,
         isEmsTarp ? "ems_tarp_intake_notes" : "claims_assignment_intake_notes",
-        parsed.notes || `Claims assignment email received from ${parsedPayload.from || "unknown sender"}.`,
+        intakeNoteMessage,
         {
           source: "inbound_email",
           from: parsedPayload.from,
