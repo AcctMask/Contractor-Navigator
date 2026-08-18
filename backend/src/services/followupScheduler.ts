@@ -140,10 +140,7 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
       j.active_followup_workflow is not null
       or j.crm_flow_key = 'weather_evidence_report'
     )
-      and not (
-        j.crm_flow_key = 'ems_tarp_email_intake'
-        and j.crm_substatus = 'ems_authorization_pending_grace'
-      )
+      and j.crm_flow_key <> 'ems_tarp_email_intake'
     order by coalesce(j.followup_workflow_started_at, j.created_at) desc
     limit 500
     `

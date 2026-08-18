@@ -166,6 +166,11 @@ async function claimDueActions(limit = 25): Promise<ScheduledActionRow[]> {
         from scheduled_actions
        where status='pending'
          and run_at <= now()
+         and not (
+           action_key = 'initial_external_response'
+           and payload->>'kind' = 'ems_document_package'
+           and payload->>'source' = 'claims_email_intake'
+         )
        order by run_at asc
        limit $1
        for update skip locked
