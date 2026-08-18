@@ -379,12 +379,65 @@ function isInternalG2GEmail(value: string | null) {
   return /@(g2groofing\.com)$/i.test(value)
 }
 
+function extractCustomerEmailCandidate(
+  text: string,
+  adjusterEmail: string | null
+) {
+  const normalizedAdjuster =
+    cleanParsedValue(adjusterEmail)
+      ?.toLowerCase() || null
+
+  for (const line of textLines(text)) {
+    const candidate =
+      cleanParsedValue(
+        extractEmail(line)
+      )
+
+    if (!candidate) continue
+
+    const normalized =
+      candidate.toLowerCase()
+
+    if (isInternalG2GEmail(candidate)) {
+      continue
+    }
+
+    if (
+      normalizedAdjuster &&
+      normalized === normalizedAdjuster
+    ) {
+      continue
+    }
+
+    /*
+     * Never treat routing headers or explicitly claims-side
+     * contacts as the homeowner/customer email.
+     */
+    if (
+      /^(from|to|cc|bcc|reply-to)\s*:/i.test(line) ||
+      /\b(adjuster|examiner|claims examiner|claim examiner|claims rep|claim rep)\b/i.test(line)
+    ) {
+      continue
+    }
+
+    return candidate
+  }
+
+  return null
+}
+
 function parseClaimsEmail(text: string) {
   const subjectCarrierClaim = extractCarrierClaimFromSubject(text)
   const addressBlock = extractAddressBlock(text)
   const adjusterDetails = extractAdjusterDetails(text)
 
+  const explicitAssignmentSource =
+    firstMatch(text, [
+      /(?:source|tpa|third party administrator|third-party administrator|assignment source|referred by)\s*[:#-]\s*([^\n\r]+)/i,
+    ])
+
   const assignmentSource =
+    cleanParsedValue(explicitAssignmentSource) ||
     extractCarrierFromForwardedFrom(text)
 
   const explicitCarrier =
@@ -428,19 +481,12 @@ function parseClaimsEmail(text: string) {
       explicitCustomerEmailField || ""
     )
 
-  const foundCustomerEmail =
-    explicitCustomerEmail ||
-    extractEmail(text)
-
   const customerEmail =
     explicitCustomerEmail
       ? cleanParsedValue(explicitCustomerEmail)
-      : (
-          isInternalG2GEmail(
-            cleanParsedValue(foundCustomerEmail)
-          )
-            ? null
-            : cleanParsedValue(foundCustomerEmail)
+      : extractCustomerEmailCandidate(
+          text,
+          adjusterDetails.adjusterEmail
         )
 
   const adjusterName =
@@ -488,11 +534,17 @@ function parseClaimsEmail(text: string) {
   const lossDate = extractLossDate(text)
   const narrativeNotes = extractDirectTarpNarrative(text) || extractNarrativeNotes(text)
 
+  const directives =
+    firstMatch(text, [
+      /(?:directives|directive|special instructions|instructions|instruction)\s*[:#-]\s*([^\n\r]+)/i,
+    ])
+
   const notes = cleanParsedValue(
     [
       serviceType ? `Service Requested: ${serviceType}` : null,
       lossDate ? `Date of Loss: ${lossDate}` : null,
       lossType ? `Cause of Loss: ${lossType}` : null,
+      directives ? `Directives: ${directives}` : null,
       narrativeNotes ? `Notes: ${narrativeNotes}` : null,
     ]
       .filter(Boolean)
