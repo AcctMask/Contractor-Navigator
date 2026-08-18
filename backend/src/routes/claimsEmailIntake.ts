@@ -340,7 +340,7 @@ function extractAssignmentDirectives(text: string) {
     const line = lines[i]
 
     const match = line.match(
-      /^(?:directives?|instructions?|special instructions?|comments?|observations?|findings?|reports?|reported(?:\s+(?:damage|conditions?|findings?|observations?))?|remarks?|notes?|recommendations?|scope(?:\s+of\s+work)?|work requested|requested work|assignment notes?)\s*[:#-]?\s*(.*)$/i
+      /^(?:directives|directive|special instructions|instructions|instruction)\s*[:#-]?\s*(.*)$/i
     )
 
     if (!match) continue
@@ -375,24 +375,6 @@ function extractAssignmentDirectives(text: string) {
         )
       ) {
         break
-      }
-
-      const chainedOperationalNote =
-        candidate.match(
-          /^(?:directives?|instructions?|special instructions?|comments?|observations?|findings?|reports?|reported(?:\s+(?:damage|conditions?|findings?|observations?))?|remarks?|notes?|recommendations?|scope(?:\s+of\s+work)?|work requested|requested work|assignment notes?)\s*[:#-]?\s*(.*)$/i
-        )
-
-      if (chainedOperationalNote) {
-        const chainedValue =
-          cleanParsedValue(
-            chainedOperationalNote[1] || ""
-          )
-
-        if (chainedValue) {
-          continuation.push(chainedValue)
-        }
-
-        continue
       }
 
       continuation.push(candidate)

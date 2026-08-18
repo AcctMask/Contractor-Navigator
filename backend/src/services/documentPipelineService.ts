@@ -1,5 +1,5 @@
 import { pool } from "../db/db"
-import { sendAlertEmail, sendCustomerEmail } from "./emailService"
+import { sendAlertEmail } from "./emailService"
 import { sendSMS } from "./twilioService"
 import { saveJobAssetByTenantSlug } from "./jobAssetsService"
 import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractHtml"
@@ -652,26 +652,12 @@ export async function sendDocumentPackage(
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
   const isEmsTarp = documentPackage.package_type === "ems_tarp"
 
-  const emsAssignmentParty =
-    documentPackage.payload?.tpa ||
-    job.carrier ||
-    documentPackage.payload?.carrier ||
-    "your insurance carrier"
-
-  const emsPropertyAddress =
-    documentPackage.payload?.job_address ||
-    "your property"
-
-  /*
-   * One substantive customer message for both SMS and email.
-   * Channel presentation may differ; customer meaning may not.
-   */
   const message = isEmsTarp
-    ? `Good2Go Roofing has been asked by ${emsAssignmentParty} to provide emergency tarp service at ${emsPropertyAddress}. Before we can enter the property and perform emergency tarp work, we need your signed Emergency Tarp Work Authorization.
+    ? `Good2Go Roofing: We received your request for emergency tarp service. Before we can enter the property and dispatch a tarp crew, we need your signed Emergency Tarp Work Authorization.
 
 Please review and sign the authorization here: ${signUrl}
 
-If you have any questions, reply to this message or visit www.g2groofing.com.`
+Once we receive it, your job will move into our emergency tarp queue for crew assignment.`
     : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
 
 Please review the project details, pricing, authorization language, and terms and conditions before signing.
@@ -688,7 +674,7 @@ Sign here: ${signUrl}`
   }
 
   if (job.customer_email) {
-    emailResult = await sendCustomerEmail(
+    emailResult = await sendAlertEmail(
       job.customer_email,
       documentPackage.document_title,
       message
