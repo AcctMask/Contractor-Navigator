@@ -40,7 +40,7 @@ async function setConversationMemory(
   )
 }
 
-import { sendAlertEmail } from "./emailService"
+import { sendAlertEmail, sendCustomerEmail } from "./emailService"
 import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
 import {
   composeNavigatorCandidate,
@@ -2260,6 +2260,25 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
         callbackNumber,
         outboundMessage
       )
+
+    /*
+     * EMS tarp WA follow-up only.
+     *
+     * The customer email mirrors the exact SMS outboundMessage.
+     * No other Navigator follow-up route receives this email behavior.
+     */
+    if (
+      job.crm_flow_key === "ems_tarp_email_intake" &&
+      aiMessage.stage === "wa_sent" &&
+      activeEmsAuthorization &&
+      job.customer_email
+    ) {
+      await sendCustomerEmail(
+        job.customer_email,
+        activeEmsAuthorization.document_title,
+        outboundMessage
+      )
+    }
 
     if (
       intendedSelectionMode ===
