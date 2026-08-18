@@ -1,4 +1,8 @@
-import { pool } from "../db/db";
+import { pool } from "../db/db"
+import {
+  reportNavigatorFailure,
+  reportNavigatorRecovery,
+} from "./navigatorHealthService";
 import {
   sendCustomerAcknowledgmentEmail,
 } from "./emailService";
@@ -594,6 +598,14 @@ export async function schedulerTickEms(
     try {
       await runAction(action)
       await markDone(action.id)
+
+      await reportNavigatorRecovery({
+        component: "ems_scheduler",
+        where: "scheduled action execution",
+        tenantId: action.tenant_id,
+        jobId: action.job_id,
+        actionId: action.id,
+      })
     } catch (err: any) {
       await timeline(
         action.tenant_id,
@@ -614,6 +626,15 @@ export async function schedulerTickEms(
         action.id,
         err
       )
+
+      await reportNavigatorFailure({
+        component: "ems_scheduler",
+        where: "scheduled action execution",
+        error: err,
+        tenantId: action.tenant_id,
+        jobId: action.job_id,
+        actionId: action.id,
+      })
     }
   }
 
@@ -640,12 +661,29 @@ export async function schedulerTick(limit = 25) {
     try {
       await runAction(action);
       await markDone(action.id);
+
+      await reportNavigatorRecovery({
+        component: "general_scheduler",
+        where: "scheduled action execution",
+        tenantId: action.tenant_id,
+        jobId: action.job_id,
+        actionId: action.id,
+      });
     } catch (err: any) {
       await timeline(action.tenant_id, action.job_id, "scheduled_action_failed", "scheduler error", {
         error: String(err?.message || err),
         action_id: action.id,
       });
       await markFailed(action.id, err);
+
+      await reportNavigatorFailure({
+        component: "general_scheduler",
+        where: "scheduled action execution",
+        error: err,
+        tenantId: action.tenant_id,
+        jobId: action.job_id,
+        actionId: action.id,
+      });
     }
   }
 }

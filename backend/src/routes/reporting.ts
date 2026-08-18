@@ -212,9 +212,33 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         params
       )
 
-      return reply.send({
+        const navigatorHealthResult = await pool.query(
+    `
+    select
+      id,
+      event_type,
+      entity_id,
+      metadata,
+      created_at
+    from system_events
+    where entity_type = 'navigator_health'
+      and event_type in (
+        'navigator_health_failure',
+        'navigator_health_recovered'
+      )
+    order by created_at desc, id desc
+    limit 100
+    `
+  )
+
+  const navigatorHealthEvents = navigatorHealthResult.rows
+
+return reply.send({
         ok: true,
         source: "contractor-navigator",
+      navigator_health: {
+        events: navigatorHealthEvents,
+      },
         scope: tenant
           ? "tenant"
           : "global",

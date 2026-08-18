@@ -3,6 +3,10 @@ import { queueAiFollowupByTenantSlug } from "./followupEngine"
 import { getDeveloperSettingsByTenantSlug } from "./devSettingsService"
 import { AI_FOLLOWUP_PROGRESS_KIND } from "./followupProgress"
 import { sendAlertEmail } from "./emailService"
+import {
+  reportNavigatorFailure,
+  reportNavigatorRecovery,
+} from "./navigatorHealthService"
 
 type SchedJob = {
   id: number
@@ -417,8 +421,23 @@ async function runSchedulerPass() {
   for (const job of jobs) {
     try {
       await processJob(job)
+
+      await reportNavigatorRecovery({
+        component: "ai_followup_scheduler",
+        where: "job follow-up processing",
+        tenantId: job.tenant_id,
+        jobId: job.id,
+      })
     } catch (err) {
       console.error("followup scheduler job error", job.id, err)
+
+      await reportNavigatorFailure({
+        component: "ai_followup_scheduler",
+        where: "job follow-up processing",
+        error: err,
+        tenantId: job.tenant_id,
+        jobId: job.id,
+      })
     }
   }
 }
