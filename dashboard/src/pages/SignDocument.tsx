@@ -186,7 +186,7 @@ export default function SignDocument() {
             style={{
               display: "block",
               width: "100%",
-              maxWidth: "220px",
+              maxWidth: "150px",
               height: "auto",
               marginBottom: "14px",
             }}
