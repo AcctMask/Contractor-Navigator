@@ -4,6 +4,8 @@ import { sendSMS } from "./twilioService"
 import { saveJobAssetByTenantSlug } from "./jobAssetsService"
 import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractHtml"
 import { PDFDocument, StandardFonts } from "pdf-lib"
+import fs from "fs"
+import path from "path"
 
 export type PackageType =
   | "retail_estimate"
@@ -243,10 +245,73 @@ async function saveSignedEmsWaPdfAsset(params: {
     "Contractor Navigator"
   )
 
+  const logoCandidates = [
+    path.resolve(
+      process.cwd(),
+      "../dashboard/public/branding/g2g-logo.png"
+    ),
+    path.resolve(
+      process.cwd(),
+      "dashboard/public/branding/g2g-logo.png"
+    ),
+  ]
+
+  const logoPath =
+    logoCandidates.find((candidate) =>
+      fs.existsSync(candidate)
+    ) || null
+
+  let logoHeight = 0
+
+  if (logoPath) {
+    try {
+      const logoBytes =
+        fs.readFileSync(logoPath)
+
+      const logo =
+        await pdfDoc.embedPng(logoBytes)
+
+      const logoSize =
+        logo.scaleToFit(105, 82)
+
+      logoHeight =
+        logoSize.height
+
+      page.drawImage(
+        logo,
+        {
+          x: margin,
+          y:
+            pageSize[1] -
+            margin -
+            logoSize.height,
+          width:
+            logoSize.width,
+          height:
+            logoSize.height,
+        }
+      )
+    } catch (err) {
+      console.error(
+        "Failed to embed G2G logo in signed EMS WA PDF:",
+        err
+      )
+    }
+  } else {
+    console.warn(
+      "G2G logo asset not found for signed EMS WA PDF"
+    )
+  }
+
+  const headerTextX =
+    logoHeight > 0
+      ? margin + 125
+      : margin
+
   page.drawText(
     "Good2Go Roofing & Construction LLC",
     {
-      x: margin,
+      x: headerTextX,
       y,
       size: 12,
       font: boldFont,
@@ -258,14 +323,25 @@ async function saveSignedEmsWaPdfAsset(params: {
   page.drawText(
     "EMS Tarp Work Authorization",
     {
-      x: margin,
+      x: headerTextX,
       y,
       size: titleSize,
       font: boldFont,
     }
   )
 
-  y -= 28
+  if (logoHeight > 0) {
+    y =
+      Math.min(
+        y - 28,
+        pageSize[1] -
+          margin -
+          logoHeight -
+          16
+      )
+  } else {
+    y -= 28
+  }
 
   drawField(
     "Customer",

@@ -1989,7 +1989,17 @@ export default function JobDetail() {
                     </span>
                   </div>
 
-                  <p style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{note.message || note.note || ""}</p>
+                  <p
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      lineHeight: 1.45,
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      maxWidth: "100%",
+                    }}
+                  >
+                    {note.message || note.note || ""}
+                  </p>
                 </div>
 
                 {note.kind ? null : (
