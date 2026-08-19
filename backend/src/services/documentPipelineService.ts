@@ -3,6 +3,7 @@ import { sendAlertEmail } from "./emailService"
 import { sendSMS } from "./twilioService"
 import { saveJobAssetByTenantSlug } from "./jobAssetsService"
 import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractHtml"
+import { PDFDocument, StandardFonts } from "pdf-lib"
 
 export type PackageType =
   | "retail_estimate"
@@ -32,6 +33,368 @@ async function saveDocumentSnapshotAsset(params: {
     note: `${params.statusLabel}: ${params.doc.document_title}`,
     uploadedBy: "Document Pipeline",
     fileBuffer: Buffer.from(html, "utf8"),
+  })
+}
+
+
+async function saveSignedEmsWaPdfAsset(params: {
+  tenantSlug: string
+  jobId: number
+  doc: any
+  payload: any
+}) {
+  const pdfDoc = await PDFDocument.create()
+
+  const regularFont =
+    await pdfDoc.embedFont(StandardFonts.Helvetica)
+
+  const boldFont =
+    await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const pageSize: [number, number] = [612, 792]
+  const margin = 48
+  const maxWidth = pageSize[0] - (margin * 2)
+  const normalSize = 10
+  const smallSize = 9
+  const headingSize = 14
+  const titleSize = 17
+  const lineGap = 4
+
+  let page = pdfDoc.addPage(pageSize)
+  let y = pageSize[1] - margin
+
+  function addPage() {
+    page = pdfDoc.addPage(pageSize)
+    y = pageSize[1] - margin
+  }
+
+  function ensureSpace(height: number) {
+    if (y - height < margin) {
+      addPage()
+    }
+  }
+
+  function wrapText(
+    value: unknown,
+    font: any,
+    size: number,
+    width: number
+  ) {
+    const text =
+      String(value ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+
+    if (!text) {
+      return [""]
+    }
+
+    const words = text.split(" ")
+    const lines: string[] = []
+    let current = ""
+
+    for (const word of words) {
+      const candidate =
+        current
+          ? `${current} ${word}`
+          : word
+
+      if (
+        current &&
+        font.widthOfTextAtSize(
+          candidate,
+          size
+        ) > width
+      ) {
+        lines.push(current)
+        current = word
+      } else {
+        current = candidate
+      }
+    }
+
+    if (current) {
+      lines.push(current)
+    }
+
+    return lines
+  }
+
+  function drawWrapped(
+    value: unknown,
+    options: {
+      font?: any
+      size?: number
+      indent?: number
+      after?: number
+    } = {}
+  ) {
+    const font =
+      options.font || regularFont
+
+    const size =
+      options.size || normalSize
+
+    const indent =
+      options.indent || 0
+
+    const after =
+      options.after ?? 8
+
+    const lines =
+      wrapText(
+        value,
+        font,
+        size,
+        maxWidth - indent
+      )
+
+    const lineHeight =
+      size + lineGap
+
+    ensureSpace(
+      Math.max(
+        lineHeight,
+        lines.length * lineHeight
+      ) + after
+    )
+
+    for (const line of lines) {
+      page.drawText(
+        line || " ",
+        {
+          x: margin + indent,
+          y,
+          size,
+          font,
+        }
+      )
+
+      y -= lineHeight
+    }
+
+    y -= after
+  }
+
+  function drawField(
+    label: string,
+    value: unknown
+  ) {
+    const normalized =
+      String(value ?? "—").trim() || "—"
+
+    drawWrapped(
+      `${label}: ${normalized}`,
+      {
+        size: normalSize,
+        after: 3,
+      }
+    )
+  }
+
+  function drawHeading(
+    value: string
+  ) {
+    ensureSpace(headingSize + 20)
+
+    y -= 4
+
+    page.drawText(
+      value,
+      {
+        x: margin,
+        y,
+        size: headingSize,
+        font: boldFont,
+      }
+    )
+
+    y -= headingSize + 10
+  }
+
+  const payload =
+    params.payload || {}
+
+  const customer =
+    payload.customer_name ||
+    payload.insured_name ||
+    "Customer"
+
+  const safeCustomer =
+    String(customer)
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") ||
+    "Customer"
+
+  pdfDoc.setTitle(
+    `Emergency Tarp Work Authorization - ${customer}`
+  )
+
+  pdfDoc.setSubject(
+    `Signed Emergency Tarp Work Authorization for job ${params.jobId}`
+  )
+
+  pdfDoc.setCreator(
+    "Good2Go Roofing & Construction LLC"
+  )
+
+  pdfDoc.setProducer(
+    "Contractor Navigator"
+  )
+
+  page.drawText(
+    "Good2Go Roofing & Construction LLC",
+    {
+      x: margin,
+      y,
+      size: 12,
+      font: boldFont,
+    }
+  )
+
+  y -= 22
+
+  page.drawText(
+    "EMS Tarp Work Authorization",
+    {
+      x: margin,
+      y,
+      size: titleSize,
+      font: boldFont,
+    }
+  )
+
+  y -= 28
+
+  drawField(
+    "Customer",
+    customer
+  )
+
+  drawField(
+    "Phone",
+    payload.customer_phone
+  )
+
+  drawField(
+    "Email",
+    payload.customer_email
+  )
+
+  drawField(
+    "Property Address",
+    payload.job_address
+  )
+
+  drawField(
+    "Carrier",
+    payload.carrier ||
+    payload.tpa
+  )
+
+  drawField(
+    "Claim Number",
+    payload.claim_number
+  )
+
+  drawField(
+    "Date of Loss",
+    payload.date_of_loss
+  )
+
+
+  drawHeading(
+    "Project Details"
+  )
+
+  drawWrapped(
+    `Property: ${
+      payload.job_address ||
+      "Address to be confirmed"
+    }`
+  )
+
+  drawWrapped(
+    `Good2Go Roofing and Construction LLC was assigned by ${
+      payload.carrier ||
+      payload.tpa ||
+      "your insurance carrier"
+    } to provide emergency services at this property.`
+  )
+
+  drawWrapped(
+    "By signing below, I authorize Good2Go Roofing and Construction LLC and their affiliates to provide a roof inspection and, upon their assessment of damages, install a tarp in affected areas as deemed necessary."
+  )
+
+  drawWrapped(
+    "I understand that all photos, invoices, and estimates for repairs and/or replacement will be processed through the appropriate insurance assignment process for authorization and payment."
+  )
+
+
+  drawHeading(
+    "Electronic Signature"
+  )
+
+  drawField(
+    "Signed By",
+    payload.signed_by ||
+    "—"
+  )
+
+  drawField(
+    "Signed At",
+    payload.signed_at ||
+    "—"
+  )
+
+  drawField(
+    "Terms Accepted",
+    payload.terms_accepted === true
+      ? "Yes"
+      : "No"
+  )
+
+  drawWrapped(
+    "Electronic Signature Statement: Typed signature accepted as electronic signature.",
+    {
+      size: smallSize,
+      after: 10,
+    }
+  )
+
+
+  drawHeading(
+    "Terms and Conditions"
+  )
+
+  drawWrapped(
+    G2G_STANDARD_WA_TERMS,
+    {
+      size: smallSize,
+      after: 0,
+    }
+  )
+
+  const pdfBytes =
+    await pdfDoc.save()
+
+  const pdfBuffer =
+    Buffer.from(pdfBytes)
+
+  await saveJobAssetByTenantSlug({
+    tenantSlug: params.tenantSlug,
+    jobId: params.jobId,
+    assetType: "contract",
+    originalName:
+      `${safeCustomer}-Signed-Emergency-Tarp-Work-Authorization.pdf`,
+    mimeType: "application/pdf",
+    note:
+      `Signed Emergency Tarp Work Authorization: ${params.doc.document_title}`,
+    uploadedBy:
+      "Document Pipeline",
+    fileBuffer:
+      pdfBuffer,
   })
 }
 
@@ -871,6 +1234,20 @@ export async function signDocumentPackage(
   const isEmsTarp = doc.package_type === "ems_tarp"
 
   if (isEmsTarp) {
+    try {
+      await saveSignedEmsWaPdfAsset({
+        tenantSlug: String(doc.tenant_slug || "g2g-roofing"),
+        jobId: Number(doc.job_id),
+        doc,
+        payload: updatedPayload,
+      })
+    } catch (err) {
+      console.error(
+        "Failed to save signed EMS WA PDF:",
+        err
+      )
+    }
+
     await pool.query(
       `
       update jobs
