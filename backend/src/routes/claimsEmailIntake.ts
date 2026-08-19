@@ -389,13 +389,68 @@ function extractAssignmentDirectives(text: string) {
 }
 
 function extractNarrativeNotes(text: string) {
-  const explicit = firstMatch(text, [
-    /(?:notes|comments|loss description|damage description|description|special instructions|report|statement)\s*[:#-]\s*([^\n\r]+)/i,
-  ])
-
-  if (explicit) return explicit
-
   const lines = textLines(text)
+
+  /*
+   * Operational narrative is Navigator intelligence.
+   *
+   * Preserve labeled loss / damage / field narrative and its natural
+   * continuation instead of reducing it to whichever single line
+   * happens to contain a damage keyword.
+   */
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    const match = line.match(
+      /^(?:notes?|comments?|loss description|damage description|description of loss|description|special instructions?|reports?|reported(?:\s+(?:damage|conditions?|findings?|observations?))?|observations?|findings?|remarks?|statements?)\s*[:#-]?\s*(.*)$/i
+    )
+
+    if (!match) continue
+
+    const collected: string[] = []
+
+    const sameLine =
+      cleanParsedValue(
+        match[1] || ""
+      )
+
+    if (sameLine) {
+      collected.push(sameLine)
+    }
+
+    for (
+      let offset = 1;
+      offset <= 6 && i + offset < lines.length;
+      offset++
+    ) {
+      const candidate =
+        cleanParsedValue(
+          lines[i + offset]
+        )
+
+      if (!candidate) continue
+
+      if (
+        /^(?:carrier|insurance carrier|insurer|source|tpa|claim|claim number|homeowner|insured|customer|phone|email|e-mail|email address|customer email|homeowner email|insured email|policyholder email|location|address|property address|date of loss|loss date|dol|cause of loss|loss type|col|adjuster name|adjuster phone|adjuster email|examiner name|examiner phone|examiner email|from|to|cc|bcc|reply-to|subject|date)\s*[:#-]/i.test(
+          candidate
+        )
+      ) {
+        break
+      }
+
+      collected.push(candidate)
+    }
+
+    const explicit =
+      cleanParsedValue(
+        collected.join(" ")
+      )
+
+    if (explicit) {
+      return explicit
+    }
+  }
+
   const addressBlock = extractAddressBlock(text)
   const customerLineIndex = addressBlock.customerName
     ? lines.findIndex((line) => line === addressBlock.customerName)
@@ -564,9 +619,19 @@ function parseClaimsEmail(text: string) {
       /(?:evening phone|primary phone|customer phone|homeowner phone|insured phone|phone|cell)\s*[:#-]\s*([^\n\r]+)/i,
     ]) || extractPhone(text)
 
+  /*
+   * Customer email is identity-sensitive.
+   *
+   * Claims assignments can contain carrier, examiner, adjuster,
+   * forwarding, signature and routing email addresses. Never promote
+   * an arbitrary body email to the homeowner/customer.
+   *
+   * Customer email therefore requires an explicit customer-style
+   * field label. Examiner/adjuster email remains separately parsed.
+   */
   const explicitCustomerEmailField =
     firstMatch(text, [
-      /(?:email address|customer email|homeowner email|insured email)\s*[:#-]\s*([^\n\r]+)/i,
+      /^(?:email|e-mail|email address|customer email|homeowner email|insured email|policyholder email|policy holder email)\s*[:#-]\s*([^\n\r]+)/im,
     ])
 
   const explicitCustomerEmail =
@@ -577,10 +642,7 @@ function parseClaimsEmail(text: string) {
   const customerEmail =
     explicitCustomerEmail
       ? cleanParsedValue(explicitCustomerEmail)
-      : extractCustomerEmailCandidate(
-          text,
-          adjusterDetails.adjusterEmail
-        )
+      : null
 
   const adjusterName =
     firstMatch(text, [
