@@ -653,11 +653,11 @@ export async function sendDocumentPackage(
   const isEmsTarp = documentPackage.package_type === "ems_tarp"
 
   const message = isEmsTarp
-    ? `Good2Go Roofing: We received your request for emergency tarp service. Before we can enter the property and dispatch a tarp crew, we need your signed Emergency Tarp Work Authorization.
+    ? `Good2Go Roofing & Construction was assigned by ${documentPackage.payload?.carrier || "your insurance carrier"} to provide emergency services at ${documentPackage.payload?.job_address || "your property"}. Before we can inspect the roof and, if necessary, perform emergency tarp work, we need your signed Emergency Tarp Work Authorization.
 
 Please review and sign the authorization here: ${signUrl}
 
-Once we receive it, your job will move into our emergency tarp queue for crew assignment.`
+Once we receive it, your job will move into our emergency service queue for inspection and crew assignment as needed.`
     : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
 
 Please review the project details, pricing, authorization language, and terms and conditions before signing.

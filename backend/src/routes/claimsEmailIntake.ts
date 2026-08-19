@@ -1326,7 +1326,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       await addTimelineEvent(
         tenantId,
         jobId,
-        isEmsTarp ? "ems_tarp_intake_notes" : "claims_assignment_intake_notes",
+        "staff_note",
         intakeNoteMessage,
         {
           source: "inbound_email",

@@ -107,6 +107,16 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     ${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value || "—")}</td></tr>`).join("\n")}
   </table>
 
+  ${isEmsWorkAuthorization ? `
+  <section>
+    <h2>Project Details</h2>
+    <p><strong>Property:</strong> ${escapeHtml(payload.job_address || "Address to be confirmed")}</p>
+    <p>Good2Go Roofing and Construction LLC was assigned by ${escapeHtml(payload.carrier || payload.tpa || "your insurance carrier")} to provide emergency services at this property.</p>
+    <p>By signing below, I authorize Good2Go Roofing and Construction LLC and their affiliates to provide a roof inspection and, upon their assessment of damages, install a tarp in affected areas as deemed necessary.</p>
+    <p>I understand that all photos, invoices, and estimates for repairs and/or replacement will be processed through the appropriate insurance assignment process for authorization and payment.</p>
+  </section>
+  ` : ""}
+
   <div class="signature">
     <strong>Electronic Signature:</strong> ${escapeHtml(payload.signed_by || "Not signed yet")}<br />
     <strong>Signed At:</strong> ${escapeHtml(payload.signed_at || "—")}<br />
