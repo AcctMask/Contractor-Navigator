@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
@@ -42,6 +42,9 @@ export default function JobDetail() {
   const [editingAssetNote, setEditingAssetNote] = useState("")
   const [editingAssetCategory, setEditingAssetCategory] = useState("Documents")
   const [uploadCategory, setUploadCategory] = useState("Documents")
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState("")
+  const uploadInFlightRef = useRef(false)
   const [showAllPhotos, setShowAllPhotos] = useState(false)
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
@@ -627,6 +630,10 @@ export default function JobDetail() {
   }
 
   async function uploadFiles() {
+    if (uploadInFlightRef.current) {
+      return
+    }
+
     if (!id || !files || files.length === 0) {
       errorToast("Choose one or more files first")
       return
@@ -641,8 +648,15 @@ export default function JobDetail() {
       return
     }
 
+    uploadInFlightRef.current = true
+    setIsUploading(true)
+
+    const initialUploadProgress =
+      `Uploading ${selectedFiles.length} file(s), ${totalMb.toFixed(1)} MB total...`
+
     setError("")
-    setStatus(`Uploading ${selectedFiles.length} file(s), ${totalMb.toFixed(1)} MB total...`)
+    setStatus(initialUploadProgress)
+    setUploadProgress(initialUploadProgress)
 
     try {
       const token = getToken()
@@ -654,9 +668,11 @@ export default function JobDetail() {
         formData.append("note", fileDescriptions[index]?.trim() || "")
         formData.append("file", file)
 
-        setStatus(
-          `Uploading file ${index + 1} of ${selectedFiles.length}: ${file.name}`
-        )
+        const currentUploadProgress =
+        `Uploading file ${index + 1} of ${selectedFiles.length}: ${file.name}`
+
+      setStatus(currentUploadProgress)
+      setUploadProgress(currentUploadProgress)
 
         const res = await fetch(
           `${API_BASE}/assets/${getTenantSlug()}/job/${id}/upload`,
@@ -701,6 +717,11 @@ export default function JobDetail() {
     } catch (err: any) {
       setStatus("")
       errorToast(err?.message || "Upload failed. Large files may require a stronger upload path.")
+    } finally {
+      uploadInFlightRef.current = false
+      setIsUploading(false)
+      setUploadProgress("")
+      setStatus("")
     }
   }
 
@@ -2022,6 +2043,7 @@ export default function JobDetail() {
         <select
           value={uploadCategory}
           onChange={(e) => setUploadCategory(e.target.value)}
+          disabled={isUploading}
           style={input}
         >
           <option value="Documents">Documents</option>
@@ -2033,6 +2055,7 @@ export default function JobDetail() {
         <input
           type="file"
           multiple
+          disabled={isUploading}
           onChange={(e) => {
             const selected = e.target.files
             setFiles(selected)
@@ -2091,9 +2114,30 @@ export default function JobDetail() {
           </div>
         ) : null}
 
-        <button onClick={uploadFiles} style={button}>
-          Upload Selected Files
+        <button
+          onClick={uploadFiles}
+          disabled={isUploading}
+          style={{
+            ...button,
+            opacity: isUploading ? 0.72 : 1,
+            cursor: isUploading ? "wait" : "pointer",
+          }}
+        >
+          {isUploading ? "⏳ Uploading..." : "Upload Selected Files"}
         </button>
+
+        {isUploading && uploadProgress ? (
+          <p
+            style={{
+              ...success,
+              marginTop: 10,
+              marginBottom: 0,
+              fontWeight: 800,
+            }}
+          >
+            ⏳ {uploadProgress}
+          </p>
+        ) : null}
       </section>
 
       {(() => {
