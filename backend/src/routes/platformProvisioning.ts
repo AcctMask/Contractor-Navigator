@@ -136,10 +136,16 @@ async function ensureProvisioningTables(
       password_hash text not null,
       role text not null default 'staff',
       is_active boolean not null default true,
+      deactivated_at timestamptz null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (tenant_id, email)
     )
+  `)
+
+  await client.query(`
+    alter table app_users
+      add column if not exists deactivated_at timestamptz null
   `)
 
   await client.query(`

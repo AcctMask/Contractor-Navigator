@@ -8,6 +8,10 @@ import {
   listUsersByTenantSlug,
   loginUserByTenantSlug,
   changePasswordForUser,
+  getTenantIdBySlug,
+  updateManagedUserRoleByTenantSlug,
+  resetManagedUserPasswordByTenantSlug,
+  deactivateManagedUserByTenantSlug,
   recordUserInvitationEmailSent,
   markTenantSendNotified,
   getAppUserById,
@@ -61,14 +65,74 @@ const USER_MANAGEMENT_ROLES = [
   "manager",
 ]
 
+async function requireTenantUserManager(
+  request: any,
+  reply: any,
+  tenantSlug: string
+) {
+  const actor =
+    await requireRole(
+      request,
+      reply,
+      USER_MANAGEMENT_ROLES
+    )
+
+  if (!actor) {
+    return null
+  }
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  if (
+    String(actor.role) !==
+      "platform_owner" &&
+    Number(actor.tenant_id) !==
+      tenantId
+  ) {
+    reply.code(403)
+
+    return null
+  }
+
+  return {
+    actor,
+    tenantId,
+  }
+}
+
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.post("/auth/:tenantSlug/invite", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
-      if (!actor) return { ok: false, error: "Not authorized" }
+      const { tenantSlug } =
+        request.params
 
-      const { tenantSlug } = request.params
-      const { email, full_name, role } = request.body || {}
+      const access =
+        await requireTenantUserManager(
+          request,
+          reply,
+          tenantSlug
+        )
+
+      if (!access) {
+        return {
+          ok: false,
+          error: "Not authorized",
+        }
+      }
+
+      const {
+        actor,
+        tenantId,
+      } = access
+
+      const {
+        email,
+        full_name,
+        role,
+      } = request.body || {}
 
       const invite =
         await inviteUserByTenantSlug(
@@ -122,7 +186,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       if (inviteEmailResult.ok) {
         await recordUserInvitationEmailSent(
           Number(invite.id),
-          Number(actor.tenant_id)
+          tenantId
         )
 
         tenantNotificationResult =
@@ -144,7 +208,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         ) {
           await markTenantSendNotified(
             Number(invite.id),
-            Number(actor.tenant_id)
+            tenantId
           )
         }
       }
@@ -351,29 +415,273 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   app.get("/auth/:tenantSlug/users", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
-      if (!actor) return { ok: false, error: "Not authorized" }
+      const { tenantSlug } =
+        request.params
 
-      const { tenantSlug } = request.params
-      const users = await listUsersByTenantSlug(tenantSlug)
-      return { ok: true, users }
+      const access =
+        await requireTenantUserManager(
+          request,
+          reply,
+          tenantSlug
+        )
+
+      if (!access) {
+        return {
+          ok: false,
+          error: "Not authorized",
+        }
+      }
+
+      const users =
+        await listUsersByTenantSlug(
+          tenantSlug
+        )
+
+      return {
+        ok: true,
+        users,
+      }
     } catch (err: any) {
       reply.code(400)
-      return { ok: false, error: err?.message || String(err) }
+      return {
+        ok: false,
+        error:
+          err?.message ||
+          String(err),
+      }
     }
   })
 
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/role",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const id =
+          Number(userId)
+
+        if (
+          !Number.isFinite(id)
+        ) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Invalid user ID",
+          }
+        }
+
+        const { role } =
+          request.body || {}
+
+        const user =
+          await updateManagedUserRoleByTenantSlug(
+            tenantSlug,
+            id,
+            role,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
+
+  app.post(
+    "/auth/:tenantSlug/users/:userId/reset-password",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const id =
+          Number(userId)
+
+        if (
+          !Number.isFinite(id)
+        ) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Invalid user ID",
+          }
+        }
+
+        const {
+          newPassword,
+        } =
+          request.body || {}
+
+        const user =
+          await resetManagedUserPasswordByTenantSlug(
+            tenantSlug,
+            id,
+            newPassword,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
+
+  app.post(
+    "/auth/:tenantSlug/users/:userId/deactivate",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const id =
+          Number(userId)
+
+        if (
+          !Number.isFinite(id)
+        ) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Invalid user ID",
+          }
+        }
+
+        const user =
+          await deactivateManagedUserByTenantSlug(
+            tenantSlug,
+            id,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
+
   app.get("/auth/:tenantSlug/invitations", async (request: any, reply) => {
     try {
-      const actor = await requireRole(request, reply, USER_MANAGEMENT_ROLES)
-      if (!actor) return { ok: false, error: "Not authorized" }
+      const { tenantSlug } =
+        request.params
 
-      const { tenantSlug } = request.params
-      const invitations = await listInvitationsByTenantSlug(tenantSlug)
-      return { ok: true, invitations }
+      const access =
+        await requireTenantUserManager(
+          request,
+          reply,
+          tenantSlug
+        )
+
+      if (!access) {
+        return {
+          ok: false,
+          error: "Not authorized",
+        }
+      }
+
+      const invitations =
+        await listInvitationsByTenantSlug(
+          tenantSlug
+        )
+
+      return {
+        ok: true,
+        invitations,
+      }
     } catch (err: any) {
       reply.code(400)
-      return { ok: false, error: err?.message || String(err) }
+
+      return {
+        ok: false,
+        error:
+          err?.message ||
+          String(err),
+      }
     }
   })
 }

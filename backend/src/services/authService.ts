@@ -24,10 +24,16 @@ async function ensureAuthTables() {
       password_hash text not null,
       role text not null default 'staff',
       is_active boolean not null default true,
+      deactivated_at timestamptz null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       unique (tenant_id, email)
     )
+  `)
+
+  await pool.query(`
+    alter table app_users
+      add column if not exists deactivated_at timestamptz null
   `)
 
   await pool.query(`
@@ -567,6 +573,7 @@ export async function acceptInvitation(
       password_hash = excluded.password_hash,
       role = excluded.role,
       is_active = true,
+      deactivated_at = null,
       updated_at = now()
     returning id, tenant_id, email, full_name, role, is_active
     `,
@@ -713,15 +720,441 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
 
   const result = await pool.query(
     `
-    select id, email, full_name, role, is_active, created_at, updated_at
+    select
+      id,
+      email,
+      full_name,
+      role,
+      is_active,
+      deactivated_at,
+      created_at,
+      updated_at
     from app_users
     where tenant_id = $1
-    order by created_at desc, id desc
+    order by
+      is_active desc,
+      created_at desc,
+      id desc
     `,
     [tenantId]
   )
 
   return result.rows
+}
+
+type ManagedUserActor = {
+  id: number
+  tenant_id: number
+  email: string
+  full_name?: string | null
+  role: string
+}
+
+const MANAGED_ASSIGNABLE_ROLES = [
+  "admin",
+  "sales",
+  "manager",
+  "staff",
+  "subcontractor",
+]
+
+function normalizeManagedRole(value: unknown) {
+  const role =
+    String(value || "")
+      .trim()
+      .toLowerCase()
+
+  if (!MANAGED_ASSIGNABLE_ROLES.includes(role)) {
+    throw new Error("Invalid user role")
+  }
+
+  return role
+}
+
+async function logUserManagementActivity(
+  tenantId: number,
+  kind:
+    | "user_role_changed"
+    | "user_password_reset"
+    | "user_deactivated",
+  message: string,
+  meta: Record<string, unknown>
+) {
+  try {
+    await pool.query(
+      `
+      insert into timeline_events
+        (
+          tenant_id,
+          job_id,
+          kind,
+          message,
+          meta,
+          created_at
+        )
+      values
+        (
+          $1,
+          null,
+          $2,
+          $3,
+          $4::jsonb,
+          now()
+        )
+      `,
+      [
+        tenantId,
+        kind,
+        message,
+        JSON.stringify(meta),
+      ]
+    )
+  } catch (error) {
+    console.error(
+      "User management activity logging failed",
+      error
+    )
+  }
+}
+
+async function getManagedUser(
+  tenantId: number,
+  userId: number
+) {
+  const result =
+    await pool.query(
+      `
+      select
+        id,
+        tenant_id,
+        email,
+        full_name,
+        role,
+        is_active,
+        deactivated_at,
+        created_at,
+        updated_at
+      from app_users
+      where tenant_id = $1
+        and id = $2
+      limit 1
+      `,
+      [
+        tenantId,
+        userId,
+      ]
+    )
+
+  if (!result.rowCount) {
+    throw new Error("User not found")
+  }
+
+  return result.rows[0]
+}
+
+function assertManagedUserIsMutable(
+  target: any,
+  actor: ManagedUserActor
+) {
+  if (
+    Number(target.id) ===
+    Number(actor.id)
+  ) {
+    throw new Error(
+      "Use your own account settings to manage your account"
+    )
+  }
+
+  if (
+    String(target.role) ===
+    "platform_owner"
+  ) {
+    throw new Error(
+      "Platform owner is protected"
+    )
+  }
+}
+
+export async function updateManagedUserRoleByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  roleInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have their role changed"
+    )
+  }
+
+  const nextRole =
+    normalizeManagedRole(
+      roleInput
+    )
+
+  if (
+    nextRole ===
+    String(target.role)
+  ) {
+    return target
+  }
+
+  const result =
+    await pool.query(
+      `
+      update app_users
+      set
+        role = $1,
+        updated_at = now()
+      where tenant_id = $2
+        and id = $3
+      returning
+        id,
+        tenant_id,
+        email,
+        full_name,
+        role,
+        is_active,
+        deactivated_at,
+        created_at,
+        updated_at
+      `,
+      [
+        nextRole,
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_role_changed",
+    `Navigator user role changed for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      old_role:
+        target.role,
+      new_role:
+        user.role,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
+export async function resetManagedUserPasswordByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  newPasswordInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have their password reset"
+    )
+  }
+
+  const newPassword =
+    String(
+      newPasswordInput || ""
+    )
+
+  if (
+    !newPassword ||
+    newPassword.length < 6
+  ) {
+    throw new Error(
+      "New password must be at least 6 characters"
+    )
+  }
+
+  const passwordHash =
+    await bcrypt.hash(
+      newPassword,
+      10
+    )
+
+  const result =
+    await pool.query(
+      `
+      update app_users
+      set
+        password_hash = $1,
+        updated_at = now()
+      where tenant_id = $2
+        and id = $3
+      returning
+        id,
+        tenant_id,
+        email,
+        full_name,
+        role,
+        is_active,
+        deactivated_at,
+        created_at,
+        updated_at
+      `,
+      [
+        passwordHash,
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_password_reset",
+    `Navigator password reset for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
+export async function deactivateManagedUserByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    return target
+  }
+
+  const result =
+    await pool.query(
+      `
+      update app_users
+      set
+        is_active = false,
+        deactivated_at = now(),
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      returning
+        id,
+        tenant_id,
+        email,
+        full_name,
+        role,
+        is_active,
+        deactivated_at,
+        created_at,
+        updated_at
+      `,
+      [
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_deactivated",
+    `Navigator access ended for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      role:
+        user.role,
+      joined_at:
+        user.created_at,
+      deactivated_at:
+        user.deactivated_at,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
 }
 
 export async function listInvitationsByTenantSlug(tenantSlug: string) {
