@@ -133,8 +133,31 @@ export default function UsersPage() {
       setEmail("")
       setFullName("")
       setRole("admin")
-      setStatus("Invitation created")
+
+      const finalStatus =
+        json?.email_sent
+          ? json?.tenant_notification_sent
+            ? "Invitation emailed successfully"
+            : "Invitation emailed; confirmation notice was not sent"
+          : "Invitation created — email was not sent"
+
       await loadAll()
+
+      setStatus(finalStatus)
+
+      if (!json?.email_sent) {
+        setError(
+          json?.email_error ||
+            "Invitation was created, but the email was not sent. Copy Invite URL remains available."
+        )
+      } else if (
+        !json?.tenant_notification_sent &&
+        json?.tenant_notification_error
+      ) {
+        setError(
+          json.tenant_notification_error
+        )
+      }
     } catch (err: any) {
       console.error(err)
       setError(err?.message || "Invite failed")

@@ -7,6 +7,193 @@ function escapeHtml(value: string) {
     .replaceAll("'", "&#039;")
 }
 
+export async function sendActualAssistantNavigatorEmail(
+  params: {
+    to: string
+    subject: string
+    heading: string
+    lines: string[]
+    buttonLabel?: string
+    buttonUrl?: string
+  }
+) {
+  try {
+    const apiKey =
+      process.env.RESEND_API_KEY
+
+    const from =
+      process.env.ACTUAL_ASSISTANT_EMAIL_FROM ||
+      "Actual Assistant <support@actualassistance.com>"
+
+    const replyTo =
+      "support@actualassistance.com"
+
+    if (!apiKey) {
+      throw new Error(
+        "RESEND_API_KEY is required"
+      )
+    }
+
+    const to =
+      String(params.to || "").trim()
+
+    if (!to) {
+      throw new Error(
+        "Email recipient is required"
+      )
+    }
+
+    const subject =
+      String(params.subject || "").trim()
+
+    const heading =
+      String(params.heading || "").trim()
+
+    const lines =
+      Array.isArray(params.lines)
+        ? params.lines
+        : []
+
+    const buttonLabel =
+      String(
+        params.buttonLabel || ""
+      ).trim()
+
+    const buttonUrl =
+      String(
+        params.buttonUrl || ""
+      ).trim()
+
+    const plainText = [
+      heading,
+      "",
+      ...lines,
+      buttonUrl ? "" : null,
+      buttonUrl
+        ? `${buttonLabel || "Open"}: ${buttonUrl}`
+        : null,
+      "",
+      "Actual Assistant",
+      "support@actualassistance.com",
+    ]
+      .filter(
+        (value) =>
+          value !== null &&
+          value !== undefined
+      )
+      .join("\n")
+
+    const htmlLines =
+      lines
+        .map(
+          (line) =>
+            `<p style="margin:0 0 12px;">${escapeHtml(
+              line
+            )}</p>`
+        )
+        .join("")
+
+    const buttonHtml =
+      buttonUrl
+        ? `
+          <p style="margin:26px 0;">
+            <a
+              href="${escapeHtml(buttonUrl)}"
+              style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:10px;"
+            >
+              ${escapeHtml(
+                buttonLabel ||
+                "Open"
+              )}
+            </a>
+          </p>
+        `
+        : ""
+
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;max-width:680px;margin:0 auto;">
+        <div style="font-size:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#2563eb;margin-bottom:14px;">
+          Actual Assistant
+        </div>
+
+        <h2 style="margin:0 0 18px;">
+          ${escapeHtml(heading)}
+        </h2>
+
+        ${htmlLines}
+        ${buttonHtml}
+
+        <p style="margin-top:28px;color:#6b7280;font-size:13px;">
+          Actual Assistant<br />
+          support@actualassistance.com
+        </p>
+      </div>
+    `
+
+    const response =
+      await fetch(
+        "https://api.resend.com/emails",
+        {
+          method: "POST",
+          headers: {
+            Authorization:
+              `Bearer ${apiKey}`,
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            from,
+            to,
+            subject,
+            text: plainText,
+            html,
+            reply_to: replyTo,
+          }),
+        }
+      )
+
+    const data =
+      await response
+        .json()
+        .catch(() => ({}))
+
+    if (!response.ok) {
+      throw new Error(
+        data?.message ||
+        data?.error ||
+        `Resend failed with status ${response.status}`
+      )
+    }
+
+    console.log(
+      "✅ ACTUAL ASSISTANT NAVIGATOR EMAIL SENT",
+      {
+        to,
+        subject,
+        result: data,
+      }
+    )
+
+    return {
+      ok: true,
+      result: data,
+    }
+  } catch (error: any) {
+    console.error(
+      "❌ ACTUAL ASSISTANT NAVIGATOR EMAIL FAILED",
+      error
+    )
+
+    return {
+      ok: false,
+      error:
+        error?.message ||
+        String(error),
+    }
+  }
+}
+
+
 export async function sendAlertEmail(
   to: string,
   subject: string,

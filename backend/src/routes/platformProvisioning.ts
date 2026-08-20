@@ -155,8 +155,20 @@ async function ensureProvisioningTables(
       invited_by_user_id bigint null,
       accepted_at timestamptz null,
       expires_at timestamptz not null,
-      created_at timestamptz not null default now()
+      created_at timestamptz not null default now(),
+      invite_email_sent_at timestamptz null,
+      tenant_send_notified_at timestamptz null,
+      invitee_acceptance_notified_at timestamptz null,
+      tenant_acceptance_notified_at timestamptz null
     )
+  `)
+
+  await client.query(`
+    alter table user_invitations
+      add column if not exists invite_email_sent_at timestamptz null,
+      add column if not exists tenant_send_notified_at timestamptz null,
+      add column if not exists invitee_acceptance_notified_at timestamptz null,
+      add column if not exists tenant_acceptance_notified_at timestamptz null
   `)
 
   await client.query(`

@@ -5,7 +5,12 @@ import {
 } from "./navigatorHealthService";
 import {
   sendCustomerAcknowledgmentEmail,
+  sendActualAssistantNavigatorEmail,
 } from "./emailService";
+
+import {
+  getTenantConversationProfileBySlug,
+} from "./companyDnaRuntimeService";
 import {
   createDocumentPackageByTenantSlug,
   sendDocumentPackage,
@@ -543,6 +548,185 @@ async function runInitialExternalResponse(
   )
 }
 
+async function runUserInvitationExpiration(
+  action: ScheduledActionRow
+) {
+  const invitationId =
+    Number(
+      action.payload
+        ?.invitation_id
+    )
+
+  if (!invitationId) {
+    throw new Error(
+      "Invitation expiration action missing invitation_id"
+    )
+  }
+
+  const result =
+    await pool.query(
+      `
+      select
+        i.id,
+        i.tenant_id,
+        i.email,
+        i.full_name,
+        i.role,
+        i.accepted_at,
+        i.expires_at,
+        i.invited_by_user_id,
+        t.slug as tenant_slug,
+        t.name as tenant_name,
+        u.email as inviter_email
+      from user_invitations i
+      join tenants t
+        on t.id = i.tenant_id
+      left join app_users u
+        on u.id =
+          i.invited_by_user_id
+       and u.tenant_id =
+          i.tenant_id
+      where i.id = $1
+        and i.tenant_id = $2
+      limit 1
+      `,
+      [
+        invitationId,
+        action.tenant_id,
+      ]
+    )
+
+  const invitation =
+    result.rows[0]
+
+  if (!invitation) {
+    await timeline(
+      action.tenant_id,
+      null,
+      "user_invitation_expiration_skipped",
+      "Invitation expiration skipped because the invitation no longer exists.",
+      {
+        action_id:
+          action.id,
+        invitation_id:
+          invitationId,
+      }
+    )
+
+    return
+  }
+
+  if (invitation.accepted_at) {
+    await timeline(
+      action.tenant_id,
+      null,
+      "user_invitation_expiration_skipped",
+      `${invitation.full_name} already accepted the Navigator invitation.`,
+      {
+        action_id:
+          action.id,
+        invitation_id:
+          invitation.id,
+        accepted_at:
+          invitation.accepted_at,
+      }
+    )
+
+    return
+  }
+
+  if (
+    new Date(
+      invitation.expires_at
+    ).getTime() >
+    Date.now()
+  ) {
+    throw new Error(
+      "Invitation expiration action ran before expires_at"
+    )
+  }
+
+  if (!invitation.inviter_email) {
+    await timeline(
+      action.tenant_id,
+      null,
+      "user_invitation_expiration_skipped",
+      "Invitation expired but the inviter email is unavailable.",
+      {
+        action_id:
+          action.id,
+        invitation_id:
+          invitation.id,
+      }
+    )
+
+    return
+  }
+
+  let tenantName =
+    invitation.tenant_name ||
+    invitation.tenant_slug
+
+  try {
+    const profile =
+      await getTenantConversationProfileBySlug(
+        invitation.tenant_slug
+      )
+
+    tenantName =
+      profile.identity.display_name ||
+      profile.identity.business_name ||
+      tenantName
+  } catch (error) {
+    console.error(
+      "Invitation expiration tenant profile lookup failed",
+      error
+    )
+  }
+
+  const emailResult =
+    await sendActualAssistantNavigatorEmail({
+      to:
+        invitation.inviter_email,
+      subject:
+        `${invitation.full_name} did not accept the ${tenantName} Navigator invitation`,
+      heading:
+        "Navigator invitation expired",
+      lines: [
+        `${invitation.full_name} (${invitation.email}) did not accept the invitation to join ${tenantName} Navigator as ${invitation.role} before it expired.`,
+      ],
+    })
+
+  if (!emailResult.ok) {
+    throw new Error(
+      emailResult.error ||
+      "Invitation expiration notification failed"
+    )
+  }
+
+  await timeline(
+    action.tenant_id,
+    null,
+    "user_invitation_expired",
+    `${invitation.full_name} did not accept the Navigator invitation before expiration.`,
+    {
+      action_id:
+        action.id,
+      invitation_id:
+        invitation.id,
+      full_name:
+        invitation.full_name,
+      email:
+        invitation.email,
+      role:
+        invitation.role,
+      invited_by_user_id:
+        invitation.invited_by_user_id ||
+        null,
+    }
+  )
+}
+
 async function runAction(action: ScheduledActionRow) {
   const tenantId = action.tenant_id;
   const jobId = action.job_id;
@@ -559,6 +743,13 @@ async function runAction(action: ScheduledActionRow) {
     "initial_external_response"
   ) {
     await runInitialExternalResponse(action);
+  } else if (
+    action.action_key ===
+    "user_invitation_expiration"
+  ) {
+    await runUserInvitationExpiration(
+      action
+    );
   } else {
     throw new Error(
       `Unsupported scheduled action: ${action.action_key}`

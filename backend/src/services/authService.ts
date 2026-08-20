@@ -41,8 +41,20 @@ async function ensureAuthTables() {
       invited_by_user_id bigint null,
       accepted_at timestamptz null,
       expires_at timestamptz not null,
-      created_at timestamptz not null default now()
+      created_at timestamptz not null default now(),
+      invite_email_sent_at timestamptz null,
+      tenant_send_notified_at timestamptz null,
+      invitee_acceptance_notified_at timestamptz null,
+      tenant_acceptance_notified_at timestamptz null
     )
+  `)
+
+  await pool.query(`
+    alter table user_invitations
+      add column if not exists invite_email_sent_at timestamptz null,
+      add column if not exists tenant_send_notified_at timestamptz null,
+      add column if not exists invitee_acceptance_notified_at timestamptz null,
+      add column if not exists tenant_acceptance_notified_at timestamptz null
   `)
 
   await pool.query(`
@@ -133,6 +145,88 @@ async function logUserInvitationActivity(
   }
 }
 
+async function queueUserInvitationExpiration(
+  invitation: {
+    id: number
+    expires_at: string
+  },
+  tenantId: number
+) {
+  await pool.query(
+    `
+    update scheduled_actions
+    set
+      status = 'cancelled',
+      updated_at = now()
+    where tenant_id = $1
+      and action_key = 'user_invitation_expiration'
+      and status = 'pending'
+      and payload->>'invitation_id' = $2
+    `,
+    [
+      tenantId,
+      String(invitation.id),
+    ]
+  )
+
+  await pool.query(
+    `
+    insert into scheduled_actions
+      (
+        tenant_id,
+        job_id,
+        action_key,
+        run_at,
+        status,
+        payload,
+        created_at,
+        updated_at
+      )
+    values
+      (
+        $1,
+        null,
+        'user_invitation_expiration',
+        $2::timestamptz,
+        'pending',
+        $3::jsonb,
+        now(),
+        now()
+      )
+    `,
+    [
+      tenantId,
+      invitation.expires_at,
+      JSON.stringify({
+        invitation_id:
+          invitation.id,
+      }),
+    ]
+  )
+}
+
+async function cancelUserInvitationExpiration(
+  invitationId: number,
+  tenantId: number
+) {
+  await pool.query(
+    `
+    update scheduled_actions
+    set
+      status = 'cancelled',
+      updated_at = now()
+    where tenant_id = $1
+      and action_key = 'user_invitation_expiration'
+      and status = 'pending'
+      and payload->>'invitation_id' = $2
+    `,
+    [
+      tenantId,
+      String(invitationId),
+    ]
+  )
+}
+
 export async function inviteUserByTenantSlug(
   tenantSlug: string,
   input: {
@@ -202,7 +296,11 @@ export async function inviteUserByTenantSlug(
         role = $4,
         invite_token = $5,
         invited_by_user_id = $6,
-        expires_at = now() + interval '7 days'
+        expires_at = now() + interval '30 days',
+        invite_email_sent_at = null,
+        tenant_send_notified_at = null,
+        invitee_acceptance_notified_at = null,
+        tenant_acceptance_notified_at = null
       where id = $1
         and tenant_id = $2
       returning id, email, full_name, role, invite_token, accepted_at, expires_at, created_at
@@ -219,18 +317,9 @@ export async function inviteUserByTenantSlug(
 
     const invite = result.rows[0]
 
-    await logUserInvitationActivity(
-      Number(tenantId),
-      "user_invitation_sent",
-      `User invitation sent to ${invite.full_name}`,
-      {
-        invitation_id: invite.id,
-        full_name: invite.full_name,
-        email: invite.email,
-        role: invite.role,
-        invited_by_user_id: invitedByUserId,
-        invitation_action: "refreshed",
-      }
+    await queueUserInvitationExpiration(
+      invite,
+      Number(tenantId)
     )
 
     return invite
@@ -241,7 +330,7 @@ export async function inviteUserByTenantSlug(
     insert into user_invitations
       (tenant_id, email, full_name, role, invite_token, invited_by_user_id, expires_at)
     values
-      ($1, $2, $3, $4, $5, $6, now() + interval '7 days')
+      ($1, $2, $3, $4, $5, $6, now() + interval '30 days')
     returning id, email, full_name, role, invite_token, accepted_at, expires_at, created_at
     `,
     [
@@ -256,21 +345,153 @@ export async function inviteUserByTenantSlug(
 
   const invite = result.rows[0]
 
-  await logUserInvitationActivity(
-    Number(tenantId),
-    "user_invitation_sent",
-    `User invitation sent to ${invite.full_name}`,
-    {
-      invitation_id: invite.id,
-      full_name: invite.full_name,
-      email: invite.email,
-      role: invite.role,
-      invited_by_user_id: invitedByUserId,
-      invitation_action: "created",
-    }
+  await queueUserInvitationExpiration(
+    invite,
+    Number(tenantId)
   )
 
   return invite
+}
+
+export async function getAppUserById(
+  userId: number | null | undefined
+) {
+  if (!userId) return null
+
+  await ensureAuthTables()
+
+  const result = await pool.query(
+    `
+    select
+      id,
+      tenant_id,
+      email,
+      full_name,
+      role,
+      is_active
+    from app_users
+    where id = $1
+    limit 1
+    `,
+    [userId]
+  )
+
+  return result.rows[0] || null
+}
+
+export async function recordUserInvitationEmailSent(
+  invitationId: number,
+  tenantId: number
+) {
+  await ensureAuthTables()
+
+  const result = await pool.query(
+    `
+    update user_invitations
+    set invite_email_sent_at = now()
+    where id = $1
+      and tenant_id = $2
+    returning
+      id,
+      email,
+      full_name,
+      role,
+      invited_by_user_id,
+      invite_email_sent_at
+    `,
+    [
+      invitationId,
+      tenantId,
+    ]
+  )
+
+  const invitation =
+    result.rows[0] || null
+
+  if (invitation) {
+    await logUserInvitationActivity(
+      tenantId,
+      "user_invitation_sent",
+      `User invitation emailed to ${invitation.full_name}`,
+      {
+        invitation_id:
+          invitation.id,
+        full_name:
+          invitation.full_name,
+        email:
+          invitation.email,
+        role:
+          invitation.role,
+        invited_by_user_id:
+          invitation.invited_by_user_id ||
+          null,
+        delivery:
+          "resend_accepted",
+      }
+    )
+  }
+
+  return invitation
+}
+
+export async function markTenantSendNotified(
+  invitationId: number,
+  tenantId: number
+) {
+  await ensureAuthTables()
+
+  await pool.query(
+    `
+    update user_invitations
+    set tenant_send_notified_at = now()
+    where id = $1
+      and tenant_id = $2
+    `,
+    [
+      invitationId,
+      tenantId,
+    ]
+  )
+}
+
+export async function markInviteeAcceptanceNotified(
+  invitationId: number,
+  tenantId: number
+) {
+  await ensureAuthTables()
+
+  await pool.query(
+    `
+    update user_invitations
+    set invitee_acceptance_notified_at = now()
+    where id = $1
+      and tenant_id = $2
+    `,
+    [
+      invitationId,
+      tenantId,
+    ]
+  )
+}
+
+export async function markTenantAcceptanceNotified(
+  invitationId: number,
+  tenantId: number
+) {
+  await ensureAuthTables()
+
+  await pool.query(
+    `
+    update user_invitations
+    set tenant_acceptance_notified_at = now()
+    where id = $1
+      and tenant_id = $2
+    `,
+    [
+      invitationId,
+      tenantId,
+    ]
+  )
 }
 
 export async function getInvitationByToken(inviteToken: string) {
@@ -286,6 +507,7 @@ export async function getInvitationByToken(inviteToken: string) {
       i.full_name,
       i.role,
       i.invite_token,
+      i.invited_by_user_id,
       i.accepted_at,
       i.expires_at,
       i.created_at
@@ -366,6 +588,11 @@ export async function acceptInvitation(
     [invite.id]
   )
 
+  await cancelUserInvitationExpiration(
+    Number(invite.id),
+    Number(invite.tenant_id)
+  )
+
   const user = userResult.rows[0] as AppUser
 
   await logUserInvitationActivity(
@@ -387,6 +614,16 @@ export async function acceptInvitation(
     user,
     token,
     tenant_slug: invite.tenant_slug,
+    invitation: {
+      id: invite.id,
+      tenant_id: invite.tenant_id,
+      email: invite.email,
+      full_name: invite.full_name,
+      role: invite.role,
+      invited_by_user_id: invite.invited_by_user_id || null,
+      accepted_at: invite.accepted_at,
+      expires_at: invite.expires_at,
+    },
   }
 }
 
@@ -493,7 +730,19 @@ export async function listInvitationsByTenantSlug(tenantSlug: string) {
 
   const result = await pool.query(
     `
-    select id, email, full_name, role, invite_token, accepted_at, expires_at, created_at
+    select
+      id,
+      email,
+      full_name,
+      role,
+      invite_token,
+      accepted_at,
+      expires_at,
+      created_at,
+      invite_email_sent_at,
+      tenant_send_notified_at,
+      invitee_acceptance_notified_at,
+      tenant_acceptance_notified_at
     from user_invitations
     where tenant_id = $1
     order by created_at desc, id desc

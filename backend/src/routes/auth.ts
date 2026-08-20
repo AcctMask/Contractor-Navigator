@@ -8,7 +8,20 @@ import {
   listUsersByTenantSlug,
   loginUserByTenantSlug,
   changePasswordForUser,
+  recordUserInvitationEmailSent,
+  markTenantSendNotified,
+  getAppUserById,
+  markInviteeAcceptanceNotified,
+  markTenantAcceptanceNotified,
 } from "../services/authService"
+
+import {
+  sendActualAssistantNavigatorEmail,
+} from "../services/emailService"
+
+import {
+  getTenantConversationProfileBySlug,
+} from "../services/companyDnaRuntimeService"
 
 const APP_BASE_URL =
   process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
@@ -57,17 +70,109 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const { tenantSlug } = request.params
       const { email, full_name, role } = request.body || {}
 
-      const invite = await inviteUserByTenantSlug(tenantSlug, {
-        email,
-        full_name,
-        role,
-        invited_by_user_id: Number(actor.id),
-      })
+      const invite =
+        await inviteUserByTenantSlug(
+          tenantSlug,
+          {
+            email,
+            full_name,
+            role,
+            invited_by_user_id:
+              Number(actor.id),
+          }
+        )
+
+      const inviteUrl =
+        `${APP_BASE_URL}/accept-invite/${invite.invite_token}`
+
+      const profile =
+        await getTenantConversationProfileBySlug(
+          tenantSlug
+        )
+
+      const tenantName =
+        profile.identity.display_name ||
+        profile.identity.business_name ||
+        tenantSlug
+
+      const inviteEmailResult =
+        await sendActualAssistantNavigatorEmail({
+          to: invite.email,
+          subject:
+            `You're invited to ${tenantName} Navigator`,
+          heading:
+            `You're invited to ${tenantName} Navigator`,
+          lines: [
+            `On behalf of ${tenantName}, you have been invited to become a user of their Navigator platform from Actual Assistant.`,
+            `Name: ${invite.full_name}`,
+            `Role: ${invite.role}`,
+            `User ID: ${invite.email}`,
+            "Your invitation is valid for 30 days.",
+            "Complete your invitation by creating your Navigator password.",
+          ],
+          buttonLabel:
+            "Accept Invitation",
+          buttonUrl:
+            inviteUrl,
+        })
+
+      let tenantNotificationResult:
+        any = null
+
+      if (inviteEmailResult.ok) {
+        await recordUserInvitationEmailSent(
+          Number(invite.id),
+          Number(actor.tenant_id)
+        )
+
+        tenantNotificationResult =
+          await sendActualAssistantNavigatorEmail({
+            to: actor.email,
+            subject:
+              `${invite.full_name} invited to ${tenantName} Navigator`,
+            heading:
+              "Navigator invitation sent",
+            lines: [
+              `${invite.full_name} (${invite.email}) has been invited to join the ${tenantName} Navigator as ${invite.role}.`,
+              "The invitation is valid for 30 days.",
+              "You will be notified when the invitation is accepted or if it expires.",
+            ],
+          })
+
+        if (
+          tenantNotificationResult.ok
+        ) {
+          await markTenantSendNotified(
+            Number(invite.id),
+            Number(actor.tenant_id)
+          )
+        }
+      }
 
       return {
         ok: true,
         invite,
-        invite_url: `${APP_BASE_URL}/accept-invite/${invite.invite_token}`,
+        invite_url:
+          inviteUrl,
+        email_sent:
+          Boolean(
+            inviteEmailResult.ok
+          ),
+        email_error:
+          inviteEmailResult.ok
+            ? null
+            : inviteEmailResult.error ||
+              "Invitation email was not sent.",
+        tenant_notification_sent:
+          Boolean(
+            tenantNotificationResult?.ok
+          ),
+        tenant_notification_error:
+          tenantNotificationResult &&
+          !tenantNotificationResult.ok
+            ? tenantNotificationResult.error ||
+              "Tenant confirmation was not sent."
+            : null,
       }
     } catch (err: any) {
       reply.code(400)
@@ -97,9 +202,89 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const { inviteToken } = request.params
       const { password } = request.body || {}
 
-      const accepted = await acceptInvitation(inviteToken, { password })
+      const accepted =
+        await acceptInvitation(
+          inviteToken,
+          { password }
+        )
 
-      return { ok: true, ...accepted }
+      const profile =
+        await getTenantConversationProfileBySlug(
+          accepted.tenant_slug
+        )
+
+      const tenantName =
+        profile.identity.display_name ||
+        profile.identity.business_name ||
+        accepted.tenant_slug
+
+      const invitation =
+        accepted.invitation
+
+      const inviteeNotice =
+        await sendActualAssistantNavigatorEmail({
+          to: accepted.user.email,
+          subject:
+            `Your ${tenantName} Navigator account is ready`,
+          heading:
+            "Congratulations — your Navigator account is ready",
+          lines: [
+            `Your Navigator account for ${tenantName} has been created successfully.`,
+            `Your User ID is ${accepted.user.email}.`,
+            "You can now use Navigator.",
+          ],
+        })
+
+      if (inviteeNotice.ok) {
+        await markInviteeAcceptanceNotified(
+          Number(invitation.id),
+          Number(invitation.tenant_id)
+        )
+      }
+
+      let tenantNotice:
+        any = null
+
+      const inviter =
+        await getAppUserById(
+          invitation.invited_by_user_id
+        )
+
+      if (inviter?.email) {
+        tenantNotice =
+          await sendActualAssistantNavigatorEmail({
+            to: inviter.email,
+            subject:
+              `${invitation.full_name} accepted the ${tenantName} Navigator invitation`,
+            heading:
+              "Navigator invitation accepted",
+            lines: [
+              `${invitation.full_name} (${invitation.email}) has accepted the invitation to join ${tenantName} Navigator as ${invitation.role}.`,
+            ],
+          })
+
+        if (tenantNotice.ok) {
+          await markTenantAcceptanceNotified(
+            Number(invitation.id),
+            Number(invitation.tenant_id)
+          )
+        }
+      }
+
+      return {
+        ok: true,
+        ...accepted,
+        notifications: {
+          invitee:
+            Boolean(
+              inviteeNotice.ok
+            ),
+          tenant:
+            Boolean(
+              tenantNotice?.ok
+            ),
+        },
+      }
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }

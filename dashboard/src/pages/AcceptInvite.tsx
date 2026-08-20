@@ -16,6 +16,7 @@ export default function AcceptInvitePage() {
   const [status, setStatus] = useState("Loading invitation...")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [accepted, setAccepted] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -74,8 +75,14 @@ export default function AcceptInvitePage() {
         )
       }
 
-      setStatus("Invitation accepted")
-      navigate("/")
+      setAccepted(true)
+      setStatus(
+        "Congratulations — your Navigator account has been created successfully."
+      )
+
+      window.setTimeout(() => {
+        navigate("/")
+      }, 1800)
     } catch (err: any) {
       setError(err?.message || "Accept invite failed")
       setStatus("Accept invite failed")
@@ -122,6 +129,44 @@ export default function AcceptInvitePage() {
           </div>
         ) : null}
 
+        {accepted ? (
+          <div
+            style={{
+              background: "rgba(37, 99, 235, 0.16)",
+              border: "1px solid rgba(96, 165, 250, 0.45)",
+              borderRadius: "16px",
+              padding: "16px",
+              marginBottom: "18px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "22px",
+                fontWeight: 800,
+              }}
+            >
+              Congratulations!
+            </div>
+
+            <div style={{ marginTop: "8px" }}>
+              Your Navigator account has been created successfully.
+            </div>
+
+            <div style={{ marginTop: "6px" }}>
+              <strong>User ID:</strong> {invite?.email}
+            </div>
+
+            <div
+              style={{
+                marginTop: "8px",
+                opacity: 0.82,
+              }}
+            >
+              Opening your Navigator home page...
+            </div>
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px" }}>
           <div>
             <label style={labelStyle}>Create Password</label>
@@ -146,8 +191,20 @@ export default function AcceptInvitePage() {
           </div>
 
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
-            <button type="submit" disabled={submitting || !invite} style={buttonStyle}>
-              {submitting ? "Creating Account..." : "Accept Invitation"}
+            <button
+              type="submit"
+              disabled={
+                submitting ||
+                !invite ||
+                accepted
+              }
+              style={buttonStyle}
+            >
+              {accepted
+                ? "Account Created"
+                : submitting
+                  ? "Creating Account..."
+                  : "Accept Invitation"}
             </button>
             <span style={{ opacity: 0.85 }}>{status}</span>
           </div>
