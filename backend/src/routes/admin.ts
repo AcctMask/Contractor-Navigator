@@ -817,6 +817,18 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'user_invitation_sent',
           'user_invitation_accepted'
         )
+      and lower(coalesce(te.kind, '')) not in (
+          'voice_call_received',
+          'voice_ai_summary_created',
+          'voice_intake_started',
+          'voice_generic_lead_alert_skipped',
+          'voice_reason_captured',
+          'voice_name_captured',
+          'voice_address_captured',
+          'voice_callback_number_captured',
+          'voice_callback_time_captured',
+          'voice_ai_response_spoken'
+        )
       order by te.created_at desc
       limit $2
       `,
