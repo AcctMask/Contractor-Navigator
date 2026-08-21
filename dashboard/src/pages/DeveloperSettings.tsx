@@ -10,7 +10,14 @@ const API_BASE =
   import.meta.env.VITE_API_BASE ||
   "https://contractor-navigator.onrender.com"
 
+type StageFollowupConfig = {
+  messages: string[]
+  timings_minutes: number[]
+}
+
 type DevSettings = {
+  stage_followups?: Record<string, StageFollowupConfig>
+
   lead_messages: string[]
   demo_completed_follow_up_messages: string[]
   estimate_messages: string[]
@@ -38,7 +45,7 @@ export default function DeveloperSettings() {
 
   const {
     branding,
-    workflowDefaults,
+    workspace,
   } = useCompanyDna()
 
   const [settings, setSettings] =
@@ -142,48 +149,89 @@ export default function DeveloperSettings() {
     }
   }, [tenantSlug])
 
-  function updateTiming(
-    key: keyof DevSettings,
-    index: number,
-    value: string,
+  function stageKeyForCard(
+    card: any,
   ) {
-    if (!settings) {
-      return
+    if (
+      card?.filter_type !== "stage" ||
+      !card?.filter_value
+    ) {
+      return ""
     }
 
-    const updated = {
-      ...settings,
-      [key]: [
-        ...(settings[key] as number[]),
-      ],
-    }
-
-    ;(updated[key] as number[])[index] =
-      Number(value)
-
-    setSettings(updated)
+    return String(card.filter_value).trim()
   }
 
-  function updateMessage(
-    key: keyof DevSettings,
+  function getStageConfiguration(
+    stageKey: string,
+  ): StageFollowupConfig {
+    const configured =
+      settings?.stage_followups?.[stageKey]
+
+    return {
+      messages:
+        Array.isArray(configured?.messages)
+          ? configured!.messages
+          : ["", "", "", "", "", "", "", "", "", ""],
+      timings_minutes:
+        Array.isArray(configured?.timings_minutes)
+          ? configured!.timings_minutes
+          : [0, 1440, 2880, 4320, 10080, 20160, 30240, 43200, 64800, 129600],
+    }
+  }
+
+  function updateStageTiming(
+    stageKey: string,
     index: number,
     value: string,
   ) {
-    if (!settings) {
-      return
-    }
+    if (!settings) return
 
-    const updated = {
+    const current =
+      getStageConfiguration(stageKey)
+
+    const timings =
+      [...current.timings_minutes]
+
+    timings[index] = Number(value)
+
+    setSettings({
       ...settings,
-      [key]: [
-        ...(settings[key] as string[]),
-      ],
-    }
+      stage_followups: {
+        ...(settings.stage_followups || {}),
+        [stageKey]: {
+          ...current,
+          timings_minutes: timings,
+        },
+      },
+    })
+  }
 
-    ;(updated[key] as string[])[index] =
-      value
+  function updateStageMessage(
+    stageKey: string,
+    index: number,
+    value: string,
+  ) {
+    if (!settings) return
 
-    setSettings(updated)
+    const current =
+      getStageConfiguration(stageKey)
+
+    const messages =
+      [...current.messages]
+
+    messages[index] = value
+
+    setSettings({
+      ...settings,
+      stage_followups: {
+        ...(settings.stage_followups || {}),
+        [stageKey]: {
+          ...current,
+          messages,
+        },
+      },
+    })
   }
 
   async function save() {
@@ -298,28 +346,41 @@ export default function DeveloperSettings() {
     setConfirmPassword("")
   }
 
-  const renderFollowupCard = (
-    id: string,
+  const renderStageFollowupCard = (
+    stageKey: string,
     labelText: string,
-    timingKey: keyof DevSettings,
-    messageKey: keyof DevSettings,
   ) => {
-    const timingPanel = `${id}:timing`
-    const messagesPanel = `${id}:messages`
+    const timingPanel =
+      `stage:${stageKey}:timing`
+
+    const messagesPanel =
+      `stage:${stageKey}:messages`
+
+    const configuration =
+      getStageConfiguration(stageKey)
 
     return (
-      <section style={sectionCard}>
+      <section
+        key={stageKey}
+        style={sectionCard}
+      >
         <h2 style={sectionTitle}>
           {labelText}
         </h2>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        <div style={{
+          color: "#94a3b8",
+          fontSize: 12,
+          marginBottom: 12,
+        }}>
+          Stage: {stageKey}
+        </div>
+
+        <div style={{
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+        }}>
           <button
             type="button"
             onClick={() =>
@@ -365,7 +426,7 @@ export default function DeveloperSettings() {
 
         {openFollowupPanel === timingPanel ? (
           <div style={{ marginTop: 18 }}>
-            {(settings?.[timingKey] as number[]).map(
+            {configuration.timings_minutes.map(
               (value, index) => (
                 <div key={index}>
                   <label style={fieldLabel}>
@@ -377,8 +438,8 @@ export default function DeveloperSettings() {
                     min="0"
                     value={value}
                     onChange={(event) =>
-                      updateTiming(
-                        timingKey,
+                      updateStageTiming(
+                        stageKey,
                         index,
                         event.target.value,
                       )
@@ -393,7 +454,7 @@ export default function DeveloperSettings() {
 
         {openFollowupPanel === messagesPanel ? (
           <div style={{ marginTop: 18 }}>
-            {(settings?.[messageKey] as string[]).map(
+            {configuration.messages.map(
               (value, index) => (
                 <div key={index}>
                   <label style={fieldLabel}>
@@ -403,8 +464,8 @@ export default function DeveloperSettings() {
                   <textarea
                     value={value}
                     onChange={(event) =>
-                      updateMessage(
-                        messageKey,
+                      updateStageMessage(
+                        stageKey,
                         index,
                         event.target.value,
                       )
@@ -446,18 +507,6 @@ export default function DeveloperSettings() {
       </div>
     )
   }
-
-  const prospectLabel =
-    workflowDefaults.customer_term ||
-    "Customer"
-
-  const proposalLabel =
-    workflowDefaults.estimate_term ||
-    "Estimate"
-
-  const agreementLabel =
-    workflowDefaults.agreement_term ||
-    "Contract"
 
   return (
     <div style={page}>
@@ -548,63 +597,25 @@ export default function DeveloperSettings() {
         ) : null}
       </div>
 
-      {renderFollowupCard(
-        "initial-interest",
-        tenantSlug === "actual-assistant-llc"
-          ? "Demo Requested"
-          : `${prospectLabel} / Initial Interest`,
-        "lead_timings_minutes",
-        "lead_messages",
-      )}
-
-      {renderFollowupCard(
-        "demo-completed-follow-up",
-        "Demo Completed Follow-Up",
-        "demo_completed_follow_up_timings_minutes",
-        "demo_completed_follow_up_messages",
-      )}
-
-      {renderFollowupCard(
-        "special-report",
-        "Special Report or Evidence",
-        "weather_report_timings_minutes",
-        "weather_report_messages",
-      )}
-
-      {renderFollowupCard(
-        "estimate-sent",
-        proposalLabel,
-        "estimate_timings_minutes",
-        "estimate_messages",
-      )}
-
-      {renderFollowupCard(
-        "contract-sent",
-        agreementLabel,
-        "contract_timings_minutes",
-        "contract_messages",
-      )}
-
-      {renderFollowupCard(
-        "wa-sent",
-        "WA Sent — Awaiting Authorization",
-        "wa_sent_timings_minutes",
-        "wa_sent_messages",
-      )}
-
-      {renderFollowupCard(
-        "tarp-active",
-        "Tarp — Awaiting Crew / Active EMS",
-        "tarp_active_timings_minutes",
-        "tarp_active_messages",
-      )}
-
-      {renderFollowupCard(
-        "tarp-complete",
-        "Tarp Complete / Post-Service",
-        "tarp_timings_minutes",
-        "tarp_messages",
-      )}
+      {(
+        workspace.dashboard
+          .pipeline_cards || []
+      )
+        .map((card) => ({
+          card,
+          stageKey:
+            stageKeyForCard(card),
+        }))
+        .filter(
+          ({ stageKey }) =>
+            Boolean(stageKey),
+        )
+        .map(({ card, stageKey }) =>
+          renderStageFollowupCard(
+            stageKey,
+            card.label,
+          ),
+        )}
 
       <div style={saveBar}>
         <button

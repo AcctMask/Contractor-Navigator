@@ -41,7 +41,11 @@ async function setConversationMemory(
 }
 
 import { sendAlertEmail } from "./emailService"
-import { getDeveloperSettingsByTenantSlug, type DevSettings } from "./devSettingsService"
+import {
+  getDeveloperSettingsByTenantSlug,
+  getStageFollowupConfig,
+  type DevSettings,
+} from "./devSettingsService"
 import {
   composeNavigatorCandidate,
   submitNavigatorObservation,
@@ -972,69 +976,27 @@ function getWorkflowMessages(settings: DevSettings, job: JobRow) {
   if (job.crm_flow_key === "weather_evidence_report") {
     return {
       workflowKey: "weather_evidence_report",
-      messages: settings.weather_report_messages || []
+      messages: settings.weather_report_messages || [],
     }
   }
 
-  if (job.active_followup_workflow === "lead") {
-    return {
-      workflowKey: "lead",
-      messages: settings.lead_messages || []
-    }
-  }
+  const stageKey =
+    String(
+      job.active_followup_workflow ||
+      job.stage ||
+      "",
+    ).trim()
 
-  if (job.active_followup_workflow === "demo_scheduled") {
-    return {
-      workflowKey: "demo_scheduled",
-      messages: settings.demo_scheduled_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "demo_completed_follow_up") {
-    return {
-      workflowKey: "demo_completed_follow_up",
-      messages: settings.demo_completed_follow_up_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "estimate_sent") {
-    return {
-      workflowKey: "estimate_sent",
-      messages: settings.estimate_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "contract_sent") {
-    return {
-      workflowKey: "contract_sent",
-      messages: settings.contract_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "wa_sent") {
-    return {
-      workflowKey: "wa_sent",
-      messages: settings.wa_sent_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "tarp_active") {
-    return {
-      workflowKey: "tarp_active",
-      messages: settings.tarp_active_messages || []
-    }
-  }
-
-  if (job.active_followup_workflow === "tarp") {
-    return {
-      workflowKey: "tarp",
-      messages: settings.tarp_messages || []
-    }
-  }
+  const configuration =
+    getStageFollowupConfig(
+      settings,
+      stageKey,
+    )
 
   return {
-    workflowKey: job.active_followup_workflow || "unknown",
-    messages: []
+    workflowKey: stageKey || "unknown",
+    messages:
+      configuration?.messages || [],
   }
 }
 

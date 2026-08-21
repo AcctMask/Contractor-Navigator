@@ -366,59 +366,6 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               else bot_pause_reason
             end,
 
-          active_followup_workflow =
-            case
-              when $3 in ('lead', 'demo_requested')
-                then 'lead'
-              when $3 = 'demo_scheduled'
-                then 'demo_scheduled'
-              when $3 = 'demo_completed_follow_up'
-                then 'demo_completed_follow_up'
-              when $3 = 'wa_sent'
-                then 'wa_sent'
-              when $3 = 'tarp'
-                then 'tarp_active'
-              when $3 = 'tarp_complete'
-                then 'tarp'
-              when $3 in ('estimate_sent', 'proposal_sent')
-                then 'estimate_sent'
-              when $3 in ('contract_sent', 'agreement_sent')
-                then 'contract_sent'
-              when $3 in ('archived', 'disqualified', 'not_moving_forward')
-                then null
-              else active_followup_workflow
-            end,
-
-          followup_workflow_started_at =
-            case
-              when $3 in ('lead', 'demo_requested')
-               and active_followup_workflow is distinct from 'lead'
-                then now()
-              when $3 = 'demo_scheduled'
-               and active_followup_workflow is distinct from 'demo_scheduled'
-                then now()
-              when $3 = 'demo_completed_follow_up'
-               and active_followup_workflow is distinct from 'demo_completed_follow_up'
-                then now()
-              when $3 = 'wa_sent'
-               and active_followup_workflow is distinct from 'wa_sent'
-                then now()
-              when $3 = 'tarp'
-               and active_followup_workflow is distinct from 'tarp_active'
-                then now()
-              when $3 = 'tarp_complete'
-               and active_followup_workflow is distinct from 'tarp'
-                then now()
-              when $3 in ('estimate_sent', 'proposal_sent')
-               and active_followup_workflow is distinct from 'estimate_sent'
-                then now()
-              when $3 in ('contract_sent', 'agreement_sent')
-               and active_followup_workflow is distinct from 'contract_sent'
-                then now()
-              when $3 in ('archived', 'disqualified', 'not_moving_forward')
-                then null
-              else followup_workflow_started_at
-            end,
 
           tarp_conversion_active =
             case

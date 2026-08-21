@@ -1,6 +1,9 @@
 import { pool } from "../db/db"
 import { queueAiFollowupByTenantSlug } from "./followupEngine"
-import { getDeveloperSettingsByTenantSlug } from "./devSettingsService"
+import {
+  getDeveloperSettingsByTenantSlug,
+  getStageFollowupConfig,
+} from "./devSettingsService"
 import { AI_FOLLOWUP_PROGRESS_KIND } from "./followupProgress"
 import { sendAlertEmail } from "./emailService"
 import {
@@ -67,47 +70,28 @@ function timingsToMs(values: number[]) {
 async function workflowDelaysForTenant(
   tenantSlug: string,
   activeWorkflow: string | null,
-  crmFlowKey?: string | null
+  crmFlowKey?: string | null,
 ) {
-  const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
+  const settings =
+    await getDeveloperSettingsByTenantSlug(
+      tenantSlug,
+    )
 
   if (crmFlowKey === "weather_evidence_report") {
-    return timingsToMs(settings.weather_report_timings_minutes || [])
+    return timingsToMs(
+      settings.weather_report_timings_minutes || [],
+    )
   }
 
-  if (activeWorkflow === "lead") {
-    return timingsToMs(settings.lead_timings_minutes || [])
-  }
+  const configuration =
+    getStageFollowupConfig(
+      settings,
+      activeWorkflow,
+    )
 
-  if (activeWorkflow === "demo_scheduled") {
-    return timingsToMs(settings.demo_scheduled_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "demo_completed_follow_up") {
-    return timingsToMs(settings.demo_completed_follow_up_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "estimate_sent") {
-    return timingsToMs(settings.estimate_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "contract_sent") {
-    return timingsToMs(settings.contract_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "wa_sent") {
-    return timingsToMs(settings.wa_sent_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "tarp_active") {
-    return timingsToMs(settings.tarp_active_timings_minutes || [])
-  }
-
-  if (activeWorkflow === "tarp") {
-    return timingsToMs(settings.tarp_timings_minutes || [])
-  }
-
-  return []
+  return timingsToMs(
+    configuration?.timings_minutes || [],
+  )
 }
 
 function nextGapMs(delays: number[], alreadySentCount: number) {

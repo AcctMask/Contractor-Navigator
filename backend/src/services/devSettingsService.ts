@@ -5,9 +5,16 @@ import { pool } from "../db/db"
  Clean version with tarp support built-in
 */
 
+export type StageFollowupConfig = {
+  messages: string[]
+  timings_minutes: number[]
+}
+
 export type DevSettings = {
   alert_email_to?: string
   alert_sms_to?: string
+
+  stage_followups?: Record<string, StageFollowupConfig>
 
   lead_messages: string[]
   demo_scheduled_messages: string[]
@@ -41,10 +48,80 @@ export type DevSettings = {
   weather_report_timings_minutes: number[]
 }
 
+function normalizeStageKey(value: unknown) {
+  return String(value || "").trim()
+}
+
+function buildLegacyStageFollowups(
+  settings: Partial<DevSettings>,
+): Record<string, StageFollowupConfig> {
+  const pairs: Array<[
+    string,
+    string[] | undefined,
+    number[] | undefined,
+  ]> = [
+    ["lead", settings.lead_messages, settings.lead_timings_minutes],
+    ["demo_requested", settings.lead_messages, settings.lead_timings_minutes],
+    ["demo_scheduled", settings.demo_scheduled_messages, settings.demo_scheduled_timings_minutes],
+    ["demo_completed_follow_up", settings.demo_completed_follow_up_messages, settings.demo_completed_follow_up_timings_minutes],
+    ["estimate_sent", settings.estimate_messages, settings.estimate_timings_minutes],
+    ["proposal_sent", settings.estimate_messages, settings.estimate_timings_minutes],
+    ["contract_sent", settings.contract_messages, settings.contract_timings_minutes],
+    ["agreement_sent", settings.contract_messages, settings.contract_timings_minutes],
+    ["wa_sent", settings.wa_sent_messages, settings.wa_sent_timings_minutes],
+    ["tarp", settings.tarp_active_messages, settings.tarp_active_timings_minutes],
+    ["tarp_complete", settings.tarp_messages, settings.tarp_timings_minutes],
+  ]
+
+  return Object.fromEntries(
+    pairs.map(([stage, messages, timings]) => [
+      stage,
+      {
+        messages: Array.isArray(messages) ? [...messages] : [],
+        timings_minutes: Array.isArray(timings) ? [...timings] : [],
+      },
+    ]),
+  )
+}
+
+export function getStageFollowupConfig(
+  settings: DevSettings,
+  stage: string | null | undefined,
+): StageFollowupConfig | null {
+  const stageKey = normalizeStageKey(stage)
+
+  if (!stageKey) {
+    return null
+  }
+
+  const configured =
+    settings.stage_followups?.[stageKey]
+
+  if (configured) {
+    return {
+      messages:
+        Array.isArray(configured.messages)
+          ? configured.messages
+          : [],
+      timings_minutes:
+        Array.isArray(configured.timings_minutes)
+          ? configured.timings_minutes
+          : [],
+    }
+  }
+
+  return (
+    buildLegacyStageFollowups(settings)[stageKey] ||
+    null
+  )
+}
+
 function defaultSettings(): DevSettings {
   return {
     alert_email_to: "",
     alert_sms_to: "",
+
+    stage_followups: {},
 
     lead_messages: ["", "", "", "", "", "", "", "", "", ""],
     demo_scheduled_messages: ["", "", "", "", "", "", "", "", "", ""],
@@ -149,8 +226,17 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
     ...existing
   }
 
+  const legacyStageFollowups =
+    buildLegacyStageFollowups(merged)
+
+  const stageFollowups = {
+    ...legacyStageFollowups,
+    ...(merged.stage_followups || {}),
+  }
+
   return {
     ...merged,
+    stage_followups: stageFollowups,
     lead_messages: [...(merged.lead_messages || []), ...defaults.lead_messages].slice(0, 10),
     demo_scheduled_messages: [...(merged.demo_scheduled_messages || []), ...defaults.demo_scheduled_messages].slice(0, 10),
     demo_completed_follow_up_messages: [...(merged.demo_completed_follow_up_messages || []), ...defaults.demo_completed_follow_up_messages].slice(0, 10),
@@ -173,6 +259,14 @@ export async function getDeveloperSettings(tenantId: number): Promise<DevSetting
 }
 
 export async function saveDeveloperSettings(tenantId: number, settings: DevSettings) {
+  const normalizedSettings: DevSettings = {
+    ...settings,
+    stage_followups: {
+      ...buildLegacyStageFollowups(settings),
+      ...(settings.stage_followups || {}),
+    },
+  }
+
   await pool.query(
     `
     insert into developer_settings (tenant_id, settings, created_at, updated_at)
@@ -180,10 +274,10 @@ export async function saveDeveloperSettings(tenantId: number, settings: DevSetti
     on conflict (tenant_id)
     do update set settings = excluded.settings, updated_at = now()
     `,
-    [tenantId, JSON.stringify(settings)]
+    [tenantId, JSON.stringify(normalizedSettings)]
   )
 
-  return { ok: true }
+  return normalizedSettings
 }
 
 export async function getDeveloperSettingsByTenantSlug(tenantSlug: string): Promise<DevSettings> {

@@ -401,67 +401,76 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     await pool.query(`
       -- CENTRAL FOLLOW-UP WORKFLOW LIFECYCLE
+      --
+      -- Corporate invariant:
+      -- A real jobs.stage transition is the event.
+      -- The destination stage is tenant data.
+      -- Tenant AI Follow-Up Settings determine whether that stage
+      -- carries automated follow-up responsibility.
       create or replace function sync_job_followup_workflow()
       returns trigger
       language plpgsql
       as $$
       declare
-        derived_workflow text;
+        stage_key text;
+        stage_config jsonb;
+        has_messages boolean := false;
+        has_timings boolean := false;
       begin
-        if new.stage in ('archived', 'disqualified') then
-          derived_workflow := null;
-
-        elsif new.crm_flow_key = 'weather_evidence_report' then
-          derived_workflow := 'weather_evidence_report';
-
-        elsif new.stage = 'lead' then
-          derived_workflow := 'lead';
-
-        elsif new.stage = 'wa_sent' then
-          derived_workflow := 'wa_sent';
-
-        elsif new.stage = 'tarp' then
-          derived_workflow := 'tarp_active';
-
-        elsif new.stage = 'tarp_complete' then
-          derived_workflow := 'tarp';
-
-        elsif new.stage = 'estimate_sent' then
-          derived_workflow := 'estimate_sent';
-
-        elsif new.stage = 'contract_sent' then
-          derived_workflow := 'contract_sent';
-
-        elsif tg_op = 'UPDATE' then
-          derived_workflow := old.active_followup_workflow;
-
-        else
-          derived_workflow := new.active_followup_workflow;
-        end if;
+        stage_key := nullif(btrim(coalesce(new.stage, '')), '');
 
         if tg_op = 'INSERT' then
-          new.active_followup_workflow := derived_workflow;
-
-          if derived_workflow is null then
-            new.followup_workflow_started_at := null;
-          else
-            new.followup_workflow_started_at :=
-              coalesce(new.followup_workflow_started_at, now());
+          if stage_key is null then
+            return new;
           end if;
 
-        elsif derived_workflow is distinct from old.active_followup_workflow then
-          new.active_followup_workflow := derived_workflow;
+        elsif new.stage is not distinct from old.stage then
+          new.active_followup_workflow :=
+            old.active_followup_workflow;
 
-          if derived_workflow is null then
-            new.followup_workflow_started_at := null;
-          else
-            new.followup_workflow_started_at := now();
-          end if;
-
-        else
-          new.active_followup_workflow := old.active_followup_workflow;
           new.followup_workflow_started_at :=
             old.followup_workflow_started_at;
+
+          return new;
+        end if;
+
+        if stage_key is null then
+          new.active_followup_workflow := null;
+          new.followup_workflow_started_at := null;
+          return new;
+        end if;
+
+        select
+          settings->'stage_followups'->stage_key
+        into stage_config
+        from developer_settings
+        where tenant_id = new.tenant_id
+        limit 1;
+
+        if stage_config is not null then
+          has_messages :=
+            jsonb_typeof(stage_config->'messages') = 'array'
+            and exists (
+              select 1
+              from jsonb_array_elements_text(
+                stage_config->'messages'
+              ) as message(value)
+              where nullif(btrim(message.value), '') is not null
+            );
+
+          has_timings :=
+            jsonb_typeof(stage_config->'timings_minutes') = 'array'
+            and jsonb_array_length(
+              stage_config->'timings_minutes'
+            ) > 0;
+        end if;
+
+        if has_messages and has_timings then
+          new.active_followup_workflow := stage_key;
+          new.followup_workflow_started_at := now();
+        else
+          new.active_followup_workflow := null;
+          new.followup_workflow_started_at := null;
         end if;
 
         return new;
@@ -471,7 +480,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       drop trigger if exists jobs_sync_followup_workflow on jobs;
 
       create trigger jobs_sync_followup_workflow
-      before insert or update of stage, crm_flow_key
+      before insert or update of stage
       on jobs
       for each row
       execute function sync_job_followup_workflow();
