@@ -24,6 +24,7 @@ import { registerReportingRoutes } from "./routes/reporting"
 import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { startFollowupScheduler } from "./services/followupScheduler"
+import { ensureFollowupLifecycleAuthority } from "./services/followupLifecycleService"
 import {
   schedulerTick,
   schedulerTickEms,
@@ -81,8 +82,15 @@ await commercialRoutes(app)
 const port = Number(process.env.PORT || 8787)
 
 app.listen({ port, host: "0.0.0.0" })
-  .then(() => {
+  .then(async () => {
     console.log(`🚀 Server running on port ${port}`)
+
+    /*
+     * Navigator corporate authority must be durable before any
+     * CRM / AI follow-up scheduler is allowed to operate.
+     */
+    await ensureFollowupLifecycleAuthority()
+
     startFollowupScheduler()
 
     /*
