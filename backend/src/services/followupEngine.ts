@@ -3197,10 +3197,50 @@ export async function handleInboundMessageByTenantSlug(
       trimmed.toLowerCase().includes("get started")
 
     if (isHighIntent) {
+      /*
+       * Buying-signal durability is a Navigator invariant.
+       *
+       * The dashboard derives has_buying_signal from the
+       * buying_signal_detected timeline event. Sales-intent
+       * handling returns early, so the signal must become
+       * durable here before the alert is dispatched.
+       */
+      const durableBuyingSignals =
+        matchedSignals.length
+          ? matchedSignals
+          : [salesIntent]
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "buying_signal_detected",
+        "Buying signal detected from customer reply",
+        {
+          matched_signals: durableBuyingSignals,
+          alert_sms_to: alertTargets.alert_sms_to,
+          alert_email_to: alertTargets.alert_email_to,
+        }
+      )
+
+      await logSystemEvent(
+        "buying_signal_detected",
+        "job",
+        jobId,
+        {
+          tenant_slug: tenantSlug,
+          from,
+          channel: "sms",
+          matched_signals: durableBuyingSignals,
+          alert_sms_to: alertTargets.alert_sms_to,
+          alert_email_to: alertTargets.alert_email_to,
+          message: trimmed,
+        }
+      )
+
       buyingSignalAlertResult = await sendBuyingSignalAlerts(
         job,
         trimmed,
-        matchedSignals.length ? matchedSignals : [salesIntent],
+        durableBuyingSignals,
         settings,
         callbackNumber
       )
