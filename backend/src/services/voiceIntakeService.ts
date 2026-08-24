@@ -314,7 +314,9 @@ export async function startVoiceIntakeLead(tenantSlug: string, from: string | nu
     callerPhone: from,
     callerName: null,
     notes:
-      "Inbound voice AI lead created. Caller reached Good2Go Roofing Team and entered the voice workflow.",
+      tenantSlug === "g2g-roofing"
+        ? "Inbound voice AI lead created. Caller reached Good2Go Roofing Team and entered the voice workflow."
+        : "Inbound voice AI prospect created through the tenant's dedicated voice AI number.",
     source: "Phone Call",
   })
 

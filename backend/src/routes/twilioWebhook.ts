@@ -94,6 +94,27 @@ import {
 const VOICE_NAME = "Polly.Joanna"
 const VOICE_LANGUAGE = "en-US"
 
+const G2G_VOICE_NUMBER = "+18557663246"
+const AA_VOICE_NUMBER = "+17274964442"
+
+function resolveInboundVoiceTenant(to: string | null) {
+  const normalizedTo = normalizePhone(to)
+
+  if (normalizedTo === G2G_VOICE_NUMBER) {
+    return "g2g-roofing"
+  }
+
+  if (normalizedTo === AA_VOICE_NUMBER) {
+    return "actual-assistant-llc"
+  }
+
+  return null
+}
+
+function aaFirstPrompt() {
+  return "Thank you for calling Actual Assistant. Tell me briefly what interested you in Actual Assistant or what you would like help with."
+}
+
 function normalizePhone(phone: string | null | undefined) {
   if (!phone) return null
   const digits = phone.replace(/\D/g, "")
@@ -1189,10 +1210,45 @@ async function registerTwilioWebhook(app: FastifyInstance) {
   app.post("/twilio/inbound-call", async (req, reply) => {
     const body = (req as any).body || {}
     const from = normalizePhone(body.From ? String(body.From) : null)
+    const to = normalizePhone(body.To ? String(body.To) : null)
     const callSid = String(body.CallSid || "").trim() || null
-    const tenantSlug = "g2g-roofing"
+    const tenantSlug = resolveInboundVoiceTenant(to)
+
+    if (!tenantSlug) {
+      req.log.warn(
+        {
+          to,
+          from,
+          callSid,
+        },
+        "Inbound Twilio call rejected: called number is not assigned to a Navigator tenant"
+      )
+
+      return replyXml(
+        reply,
+        twimlResponse(
+          "<Say>We are unable to route this call.</Say><Hangup/>"
+        )
+      )
+    }
 
     const voiceJob = await getOrCreateVoiceJob(tenantSlug, from, callSid)
+
+    if (tenantSlug === "actual-assistant-llc") {
+      const actionUrl = buildActionUrl("/twilio/voice/aa/reason", {
+        tenantSlug,
+        jobId: voiceJob.job_id,
+        callSid: callSid || "",
+      })
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          aaFirstPrompt(),
+          actionUrl
+        )
+      )
+    }
 
     const actionUrl = buildActionUrl("/twilio/voice/reason", {
       tenantSlug,
@@ -1201,6 +1257,46 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     })
 
     return replyXml(reply, gatherSpeechOrDigitsXml(firstPrompt(), actionUrl))
+  })
+
+  app.post("/twilio/voice/aa/reason", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const from = normalizePhone(body.From)
+    const reason = getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !== "actual-assistant-llc" ||
+      !jobId
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("We couldn't complete the call intake. A representative will follow up shortly.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceReason(
+      "actual-assistant-llc",
+      Number(jobId),
+      from,
+      reason || "General interest in Actual Assistant"
+    )
+
+    const actionUrl = buildActionUrl("/twilio/voice/name", {
+      tenantSlug: "actual-assistant-llc",
+      jobId,
+      callSid: String(callSid || ""),
+    })
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        "Thank you. May I have your name?",
+        actionUrl
+      )
+    )
   })
 
   app.post("/twilio/voice/reason", async (req, reply) => {
