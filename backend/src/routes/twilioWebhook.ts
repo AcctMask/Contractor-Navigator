@@ -1675,6 +1675,117 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       String(callSid || "")
     )
 
+    const actionUrl = buildActionUrl(
+      "/twilio/voice/aa/followup",
+      {
+        tenantSlug: "actual-assistant-llc",
+        jobId,
+        callSid: String(callSid || ""),
+      }
+    )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        response,
+        actionUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/aa/followup", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const followupAnswer = getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !== "actual-assistant-llc" ||
+      !jobId ||
+      !followupAnswer
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I didn't quite catch that. Please call back and we'll continue the conversation.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      followupAnswer,
+      String(callSid || "")
+    )
+
+    const context =
+      await getAaVoiceConversationContext(
+        "actual-assistant-llc",
+        Number(jobId)
+      )
+
+    let response =
+      "Thank you. That gives me a better understanding of what you're trying to accomplish. Based on what you've told me, this is something worth continuing the conversation about."
+
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug:
+            "actual-assistant-llc",
+          task:
+            "Continue a live inbound conversation with a prospective Actual Assistant customer after they have answered the intelligent follow-up question about how their business currently handles the problem they described. Respond as an intelligent business assistant, not an IVR or scripted intake form. Demonstrate that you understood their answer and connect it naturally to their original reason for calling and stated business need. Where useful, explain how Actual Assistant may relate to the problem using only capabilities supported by the tenant's Company DNA. Do not invent capabilities, pricing, guarantees, or unsupported claims. Keep the spoken response concise, specific, warm, and conversational. Do not ask for an address, callback number, or another qualification field yet. End naturally without making a commitment on behalf of the company.",
+          channel:
+            "voice",
+          currentContext: {
+            original_reason:
+              context.reason,
+            caller_name:
+              context.callerName,
+            business_name:
+              context.businessName,
+            caller_phone:
+              context.callerPhone,
+            latest_followup_answer:
+              followupAnswer,
+            job_id:
+              Number(jobId),
+            call_sid:
+              String(callSid || ""),
+            conversation_goal:
+              "Demonstrate understanding of the caller's business problem and respond intelligently before controlled disposition.",
+          },
+        })
+
+      if (
+        candidate &&
+        typeof candidate.text === "string" &&
+        candidate.text.trim()
+      ) {
+        response =
+          candidate.text.trim()
+      }
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice follow-up composition unavailable; using deterministic fallback"
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      response,
+      String(callSid || "")
+    )
+
     await finalizeVoiceTranscriptNote(
       "actual-assistant-llc",
       Number(jobId),
