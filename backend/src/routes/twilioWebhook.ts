@@ -1948,13 +1948,17 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     )
 
     const callerWantsCallback =
-      /^(yes|yeah|yep|sure|absolutely|definitely|please|yes please|i do|i would|that would be great|that would be good|okay|ok)$/i
+      /^(yes|yeah|yep|sure|absolutely|definitely|certainly|of course|okay|ok)\b/i
         .test(normalized) ||
-      /call me|call back|please call|have someone call|someone.*call|somebody.*call|contact me|reach out|speak to someone|talk to someone/i
+      /\b(yes please|please do|i do|i would|i'd like|i would like|that would be great|that would be good|sounds good|go ahead)\b/i
+        .test(normalized) ||
+      /\b(call me|call back|please call|have someone call|someone.*call|somebody.*call|contact me|reach out|speak to someone|talk to someone)\b/i
         .test(normalized)
 
     const callerDeclinesCallback =
-      /^(no|nope|not now|no thanks|no thank you|that's okay|that is okay)$/i
+      /^(no|nope|nah)\b/i
+        .test(normalized) ||
+      /\b(not now|no thanks|no thank you|don't call|do not call|that's okay|that is okay)\b/i
         .test(normalized)
 
     if (
