@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { sendSMS } from "../services/twilioService"
-import { submitNavigatorObservation } from "../services/headquartersService"
+import {
+  composeNavigatorCandidate,
+  submitNavigatorObservation,
+} from "../services/headquartersService"
 
 
 async function ensureConversationMemoryTable() {
@@ -80,13 +83,17 @@ import {
   markPhoneAsDnc,
 } from "../services/dncService"
 import {
+  getAaVoiceConversationContext,
   getVoiceFinalConfirmation,
   getVoiceStatusResponse,
   getVoiceSummary,
   saveVoiceAddress,
+  saveVoiceBusinessName,
   saveVoiceCallbackNumber,
   saveVoiceName,
   saveVoiceReason,
+  saveVoiceTranscriptTurn,
+  finalizeVoiceTranscriptNote,
   sendVoiceIntakeAlert,
   startVoiceIntakeLead,
 } from "../services/voiceIntakeService"
@@ -1284,18 +1291,401 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       reason || "General interest in Actual Assistant"
     )
 
-    const actionUrl = buildActionUrl("/twilio/voice/name", {
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      aaFirstPrompt(),
+      String(callSid || "")
+    )
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      reason || "General interest in Actual Assistant",
+      String(callSid || "")
+    )
+
+    const actionUrl = buildActionUrl("/twilio/voice/aa/name", {
       tenantSlug: "actual-assistant-llc",
       jobId,
       callSid: String(callSid || ""),
     })
 
+    let response =
+      "Thank you for telling me a little about what you're looking for. I'd like to understand your needs so we can make the conversation useful. May I have your name?"
+
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug:
+            "actual-assistant-llc",
+          task:
+            "Respond conversationally to an inbound prospective customer who has just explained why they called Actual Assistant. Acknowledge what they said naturally and intelligently. Demonstrate that you understood their business need without making unsupported claims or promises. Keep the spoken response concise. Then transition naturally to asking for their name so the qualification conversation can continue.",
+          channel:
+            "voice",
+          currentContext: {
+            caller_reason:
+              reason ||
+              "General interest in Actual Assistant",
+            job_id:
+              Number(jobId),
+            call_sid:
+              String(callSid || ""),
+            next_information_needed:
+              "caller name",
+          },
+        })
+
+      if (
+        candidate &&
+        typeof candidate.text === "string" &&
+        candidate.text.trim()
+      ) {
+        response =
+          candidate.text.trim()
+      }
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice conversational composition unavailable; using deterministic fallback"
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      response,
+      String(callSid || "")
+    )
+
     return replyXml(
       reply,
       gatherSpeechXml(
-        "Thank you. May I have your name?",
+        response,
         actionUrl
       )
+    )
+  })
+
+  app.post("/twilio/voice/aa/name", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const name = getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !== "actual-assistant-llc" ||
+      !jobId ||
+      !name
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I didn't quite catch your name. Please call back and we'll continue the conversation.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceName(
+      "actual-assistant-llc",
+      Number(jobId),
+      name
+    )
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      name,
+      String(callSid || "")
+    )
+
+    const actionUrl = buildActionUrl(
+      "/twilio/voice/aa/business",
+      {
+        tenantSlug: "actual-assistant-llc",
+        jobId,
+        callSid: String(callSid || ""),
+      }
+    )
+
+    let response =
+      `Thank you, ${name}. What is the name of your business?`
+
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug:
+            "actual-assistant-llc",
+          task:
+            "Continue an inbound Actual Assistant conversation after the caller has provided their name. Respond naturally and briefly. Use the caller's name if appropriate. Maintain conversational continuity with why they called. Then ask for the name of their business. Do not make unsupported claims or promises.",
+          channel:
+            "voice",
+          currentContext: {
+            caller_name:
+              name,
+            job_id:
+              Number(jobId),
+            call_sid:
+              String(callSid || ""),
+            next_information_needed:
+              "business name",
+          },
+        })
+
+      if (
+        candidate &&
+        typeof candidate.text === "string" &&
+        candidate.text.trim()
+      ) {
+        response =
+          candidate.text.trim()
+      }
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice name composition unavailable; using deterministic fallback"
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      response,
+      String(callSid || "")
+    )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        response,
+        actionUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/aa/business", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const businessName = getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !== "actual-assistant-llc" ||
+      !jobId ||
+      !businessName
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I didn't quite catch the name of your business. Please call back and we'll continue the conversation.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceBusinessName(
+      "actual-assistant-llc",
+      Number(jobId),
+      businessName
+    )
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      businessName,
+      String(callSid || "")
+    )
+
+    const actionUrl = buildActionUrl(
+      "/twilio/voice/aa/needs",
+      {
+        tenantSlug: "actual-assistant-llc",
+        jobId,
+        callSid: String(callSid || ""),
+      }
+    )
+
+    let response =
+      `Thank you. I have ${businessName}. Tell me a little about what you would like Actual Assistant to help your business accomplish.`
+
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug:
+            "actual-assistant-llc",
+          task:
+            "Continue an inbound Actual Assistant conversation after the caller has provided their business name. Acknowledge the business name naturally and briefly. Maintain conversational continuity with the caller's reason for calling. Then invite the caller to explain what they would like Actual Assistant to help their business accomplish. Keep the response concise and conversational. Do not make unsupported claims or promises.",
+          channel:
+            "voice",
+          currentContext: {
+            business_name:
+              businessName,
+            job_id:
+              Number(jobId),
+            call_sid:
+              String(callSid || ""),
+            next_information_needed:
+              "the business need or outcome the caller wants Actual Assistant to help accomplish",
+          },
+        })
+
+      if (
+        candidate &&
+        typeof candidate.text === "string" &&
+        candidate.text.trim()
+      ) {
+        response =
+          candidate.text.trim()
+      }
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice business composition unavailable; using deterministic fallback"
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      response,
+      String(callSid || "")
+    )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        response,
+        actionUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/aa/needs", async (req, reply) => {
+    const body = (req as any).body || {}
+    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const statedNeed = getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !== "actual-assistant-llc" ||
+      !jobId ||
+      !statedNeed
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I didn't quite catch that. Please call back and we'll continue the conversation.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      statedNeed,
+      String(callSid || "")
+    )
+
+    const context =
+      await getAaVoiceConversationContext(
+        "actual-assistant-llc",
+        Number(jobId)
+      )
+
+    let response =
+      "That makes sense. Based on what you've told me, I'd like to understand a little more about how that works in your business today. What happens now when that situation comes up?"
+
+    try {
+      const candidate =
+        await composeNavigatorCandidate({
+          tenantSlug:
+            "actual-assistant-llc",
+          task:
+            "You are continuing a live inbound conversation with a prospective Actual Assistant customer. This is a demonstration of Actual Assistant itself, so respond like an intelligent business assistant, not an IVR or scripted intake form. Use the caller's accumulated context and their newest stated need. Briefly demonstrate that you understand the business problem. Where useful, connect the need to relevant Actual Assistant capabilities supported by the tenant's Company DNA, but do not invent capabilities, pricing, guarantees, or unsupported claims. Then ask ONE natural, useful follow-up question that helps you understand how the problem currently works in their business. Keep the spoken response concise, warm, conversational, and specific to what the caller actually said.",
+          channel:
+            "voice",
+          currentContext: {
+            original_reason:
+              context.reason,
+            caller_name:
+              context.callerName,
+            business_name:
+              context.businessName,
+            stated_business_need:
+              statedNeed,
+            caller_phone:
+              context.callerPhone,
+            job_id:
+              Number(jobId),
+            call_sid:
+              String(callSid || ""),
+            conversation_goal:
+              "Understand the caller's business problem while demonstrating Actual Assistant's conversational intelligence.",
+          },
+        })
+
+      if (
+        candidate &&
+        typeof candidate.text === "string" &&
+        candidate.text.trim()
+      ) {
+        response =
+          candidate.text.trim()
+      }
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice needs composition unavailable; using deterministic fallback"
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      response,
+      String(callSid || "")
+    )
+
+    await finalizeVoiceTranscriptNote(
+      "actual-assistant-llc",
+      Number(jobId),
+      String(callSid || "")
+    )
+
+    return replyXml(
+      reply,
+      twimlResponse(`
+  ${sayBlock(response)}
+  <Hangup/>`)
     )
   })
 

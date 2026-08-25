@@ -389,6 +389,22 @@ export async function saveVoiceName(tenantSlug: string, jobId: number, name: str
   )
 }
 
+export async function saveVoiceBusinessName(
+  tenantSlug: string,
+  jobId: number,
+  businessName: string
+) {
+  const ctx = await getJobContext(tenantSlug, jobId)
+
+  await addTimelineEvent(
+    ctx.tenant_id,
+    ctx.job_id,
+    "voice_business_name_captured",
+    businessName,
+    { channel: "voice" }
+  )
+}
+
 export async function saveVoiceAddress(tenantSlug: string, jobId: number, address: string) {
   const ctx = await getJobContext(tenantSlug, jobId)
 
@@ -450,6 +466,210 @@ export async function saveVoiceCallbackNumber(
   )
 
   return callbackNumber || "No callback number captured"
+}
+
+export async function saveVoiceTranscriptTurn(
+  tenantSlug: string,
+  jobId: number,
+  speaker: "assistant" | "caller",
+  message: string,
+  callSid: string | null = null
+) {
+  const cleanMessage = String(message || "").trim()
+  if (!cleanMessage) return
+
+  const ctx = await getJobContext(tenantSlug, jobId)
+
+  const existing = await pool.query(
+    `
+    select id
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'voice_transcript_turn'
+      and meta->>'speaker' = $3
+      and coalesce(meta->>'call_sid', '') = coalesce($4, '')
+      and message = $5
+    limit 1
+    `,
+    [
+      ctx.tenant_id,
+      ctx.job_id,
+      speaker,
+      callSid || "",
+      cleanMessage,
+    ]
+  )
+
+  if (existing.rowCount) return
+
+  await addTimelineEvent(
+    ctx.tenant_id,
+    ctx.job_id,
+    "voice_transcript_turn",
+    cleanMessage,
+    {
+      channel: "voice",
+      speaker,
+      call_sid: callSid || null,
+    }
+  )
+}
+
+export async function finalizeVoiceTranscriptNote(
+  tenantSlug: string,
+  jobId: number,
+  callSid: string | null = null
+) {
+  const ctx = await getJobContext(tenantSlug, jobId)
+
+  const existing = await pool.query(
+    `
+    select id
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'voice_ai_transcript'
+      and coalesce(meta->>'call_sid', '') = coalesce($3, '')
+    limit 1
+    `,
+    [
+      ctx.tenant_id,
+      ctx.job_id,
+      callSid || "",
+    ]
+  )
+
+  if (existing.rowCount) return
+
+  const turns = await pool.query(
+    `
+    select
+      id,
+      message,
+      meta,
+      created_at
+    from timeline_events
+    where tenant_id = $1
+      and job_id = $2
+      and kind = 'voice_transcript_turn'
+      and coalesce(meta->>'call_sid', '') = coalesce($3, '')
+    order by created_at asc, id asc
+    `,
+    [
+      ctx.tenant_id,
+      ctx.job_id,
+      callSid || "",
+    ]
+  )
+
+  if (!turns.rowCount) return
+
+  const businessName =
+    await getLatestVoiceValue(
+      ctx.tenant_id,
+      ctx.job_id,
+      "voice_business_name_captured"
+    )
+
+  const callerName =
+    await getLatestVoiceValue(
+      ctx.tenant_id,
+      ctx.job_id,
+      "voice_name_captured"
+    )
+
+  const lines: string[] = [
+    "ACTUAL ASSISTANT VOICE AI CALL",
+    "",
+    `Caller: ${
+      callerName ||
+      ctx.customer_name ||
+      "Inbound Caller"
+    }`,
+    `Business: ${
+      businessName ||
+      "Not provided"
+    }`,
+    `Phone: ${
+      ctx.customer_phone ||
+      "Not available"
+    }`,
+    "",
+    "CALL TRANSCRIPT",
+    "",
+  ]
+
+  for (const row of turns.rows) {
+    const speaker =
+      String(row.meta?.speaker || "") === "assistant"
+        ? "Actual Assistant"
+        : "Caller"
+
+    lines.push(
+      `${speaker}:`,
+      String(row.message || "").trim(),
+      ""
+    )
+  }
+
+  const transcript = lines.join("\n").trim()
+
+  await addTimelineEvent(
+    ctx.tenant_id,
+    ctx.job_id,
+    "voice_ai_transcript",
+    transcript,
+    {
+      author: "Actual Assistant Voice AI",
+      source: "voice_ai_transcript",
+      channel: "voice",
+      call_sid: callSid || null,
+    }
+  )
+}
+
+export async function getAaVoiceConversationContext(
+  tenantSlug: string,
+  jobId: number
+) {
+  const ctx = await getJobContext(
+    tenantSlug,
+    jobId
+  )
+
+  const reason =
+    await getLatestVoiceValue(
+      ctx.tenant_id,
+      ctx.job_id,
+      "voice_reason_captured"
+    )
+
+  const callerName =
+    await getLatestVoiceValue(
+      ctx.tenant_id,
+      ctx.job_id,
+      "voice_name_captured"
+    )
+
+  const businessName =
+    await getLatestVoiceValue(
+      ctx.tenant_id,
+      ctx.job_id,
+      "voice_business_name_captured"
+    )
+
+  return {
+    reason,
+    callerName:
+      callerName ||
+      ctx.customer_name ||
+      null,
+    businessName,
+    callerPhone:
+      ctx.customer_phone ||
+      null,
+  }
 }
 
 export async function getVoiceSummary(

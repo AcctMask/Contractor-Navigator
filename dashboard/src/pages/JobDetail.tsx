@@ -125,6 +125,7 @@ export default function JobDetail() {
         "high_intent_alert_routed",
         "voice_intake_alert_routed",
         "voice_ai_response_spoken",
+        "voice_ai_transcript",
         "voice_followup_sms_sent",
         "job_manually_updated",
         "job_archived",
@@ -396,6 +397,7 @@ export default function JobDetail() {
     if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
     if (kind.includes("manual_sms")) return "Staff SMS"
     if (kind.includes("staff_note")) return meta.author ? `Staff Note — ${meta.author}` : "Staff Note"
+    if (kind.includes("voice_ai_transcript")) return "Voice AI Transcript"
     if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
     if (kind.includes("customer_reply")) return "Customer Reply"
     if (kind.includes("estimate_details")) return "Estimate Details"
