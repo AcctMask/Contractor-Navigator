@@ -208,6 +208,13 @@ function gatherSpeechXml(prompt: string, actionUrl: string) {
   <Hangup/>`)
 }
 
+function gatherAaSpeechXml(prompt: string, actionUrl: string) {
+  return twimlResponse(`
+  <Gather input="speech" method="POST" action="${xmlEscape(actionUrl)}" actionOnEmptyResult="true" speechTimeout="auto" language="${VOICE_LANGUAGE}">
+    ${sayBlock(prompt)}
+  </Gather>`)
+}
+
 function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
   const recordingCallback = `${buildBaseUrl()}/twilio/voice/recording-status`
 
@@ -1311,6 +1318,7 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       tenantSlug: "actual-assistant-llc",
       jobId,
       callSid: String(callSid || ""),
+      retry: 0,
     })
 
     let response =
@@ -1369,7 +1377,7 @@ async function registerTwilioWebhook(app: FastifyInstance) {
 
     return replyXml(
       reply,
-      gatherSpeechXml(
+      gatherAaSpeechXml(
         response,
         actionUrl
       )
@@ -1378,18 +1386,113 @@ async function registerTwilioWebhook(app: FastifyInstance) {
 
   app.post("/twilio/voice/aa/name", async (req, reply) => {
     const body = (req as any).body || {}
-    const { tenantSlug, jobId, callSid } = (req as any).query || {}
+    const {
+      tenantSlug,
+      jobId,
+      callSid,
+      retry,
+    } = (req as any).query || {}
+
     const name = getSpeech(body)
 
     if (
       String(tenantSlug || "") !== "actual-assistant-llc" ||
-      !jobId ||
-      !name
+      !jobId
     ) {
       return replyXml(
         reply,
         twimlResponse(`
-  ${sayBlock("I didn't quite catch your name. Please call back and we'll continue the conversation.")}
+  ${sayBlock("We couldn't complete the call intake. A representative will follow up shortly.")}
+  <Hangup/>`)
+      )
+    }
+
+    if (!name) {
+      const retryCount =
+        Math.max(
+          0,
+          Number.parseInt(
+            String(retry || "0"),
+            10
+          ) || 0
+        )
+
+      if (retryCount < 2) {
+        const retryActionUrl =
+          buildActionUrl(
+            "/twilio/voice/aa/name",
+            {
+              tenantSlug:
+                "actual-assistant-llc",
+              jobId,
+              callSid:
+                String(callSid || ""),
+              retry:
+                retryCount + 1,
+            }
+          )
+
+        const retryPrompt =
+          retryCount === 0
+            ? "I'm sorry, I didn't quite catch your name. Please say your first and last name."
+            : "I'm sorry, I still didn't catch your name. Please say it one more time."
+
+        await saveVoiceTranscriptTurn(
+          "actual-assistant-llc",
+          Number(jobId),
+          "assistant",
+          retryPrompt,
+          String(callSid || "")
+        )
+
+        return replyXml(
+          reply,
+          gatherAaSpeechXml(
+            retryPrompt,
+            retryActionUrl
+          )
+        )
+      }
+
+      const finalMessage =
+        "I'm sorry, I still couldn't capture your name. I do have your phone number and what you called about, so someone from Actual Assistant can follow up with you."
+
+      await saveVoiceTranscriptTurn(
+        "actual-assistant-llc",
+        Number(jobId),
+        "assistant",
+        finalMessage,
+        String(callSid || "")
+      )
+
+      await finalizeVoiceTranscriptNote(
+        "actual-assistant-llc",
+        Number(jobId),
+        String(callSid || "")
+      )
+
+      try {
+        await sendVoiceIntakeAlert(
+          "actual-assistant-llc",
+          Number(jobId)
+        )
+      } catch (error) {
+        req.log.warn(
+          {
+            error,
+            tenantSlug:
+              "actual-assistant-llc",
+            jobId:
+              Number(jobId),
+          },
+          "AA Voice partial intake alert unavailable after name retries"
+        )
+      }
+
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock(finalMessage)}
   <Hangup/>`)
       )
     }
