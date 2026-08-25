@@ -1881,31 +1881,129 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       )
     }
 
-    const normalizedFollowup =
-      followupAnswer.toLowerCase()
+    const dispositionPrompt =
+      `${response} Would you like someone from Actual Assistant to call you to continue the conversation?`
 
-    const callbackRequested =
-      normalizedFollowup.includes("call me") ||
-      normalizedFollowup.includes("call back") ||
-      normalizedFollowup.includes("please call") ||
-      normalizedFollowup.includes("can you call") ||
-      normalizedFollowup.includes("someone call") ||
-      normalizedFollowup.includes("somebody call") ||
-      normalizedFollowup.includes("speak to someone") ||
-      normalizedFollowup.includes("talk to someone")
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      dispositionPrompt,
+      String(callSid || "")
+    )
 
-    if (callbackRequested) {
-      const tenantId =
-        await getTenantIdBySlug(
-          "actual-assistant-llc"
+    const dispositionUrl =
+      buildActionUrl(
+        "/twilio/voice/aa/disposition",
+        {
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId,
+          callSid:
+            String(callSid || ""),
+        }
+      )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        dispositionPrompt,
+        dispositionUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/aa/disposition", async (req, reply) => {
+    const body = (req as any).body || {}
+
+    const {
+      tenantSlug,
+      jobId,
+      callSid,
+    } = (req as any).query || {}
+
+    const answer = getSpeech(body)
+    const normalized =
+      answer.toLowerCase().trim()
+
+    if (
+      String(tenantSlug || "") !==
+        "actual-assistant-llc" ||
+      !jobId
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("We couldn't complete the call intake. Someone from Actual Assistant will follow up shortly.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      answer || "(no response)",
+      String(callSid || "")
+    )
+
+    const callerWantsCallback =
+      /^(yes|yeah|yep|sure|absolutely|definitely|please|yes please|i do|i would|that would be great|that would be good|okay|ok)$/i
+        .test(normalized) ||
+      /call me|call back|please call|have someone call|someone.*call|somebody.*call|contact me|reach out|speak to someone|talk to someone/i
+        .test(normalized)
+
+    const callerDeclinesCallback =
+      /^(no|nope|not now|no thanks|no thank you|that's okay|that is okay)$/i
+        .test(normalized)
+
+    if (
+      !callerWantsCallback &&
+      !callerDeclinesCallback
+    ) {
+      const retryUrl =
+        buildActionUrl(
+          "/twilio/voice/aa/disposition",
+          {
+            tenantSlug:
+              "actual-assistant-llc",
+            jobId,
+            callSid:
+              String(callSid || ""),
+          }
         )
 
+      const retryPrompt =
+        "Just to make sure I understood, would you like someone from Actual Assistant to call you? Please say yes or no."
+
+      await saveVoiceTranscriptTurn(
+        "actual-assistant-llc",
+        Number(jobId),
+        "assistant",
+        retryPrompt,
+        String(callSid || "")
+      )
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          retryPrompt,
+          retryUrl
+        )
+      )
+    }
+
+    const tenantId =
+      await getTenantIdBySlug(
+        "actual-assistant-llc"
+      )
+
+    if (!callerWantsCallback) {
       await pool.query(
         `
         update jobs
         set
-          crm_substatus = 'callback_requested',
-          crm_flow_key = 'inbound_callback_request',
+          stage = 'lead',
           updated_at = now()
         where tenant_id = $1
           and id = $2
@@ -1913,18 +2011,38 @@ async function registerTwilioWebhook(app: FastifyInstance) {
         [tenantId, Number(jobId)]
       )
 
+      const finalMessage =
+        "Thank you for calling Actual Assistant. I have your information and our conversation saved. Have a great day."
+
       await addTimelineEvent(
         tenantId,
         Number(jobId),
-        "buying_signal_detected",
-        "Caller requested a follow-up call during Actual Assistant voice conversation",
+        "voice_ai_response_spoken",
+        finalMessage,
         {
-          channel: "voice",
-          source: "twilio_voice_intake",
-          reason: "callback_request",
-          call_sid: String(callSid || ""),
-          caller_message: followupAnswer,
+          sender:
+            "Actual Assistant",
+          channel:
+            "voice",
+          call_sid:
+            String(callSid || ""),
+          disposition:
+            "conversation_complete",
         }
+      )
+
+      await saveVoiceTranscriptTurn(
+        "actual-assistant-llc",
+        Number(jobId),
+        "assistant",
+        finalMessage,
+        String(callSid || "")
+      )
+
+      await finalizeVoiceTranscriptNote(
+        "actual-assistant-llc",
+        Number(jobId),
+        String(callSid || "")
       )
 
       try {
@@ -1941,19 +2059,225 @@ async function registerTwilioWebhook(app: FastifyInstance) {
             jobId:
               Number(jobId),
           },
-          "AA Voice callback-request alert unavailable"
+          "AA Voice completed-intake alert unavailable"
         )
       }
 
-      response =
-        "Absolutely. I've marked this for follow-up and someone from Actual Assistant will contact you. Thank you for calling."
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock(finalMessage)}
+  <Hangup/>`)
+      )
     }
+
+    const from =
+      normalizePhone(
+        body.From
+          ? String(body.From)
+          : null
+      )
+
+    const callbackUrl =
+      buildActionUrl(
+        "/twilio/voice/aa/callback-number",
+        {
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId,
+          callSid:
+            String(callSid || ""),
+        }
+      )
+
+    const callbackPrompt =
+      from
+        ? "Absolutely. Is the number you're calling from the best number to reach you?"
+        : "Absolutely. Please tell me the best phone number to reach you."
 
     await saveVoiceTranscriptTurn(
       "actual-assistant-llc",
       Number(jobId),
       "assistant",
-      response,
+      callbackPrompt,
+      String(callSid || "")
+    )
+
+    return replyXml(
+      reply,
+      gatherSpeechXml(
+        callbackPrompt,
+        callbackUrl
+      )
+    )
+  })
+
+  app.post("/twilio/voice/aa/callback-number", async (req, reply) => {
+    const body = (req as any).body || {}
+
+    const {
+      tenantSlug,
+      jobId,
+      callSid,
+    } = (req as any).query || {}
+
+    const from =
+      normalizePhone(
+        body.From
+          ? String(body.From)
+          : null
+      )
+
+    const spokenValue =
+      getSpeech(body)
+
+    const normalizedAnswer =
+      spokenValue
+        .toLowerCase()
+        .trim()
+
+    if (
+      String(tenantSlug || "") !==
+        "actual-assistant-llc" ||
+      !jobId
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("We couldn't complete the callback information. Someone from Actual Assistant will follow up shortly.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      spokenValue || "(no response)",
+      String(callSid || "")
+    )
+
+    const callerConfirmed =
+      /^(yes|yeah|yep|correct|right|okay|ok|sure|that's fine|that is fine)$/i
+        .test(normalizedAnswer)
+
+    const callerDeclined =
+      /^(no|nope|different|another number|not that number)$/i
+        .test(normalizedAnswer)
+
+    if (
+      callerDeclined ||
+      (!from && !spokenValue)
+    ) {
+      const preferredUrl =
+        buildActionUrl(
+          "/twilio/voice/aa/preferred-callback-number",
+          {
+            tenantSlug:
+              "actual-assistant-llc",
+            jobId,
+            callSid:
+              String(callSid || ""),
+          }
+        )
+
+      const prompt =
+        "Please provide the best phone number to reach you."
+
+      await saveVoiceTranscriptTurn(
+        "actual-assistant-llc",
+        Number(jobId),
+        "assistant",
+        prompt,
+        String(callSid || "")
+      )
+
+      return replyXml(
+        reply,
+        gatherSpeechXml(
+          prompt,
+          preferredUrl
+        )
+      )
+    }
+
+    const callbackValue =
+      callerConfirmed || !spokenValue
+        ? from
+        : spokenValue
+
+    await saveVoiceCallbackNumber(
+      "actual-assistant-llc",
+      Number(jobId),
+      from,
+      callbackValue
+    )
+
+    const tenantId =
+      await getTenantIdBySlug(
+        "actual-assistant-llc"
+      )
+
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'lead',
+        crm_substatus =
+          'callback_requested',
+        crm_flow_key =
+          'inbound_callback_request',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [tenantId, Number(jobId)]
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      Number(jobId),
+      "buying_signal_detected",
+      "Caller requested a follow-up call during Actual Assistant voice conversation",
+      {
+        channel:
+          "voice",
+        source:
+          "twilio_voice_intake",
+        reason:
+          "callback_request",
+        call_sid:
+          String(callSid || ""),
+        callback_number:
+          callbackValue,
+      }
+    )
+
+    const finalMessage =
+      "Absolutely. I've marked this for follow-up and someone from Actual Assistant will contact you. Thank you for calling."
+
+    await addTimelineEvent(
+      tenantId,
+      Number(jobId),
+      "voice_ai_response_spoken",
+      finalMessage,
+      {
+        sender:
+          "Actual Assistant",
+        channel:
+          "voice",
+        call_sid:
+          String(callSid || ""),
+        disposition:
+          "callback_requested",
+      }
+    )
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      finalMessage,
       String(callSid || "")
     )
 
@@ -1963,10 +2287,188 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       String(callSid || "")
     )
 
+    try {
+      await sendVoiceIntakeAlert(
+        "actual-assistant-llc",
+        Number(jobId)
+      )
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice callback-request alert unavailable"
+      )
+    }
+
     return replyXml(
       reply,
       twimlResponse(`
-  ${sayBlock(response)}
+  ${sayBlock(finalMessage)}
+  <Hangup/>`)
+    )
+  })
+
+  app.post("/twilio/voice/aa/preferred-callback-number", async (req, reply) => {
+    const body = (req as any).body || {}
+
+    const {
+      tenantSlug,
+      jobId,
+      callSid,
+    } = (req as any).query || {}
+
+    const from =
+      normalizePhone(
+        body.From
+          ? String(body.From)
+          : null
+      )
+
+    const preferredNumber =
+      getSpeech(body)
+
+    if (
+      String(tenantSlug || "") !==
+        "actual-assistant-llc" ||
+      !jobId
+    ) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("We couldn't complete the callback information. Someone from Actual Assistant will follow up shortly.")}
+  <Hangup/>`)
+      )
+    }
+
+    const callbackValue =
+      preferredNumber || from
+
+    if (!callbackValue) {
+      return replyXml(
+        reply,
+        twimlResponse(`
+  ${sayBlock("I wasn't able to capture a callback number, but I have saved the rest of our conversation. Thank you for calling Actual Assistant.")}
+  <Hangup/>`)
+      )
+    }
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "caller",
+      preferredNumber ||
+        "(use calling number)",
+      String(callSid || "")
+    )
+
+    await saveVoiceCallbackNumber(
+      "actual-assistant-llc",
+      Number(jobId),
+      from,
+      callbackValue
+    )
+
+    const tenantId =
+      await getTenantIdBySlug(
+        "actual-assistant-llc"
+      )
+
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'lead',
+        crm_substatus =
+          'callback_requested',
+        crm_flow_key =
+          'inbound_callback_request',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [tenantId, Number(jobId)]
+    )
+
+    await addTimelineEvent(
+      tenantId,
+      Number(jobId),
+      "buying_signal_detected",
+      "Caller requested a follow-up call during Actual Assistant voice conversation",
+      {
+        channel:
+          "voice",
+        source:
+          "twilio_voice_intake",
+        reason:
+          "callback_request",
+        call_sid:
+          String(callSid || ""),
+        callback_number:
+          callbackValue,
+      }
+    )
+
+    const finalMessage =
+      "Thank you. I've saved that number and marked this for follow-up. Someone from Actual Assistant will contact you."
+
+    await addTimelineEvent(
+      tenantId,
+      Number(jobId),
+      "voice_ai_response_spoken",
+      finalMessage,
+      {
+        sender:
+          "Actual Assistant",
+        channel:
+          "voice",
+        call_sid:
+          String(callSid || ""),
+        disposition:
+          "callback_requested",
+      }
+    )
+
+    await saveVoiceTranscriptTurn(
+      "actual-assistant-llc",
+      Number(jobId),
+      "assistant",
+      finalMessage,
+      String(callSid || "")
+    )
+
+    await finalizeVoiceTranscriptNote(
+      "actual-assistant-llc",
+      Number(jobId),
+      String(callSid || "")
+    )
+
+    try {
+      await sendVoiceIntakeAlert(
+        "actual-assistant-llc",
+        Number(jobId)
+      )
+    } catch (error) {
+      req.log.warn(
+        {
+          error,
+          tenantSlug:
+            "actual-assistant-llc",
+          jobId:
+            Number(jobId),
+        },
+        "AA Voice callback-request alert unavailable"
+      )
+    }
+
+    return replyXml(
+      reply,
+      twimlResponse(`
+  ${sayBlock(finalMessage)}
   <Hangup/>`)
     )
   })
