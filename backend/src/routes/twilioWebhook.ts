@@ -1881,6 +1881,74 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       )
     }
 
+    const normalizedFollowup =
+      followupAnswer.toLowerCase()
+
+    const callbackRequested =
+      normalizedFollowup.includes("call me") ||
+      normalizedFollowup.includes("call back") ||
+      normalizedFollowup.includes("please call") ||
+      normalizedFollowup.includes("can you call") ||
+      normalizedFollowup.includes("someone call") ||
+      normalizedFollowup.includes("somebody call") ||
+      normalizedFollowup.includes("speak to someone") ||
+      normalizedFollowup.includes("talk to someone")
+
+    if (callbackRequested) {
+      const tenantId =
+        await getTenantIdBySlug(
+          "actual-assistant-llc"
+        )
+
+      await pool.query(
+        `
+        update jobs
+        set
+          crm_substatus = 'callback_requested',
+          crm_flow_key = 'inbound_callback_request',
+          updated_at = now()
+        where tenant_id = $1
+          and id = $2
+        `,
+        [tenantId, Number(jobId)]
+      )
+
+      await addTimelineEvent(
+        tenantId,
+        Number(jobId),
+        "buying_signal_detected",
+        "Caller requested a follow-up call during Actual Assistant voice conversation",
+        {
+          channel: "voice",
+          source: "twilio_voice_intake",
+          reason: "callback_request",
+          call_sid: String(callSid || ""),
+          caller_message: followupAnswer,
+        }
+      )
+
+      try {
+        await sendVoiceIntakeAlert(
+          "actual-assistant-llc",
+          Number(jobId)
+        )
+      } catch (error) {
+        req.log.warn(
+          {
+            error,
+            tenantSlug:
+              "actual-assistant-llc",
+            jobId:
+              Number(jobId),
+          },
+          "AA Voice callback-request alert unavailable"
+        )
+      }
+
+      response =
+        "Absolutely. I've marked this for follow-up and someone from Actual Assistant will contact you. Thank you for calling."
+    }
+
     await saveVoiceTranscriptTurn(
       "actual-assistant-llc",
       Number(jobId),
