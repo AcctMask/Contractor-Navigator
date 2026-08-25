@@ -1,5 +1,6 @@
 import { pool } from "../db/db"
 import { getDeveloperSettingsByTenantSlug } from "./devSettingsService"
+import { getTenantConversationProfileBySlug } from "./companyDnaRuntimeService"
 import { sendSMS } from "./twilioService"
 import { sendAlertEmail } from "./emailService"
 import {
@@ -884,10 +885,36 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     process.env.TWILIO_ALERT_TO ||
     ""
 
+  let tenantIdentityEmail = ""
+
+  try {
+    const tenantProfile =
+      await getTenantConversationProfileBySlug(
+        tenantSlug
+      )
+
+    tenantIdentityEmail =
+      String(
+        tenantProfile.identity.email || ""
+      ).trim()
+  } catch (err: any) {
+    console.warn(
+      "[VOICE_DIAG] tenant identity email unavailable; using configured fallback",
+      {
+        tenantSlug,
+        jobId,
+        error:
+          err?.message ||
+          String(err),
+      }
+    )
+  }
+
   const alertEmailTo =
+    tenantIdentityEmail ||
+    settings.alert_email_to ||
     process.env.VOICE_INTAKE_EMAIL_TO ||
     process.env.G2G_GMAIL_TO ||
-    settings.alert_email_to ||
     process.env.ALERT_EMAIL_TO ||
     process.env.ESCALATION_EMAIL_TO ||
     "good2goroofingandconstruction@gmail.com"
