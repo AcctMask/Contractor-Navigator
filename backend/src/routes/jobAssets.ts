@@ -1354,12 +1354,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           const reportImageBytes = await sharp(sourceBytes)
             .autoOrient()
             .resize({
-              width: 1400,
-              height: 1400,
+              width: 900,
+              height: 900,
               fit: "inside",
               withoutEnlargement: true,
             })
-            .jpeg({ quality: 85 })
+            .jpeg({ quality: 78 })
             .toBuffer()
 
           const image =
