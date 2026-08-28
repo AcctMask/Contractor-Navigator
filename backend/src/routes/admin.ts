@@ -862,7 +862,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const jobRow = await pool.query(
       `
-      select id, customer_id
+      select *
       from jobs
       where tenant_id = $1 and id = $2
       limit 1
@@ -874,7 +874,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       return reply.code(404).send({ ok: false, error: "Job not found" });
     }
 
-    const customerId = jobRow.rows[0].customer_id;
+    const existingJob = jobRow.rows[0];
+    const customerId = existingJob.customer_id;
 
     await pool.query(
       `
@@ -991,12 +992,111 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       ]
     );
 
+    const manualUpdateLabels: Record<string, string> = {
+      stage: "Stage",
+      crm_flow_key: "CRM flow",
+      crm_substatus: "CRM substatus",
+      manual_owner: "Owner",
+      bot_paused: "AI follow-up",
+      estimate_status: "Estimate status",
+      contract_status: "Contract status",
+      wa_status: "Work authorization status",
+      carrier: "Carrier",
+      claim_number: "Claim number",
+      date_of_loss: "Date of loss",
+      policy_holder: "Policy holder",
+      adjuster_name: "Adjuster",
+      adjuster_phone: "Adjuster phone",
+      adjuster_email: "Adjuster email",
+      assignment_subject: "Assignment subject",
+      assignment_notes: "Assignment notes",
+      damage_location: "Damage location",
+      damage_summary: "Damage summary",
+      last_human_note: "Human note",
+      lead_source: "Lead source",
+      lead_source_detail: "Lead source detail",
+      marketing_campaign: "Marketing campaign",
+      job_type: "Job type",
+      address: "Address",
+      address1: "Address",
+      city: "City",
+      state: "State",
+      zip: "ZIP",
+      customer_name: "Customer name",
+      customer_phone: "Customer phone",
+      customer_email: "Customer email",
+      secondary_contact_name: "Secondary contact",
+      secondary_contact_phone: "Secondary contact phone",
+      secondary_contact_email: "Secondary contact email",
+      secondary_contact_type: "Secondary contact type",
+    };
+
+    const valueText = (value: any) => {
+      if (value === null || value === undefined || value === "") return "blank";
+      if (typeof value === "boolean") return value ? "on" : "off";
+      return String(value);
+    };
+
+    const jobBodyToColumn: Record<string, string> = {
+      stage: "stage",
+      crm_flow_key: "crm_flow_key",
+      crm_substatus: "crm_substatus",
+      manual_owner: "manual_owner",
+      bot_paused: "bot_paused",
+      estimate_status: "estimate_status",
+      contract_status: "contract_status",
+      wa_status: "wa_status",
+      carrier: "carrier",
+      claim_number: "claim_number",
+      date_of_loss: "date_of_loss",
+      policy_holder: "policy_holder",
+      adjuster_name: "adjuster_name",
+      adjuster_phone: "adjuster_phone",
+      adjuster_email: "adjuster_email",
+      assignment_subject: "assignment_subject",
+      assignment_notes: "assignment_notes",
+      damage_location: "damage_location",
+      damage_summary: "damage_summary",
+      last_human_note: "last_human_note",
+      lead_source: "lead_source",
+      lead_source_detail: "lead_source_detail",
+      marketing_campaign: "marketing_campaign",
+      job_type: "job_type",
+      address: "address1",
+      address1: "address1",
+      city: "city",
+      state: "state",
+      zip: "zip",
+      customer_phone: "customer_phone",
+      customer_email: "customer_email",
+      secondary_contact_name: "secondary_contact_name",
+      secondary_contact_phone: "secondary_contact_phone",
+      secondary_contact_email: "secondary_contact_email",
+      secondary_contact_type: "secondary_contact_type",
+    };
+
+    const changeDescriptions = Object.keys(body)
+      .filter((key) => {
+        const column = jobBodyToColumn[key];
+        if (!column) return false;
+        if (body[key] === undefined || body[key] === null) return false;
+        return String(existingJob[column] ?? "") !== String(body[key] ?? "");
+      })
+      .map((key) => {
+        const column = jobBodyToColumn[key];
+        return `${manualUpdateLabels[key]} changed from ${valueText(existingJob[column])} to ${valueText(body[key])}`;
+      });
+
+    const manualUpdateMessage = changeDescriptions.length
+      ? changeDescriptions.join("; ")
+      : "CRM record saved with no field changes";
+
     await pool.query(
       `
       insert into timeline_events (tenant_id, job_id, kind, message, meta, created_at)
-      values ($1, $2, 'job_manually_updated', 'Job manually updated from CRM command center', $3::jsonb, now())
+      values ($1, $2, 'job_manually_updated', $3, $4::jsonb, now())
       `,
-      [tenantId, jobId, JSON.stringify(body)]
+      [tenantId, jobId, manualUpdateMessage, JSON.stringify(body)]
     );
 
     return reply.send({ ok: true, tenant_id: tenantId, job_id: jobId, updated: true });

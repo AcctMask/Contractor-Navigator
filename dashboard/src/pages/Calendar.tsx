@@ -250,12 +250,27 @@ export default function CalendarPage() {
   async function handleEventDrop({
     event,
     start,
-    end,
   }: any) {
+    const calendarEvent = event as CalendarEvent
+    const droppedDate = new Date(start)
+
+    // Dragging changes the calendar date only.
+    // Preserve the event's existing local clock time and duration.
+    const nextStart = new Date(calendarEvent.start)
+    nextStart.setFullYear(
+      droppedDate.getFullYear(),
+      droppedDate.getMonth(),
+      droppedDate.getDate(),
+    )
+
+    const durationMs =
+      calendarEvent.end.getTime() - calendarEvent.start.getTime()
+    const nextEnd = new Date(nextStart.getTime() + durationMs)
+
     await saveCalendarTiming(
-      event as CalendarEvent,
-      new Date(start),
-      new Date(end),
+      calendarEvent,
+      nextStart,
+      nextEnd,
       "calendar_drag_drop",
     )
   }
