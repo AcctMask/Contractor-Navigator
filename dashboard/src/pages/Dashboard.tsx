@@ -296,6 +296,13 @@ export default function DashboardPage() {
       case "lead_created":
         return `New lead created for ${customer}`
 
+      case "calendar_stage_event_created":
+        return `Calendar event scheduled for ${customer}`
+
+      case "calendar_stage_event_rescheduled":
+      case "calendar_event_rescheduled":
+        return `Calendar event changed for ${customer}`
+
       case "user_invitation_sent": {
         const invitedUser = String(
           event.meta?.full_name ||

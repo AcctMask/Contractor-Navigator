@@ -824,7 +824,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'voice_intake_alert_routed',
           'voice_address_match_ambiguous',
           'user_invitation_sent',
-          'user_invitation_accepted'
+          'user_invitation_accepted',
+          'calendar_stage_event_created',
+          'calendar_stage_event_rescheduled',
+          'calendar_event_rescheduled'
         )
       and lower(coalesce(te.kind, '')) not in (
           'voice_call_received',

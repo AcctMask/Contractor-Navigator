@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Calendar, dateFnsLocalizer } from "react-big-calendar"
+import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop"
 import { format } from "date-fns/format"
 import { parse } from "date-fns/parse"
 import { startOfWeek } from "date-fns/startOfWeek"
 import { getDay } from "date-fns/getDay"
 import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
+import "react-big-calendar/lib/addons/dragAndDrop/styles.css"
 import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
@@ -25,6 +27,17 @@ const localizer = dateFnsLocalizer({
   locales: { "en-US": enUS },
 })
 
+const DraggableCalendar = withDragAndDrop(Calendar as any) as any
+
+function dateTimeLocalValue(value: Date) {
+  if (!value || Number.isNaN(value.getTime())) return ""
+
+  const adjusted =
+    new Date(value.getTime() - value.getTimezoneOffset() * 60000)
+
+  return adjusted.toISOString().slice(0, 16)
+}
+
 type CalendarEvent = {
   id: number
   title: string
@@ -34,6 +47,10 @@ type CalendarEvent = {
   location?: string
   notes?: string
   event_type?: string
+  customer_name?: string
+  job_address?: string
+  automation_managed?: boolean
+  automation_stage_key?: string | null
 }
 
 export default function CalendarPage() {
@@ -63,13 +80,17 @@ export default function CalendarPage() {
 
       const mapped = (data.events || []).map((e: any) => ({
         id: Number(e.id),
-        title: `${e.event_type || "event"}: ${e.title || "Untitled"}`,
+        title: e.title || e.customer_name || "Untitled",
         start: new Date(e.start_time),
-        end: new Date(e.end_time),
+        end: new Date(e.end_time || e.start_time),
         job_id: e.job_id ? Number(e.job_id) : null,
-        location: e.location || "",
+        location: e.location || e.job_address || "",
         notes: e.notes || "",
         event_type: e.event_type || "",
+        customer_name: e.customer_name || "",
+        job_address: e.job_address || "",
+        automation_managed: Boolean(e.automation_managed),
+        automation_stage_key: e.automation_stage_key || null,
       }))
 
       setEvents(mapped)
@@ -174,6 +195,84 @@ export default function CalendarPage() {
     ].join("\n")
   }
 
+  async function saveCalendarTiming(
+    event: CalendarEvent,
+    start: Date,
+    end: Date,
+    auditSource: string,
+  ) {
+    try {
+      setMessage("Saving calendar change...")
+
+      const res = await fetch(
+        `${API_BASE}/calendar/${getTenantSlug()}/events/${event.id}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: event.title,
+            start_time: start.toISOString(),
+            end_time: end.toISOString(),
+            location: event.location || "",
+            notes: event.notes || "",
+            event_type: event.event_type || "general",
+            audit_source: auditSource,
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Calendar update failed")
+      }
+
+      setMessage("Calendar event updated.")
+      await loadEvents()
+    } catch (err: any) {
+      console.error("Calendar update failed:", err)
+      setMessage(err?.message || "Calendar update failed")
+      await loadEvents()
+    }
+  }
+
+  async function saveSelectedTiming() {
+    if (!selectedEvent) return
+
+    await saveCalendarTiming(
+      selectedEvent,
+      selectedEvent.start,
+      selectedEvent.end,
+      "calendar_manual_datetime_edit",
+    )
+  }
+
+  async function handleEventDrop({
+    event,
+    start,
+    end,
+  }: any) {
+    await saveCalendarTiming(
+      event as CalendarEvent,
+      new Date(start),
+      new Date(end),
+      "calendar_drag_drop",
+    )
+  }
+
+  async function handleEventResize({
+    event,
+    start,
+    end,
+  }: any) {
+    await saveCalendarTiming(
+      event as CalendarEvent,
+      new Date(start),
+      new Date(end),
+      "calendar_resize",
+    )
+  }
+
   useEffect(() => {
     loadEvents()
   }, [])
@@ -267,10 +366,44 @@ export default function CalendarPage() {
         <div style={{ background: "#111827", color: "white", borderRadius: 12, padding: 16, marginBottom: 20 }}>
           <h2 style={{ marginTop: 0 }}>Selected Event</h2>
           <p><strong>Title:</strong> {selectedEvent.title}</p>
-          <p><strong>Time:</strong> {selectedEvent.start.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })} - {selectedEvent.end.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })}</p>
+          <p><strong>Customer:</strong> {selectedEvent.customer_name || "Not linked"}</p>
           <p><strong>Job ID:</strong> {selectedEvent.job_id || "Not linked"}</p>
           <p><strong>Location:</strong> {selectedEvent.location || "Not provided"}</p>
           <p><strong>Notes:</strong> {selectedEvent.notes || "None"}</p>
+
+          <label style={{ display: "block", marginTop: 12 }}>
+            <strong>Start date / time</strong>
+          </label>
+          <input
+            type="datetime-local"
+            value={dateTimeLocalValue(selectedEvent.start)}
+            onChange={(e) =>
+              setSelectedEvent({
+                ...selectedEvent,
+                start: new Date(e.target.value),
+              })
+            }
+            style={inputStyle}
+          />
+
+          <label style={{ display: "block", marginTop: 8 }}>
+            <strong>End date / time</strong>
+          </label>
+          <input
+            type="datetime-local"
+            value={dateTimeLocalValue(selectedEvent.end)}
+            onChange={(e) =>
+              setSelectedEvent({
+                ...selectedEvent,
+                end: new Date(e.target.value),
+              })
+            }
+            style={inputStyle}
+          />
+
+          <button onClick={saveSelectedTiming} style={buttonStyle}>
+            Save Date / Time
+          </button>
 
           <button onClick={openSelectedJob} style={buttonStyle}>
             Open Job
@@ -287,13 +420,16 @@ export default function CalendarPage() {
       )}
 
       <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
-        <Calendar
+        <DraggableCalendar
           localizer={localizer}
           events={events}
           startAccessor="start"
           endAccessor="end"
           tooltipAccessor={tooltip}
           onSelectEvent={handleSelectEvent}
+          onEventDrop={handleEventDrop}
+          onEventResize={handleEventResize}
+          resizable
           views={["month", "week", "day", "agenda"]}
           culture="en-US"
           style={{ height: "100%" }}

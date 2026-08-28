@@ -1,5 +1,9 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
+import {
+  ensureCalendarAutomationFoundation,
+  recordCalendarRescheduleActivity,
+} from "../services/calendarAutomationService"
 
 async function ensureCalendarTable() {
   await pool.query(`
@@ -47,6 +51,9 @@ async function getTenantIdBySlug(slug: string): Promise<number> {
 }
 
 export async function registerCalendarRoutes(app: FastifyInstance) {
+  await ensureCalendarTable()
+  await ensureCalendarAutomationFoundation()
+
   app.get("/calendar/:tenantSlug/events", async (request: any, reply) => {
     try {
       await ensureCalendarTable()
@@ -57,19 +64,35 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
       const result = await pool.query(
         `
         select
-          id,
-          job_id,
-          title,
-          start_time,
-          end_time,
-          location,
-          notes,
-          event_type,
-          created_at,
-          updated_at
-        from calendar_events
-        where tenant_id = $1
-        order by start_time asc, id asc
+          ce.id,
+          ce.job_id,
+          ce.title,
+          ce.start_time,
+          ce.end_time,
+          ce.location,
+          ce.notes,
+          ce.event_type,
+          ce.automation_managed,
+          ce.automation_stage_key,
+          ce.created_at,
+          ce.updated_at,
+          c.full_name as customer_name,
+          concat_ws(
+            ', ',
+            nullif(trim(j.address1), ''),
+            nullif(trim(j.city), ''),
+            nullif(trim(j.state), ''),
+            nullif(trim(j.zip), '')
+          ) as job_address
+        from calendar_events ce
+        left join jobs j
+          on j.id = ce.job_id
+         and j.tenant_id = ce.tenant_id
+        left join customers c
+          on c.id = j.customer_id
+         and c.tenant_id = j.tenant_id
+        where ce.tenant_id = $1
+        order by ce.start_time asc, ce.id asc
         `,
         [tenantId]
       )
@@ -161,6 +184,34 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const body = request.body || {}
 
+      const previousResult = await pool.query(
+        `
+        select
+          id,
+          job_id,
+          title,
+          start_time,
+          end_time,
+          location,
+          notes,
+          event_type,
+          automation_managed,
+          automation_stage_key,
+          created_at,
+          updated_at
+        from calendar_events
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, Number(eventId)]
+      )
+
+      if (!previousResult.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Calendar event not found" }
+      }
+
       if (!body.title) {
         reply.code(400)
         return { ok: false, error: "Title is required" }
@@ -193,6 +244,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           location,
           notes,
           event_type,
+          automation_managed,
+          automation_stage_key,
           created_at,
           updated_at
         `,
@@ -212,6 +265,13 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
         reply.code(404)
         return { ok: false, error: "Calendar event not found" }
       }
+
+      await recordCalendarRescheduleActivity({
+        tenantId,
+        before: previousResult.rows[0],
+        after: result.rows[0],
+        source: body.audit_source || "calendar_ui",
+      })
 
       return { ok: true, event: result.rows[0] }
     } catch (err: any) {
