@@ -539,6 +539,25 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       [tenantId]
     );
 
+    const bySourceType = await pool.query(
+      `
+      select
+        coalesce(
+          nullif(trim(j.lead_source), ''),
+          nullif(trim(j.lead_source_detail), ''),
+          'unknown'
+        ) as source,
+        coalesce(nullif(trim(j.job_type), ''), 'unknown') as job_type,
+        count(*)::int as count
+      from jobs j
+      where j.tenant_id = $1
+      ${dateFilter}
+      group by 1, 2
+      order by 1 asc, count desc, 2 asc
+      `,
+      [tenantId]
+    );
+
     const byStage = await pool.query(
       `
       select
@@ -559,6 +578,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       range,
       by_source: bySource.rows,
       by_job_type: byJobType.rows,
+      by_source_type: bySourceType.rows,
       by_stage: byStage.rows,
     });
   });

@@ -8,11 +8,18 @@ type ReportRow = {
   count: number
 }
 
+type SourceTypeRow = {
+  source: string
+  job_type: string
+  count: number
+}
+
 type ReportData = {
   ok: boolean
   range: string
   by_source: ReportRow[]
   by_job_type: ReportRow[]
+  by_source_type: SourceTypeRow[]
   by_stage: ReportRow[]
 }
 
@@ -44,6 +51,8 @@ export default function ReportsPage() {
     workspace.dashboard.pipeline_cards || []
   )
 
+  const sourceTypeRows = buildSourceTypeRows(data?.by_source_type || [])
+
   return (
     <div style={page}>
       <h1>Reports</h1>
@@ -64,12 +73,87 @@ export default function ReportsPage() {
       {error && <p style={danger}>{error}</p>}
 
       <div style={grid}>
-        <ReportCard title="Jobs by Lead Source" rows={data?.by_source || []} />
-        <ReportCard title="Jobs by Type" rows={data?.by_job_type || []} />
+        <SourceTypeCard rows={sourceTypeRows} />
         <ReportCard title="Jobs by Stage" rows={stageRows} />
       </div>
     </div>
   )
+}
+
+type SourceTypeDisplayRow = {
+  source: string
+  types: Array<{ label: string; count: number }>
+  count: number
+}
+
+function buildSourceTypeRows(rows: SourceTypeRow[]): SourceTypeDisplayRow[] {
+  const grouped = new Map<string, SourceTypeDisplayRow>()
+
+  for (const row of rows) {
+    const source = String(row.source || "unknown")
+    const jobType = String(row.job_type || "unknown")
+    const count = Number(row.count || 0)
+
+    const current = grouped.get(source) || {
+      source,
+      types: [],
+      count: 0,
+    }
+
+    current.types.push({
+      label: humanizeReportValue(jobType),
+      count,
+    })
+    current.count += count
+    grouped.set(source, current)
+  }
+
+  return Array.from(grouped.values()).sort(
+    (a, b) => b.count - a.count || a.source.localeCompare(b.source)
+  )
+}
+
+function SourceTypeCard({ rows }: { rows: SourceTypeDisplayRow[] }) {
+  const total = rows.reduce((sum, row) => sum + row.count, 0)
+
+  return (
+    <section style={card}>
+      <h2>Jobs by Source & Type</h2>
+      <p style={muted}>Total: {total}</p>
+
+      {rows.length === 0 ? (
+        <p style={muted}>No data yet.</p>
+      ) : (
+        <div>
+          <div style={sourceTypeHeader}>
+            <strong>Source</strong>
+            <strong>Job Type</strong>
+            <strong style={{ textAlign: "right" }}>Total</strong>
+          </div>
+
+          {rows.map((row) => (
+            <div key={row.source} style={sourceTypeRow}>
+              <span>{humanizeReportValue(row.source)}</span>
+              <span style={sourceTypeList}>
+                {row.types.map((type) => (
+                  <span key={`${row.source}-${type.label}`}>
+                    {type.label} ({type.count})
+                  </span>
+                ))}
+              </span>
+              <strong style={{ textAlign: "right" }}>{row.count}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function humanizeReportValue(value: string) {
+  return String(value || "unknown")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function buildStageRows(
@@ -187,6 +271,31 @@ const card = {
   border: "1px solid rgba(148, 163, 184, 0.18)",
   borderRadius: "18px",
   padding: "20px",
+} as const
+
+const sourceTypeHeader = {
+  display: "grid",
+  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(150px, 1fr) 70px",
+  gap: "14px",
+  padding: "10px 0",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
+  opacity: 0.8,
+  fontSize: "13px",
+} as const
+
+const sourceTypeRow = {
+  display: "grid",
+  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(150px, 1fr) 70px",
+  gap: "14px",
+  alignItems: "start",
+  padding: "10px 0",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
+} as const
+
+const sourceTypeList = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
 } as const
 
 const rowStyle = {
