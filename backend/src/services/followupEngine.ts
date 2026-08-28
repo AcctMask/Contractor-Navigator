@@ -1286,7 +1286,8 @@ async function sendAutoClassificationReply(
   classification: InboundClassification,
   settings: DevSettings,
   fallbackPhone: string | null,
-  inboundMessage: string
+  inboundMessage: string,
+  replyFrom: string | null = null
 ) {
   const phone = (await getCustomerPhone(tenantId, job.customer_id)) || fallbackPhone
   if (!phone) {
@@ -1455,7 +1456,11 @@ async function sendAutoClassificationReply(
   )
 
   try {
-    const sms = await sendSMS(phone, replyMessage)
+    const sms = await sendSMS(
+      phone,
+      replyMessage,
+      tenantSlug === "actual-assistant-llc" ? replyFrom : null
+    )
 
     /*
      * Advance alternation only when the intended
@@ -3534,7 +3539,8 @@ export async function handleInboundMessageByTenantSlug(
     classification,
     settings,
     callbackNumber,
-    trimmed
+    trimmed,
+    replyFrom
   )
 
   return {
