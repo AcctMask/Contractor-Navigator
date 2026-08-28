@@ -10,6 +10,7 @@ type ReportRow = {
 
 type SourceTypeRow = {
   source: string
+  current_stage: string
   job_type: string
   count: number
 }
@@ -56,7 +57,7 @@ export default function ReportsPage() {
   return (
     <div style={page}>
       <h1>Reports</h1>
-      <p style={muted}>Track where jobs are coming from, what type they are, and where they sit in the pipeline.</p>
+      <p style={muted}>Track where opportunities come from, what they become, and where they currently sit in the pipeline.</p>
 
       <div style={buttonRow}>
         {["7d", "30d", "all"].map((r) => (
@@ -82,7 +83,11 @@ export default function ReportsPage() {
 
 type SourceTypeDisplayRow = {
   source: string
-  types: Array<{ label: string; count: number }>
+  outcomes: Array<{
+    stage: string
+    jobType: string
+    count: number
+  }>
   count: number
 }
 
@@ -91,21 +96,33 @@ function buildSourceTypeRows(rows: SourceTypeRow[]): SourceTypeDisplayRow[] {
 
   for (const row of rows) {
     const source = String(row.source || "unknown")
+    const currentStage = String(row.current_stage || "unknown")
     const jobType = String(row.job_type || "unknown")
     const count = Number(row.count || 0)
 
     const current = grouped.get(source) || {
       source,
-      types: [],
+      outcomes: [],
       count: 0,
     }
 
-    current.types.push({
-      label: humanizeReportValue(jobType),
+    current.outcomes.push({
+      stage: humanizeStage(currentStage),
+      jobType: humanizeReportJobType(jobType),
       count,
     })
+
     current.count += count
     grouped.set(source, current)
+  }
+
+  for (const row of grouped.values()) {
+    row.outcomes.sort(
+      (a, b) =>
+        b.count - a.count ||
+        a.stage.localeCompare(b.stage) ||
+        a.jobType.localeCompare(b.jobType)
+    )
   }
 
   return Array.from(grouped.values()).sort(
@@ -118,8 +135,8 @@ function SourceTypeCard({ rows }: { rows: SourceTypeDisplayRow[] }) {
 
   return (
     <section style={card}>
-      <h2>Jobs by Source & Type</h2>
-      <p style={muted}>Total: {total}</p>
+      <h2>Source Performance</h2>
+      <p style={muted}>Total opportunities: {total}</p>
 
       {rows.length === 0 ? (
         <p style={muted}>No data yet.</p>
@@ -127,27 +144,51 @@ function SourceTypeCard({ rows }: { rows: SourceTypeDisplayRow[] }) {
         <div>
           <div style={sourceTypeHeader}>
             <strong>Source</strong>
-            <strong>Job Type</strong>
+            <strong>Current Stage</strong>
+            <strong>Current Job Type</strong>
             <strong style={{ textAlign: "right" }}>Total</strong>
           </div>
 
           {rows.map((row) => (
-            <div key={row.source} style={sourceTypeRow}>
-              <span>{humanizeReportValue(row.source)}</span>
-              <span style={sourceTypeList}>
-                {row.types.map((type) => (
-                  <span key={`${row.source}-${type.label}`}>
-                    {type.label} ({type.count})
+            <div key={row.source} style={sourceGroup}>
+              {row.outcomes.map((outcome, index) => (
+                <div
+                  key={`${row.source}-${outcome.stage}-${outcome.jobType}`}
+                  style={sourceTypeRow}
+                >
+                  <span>
+                    {index === 0 ? humanizeReportValue(row.source) : ""}
                   </span>
-                ))}
-              </span>
-              <strong style={{ textAlign: "right" }}>{row.count}</strong>
+                  <span>{outcome.stage}</span>
+                  <span>{outcome.jobType}</span>
+                  <strong style={{ textAlign: "right" }}>
+                    {outcome.count}
+                  </strong>
+                </div>
+              ))}
+
+              <div style={sourceTotalRow}>
+                <span />
+                <span />
+                <strong>Source Total</strong>
+                <strong style={{ textAlign: "right" }}>{row.count}</strong>
+              </div>
             </div>
           ))}
         </div>
       )}
     </section>
   )
+}
+
+function humanizeReportJobType(value: string) {
+  const normalized = String(value || "unknown").trim()
+
+  if (normalized.toUpperCase() === "VOICE_INTAKE") {
+    return "Unclassified"
+  }
+
+  return humanizeReportValue(normalized)
 }
 
 function humanizeReportValue(value: string) {
@@ -275,7 +316,7 @@ const card = {
 
 const sourceTypeHeader = {
   display: "grid",
-  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(150px, 1fr) 70px",
+  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
   gap: "14px",
   padding: "10px 0",
   borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
@@ -285,17 +326,24 @@ const sourceTypeHeader = {
 
 const sourceTypeRow = {
   display: "grid",
-  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(150px, 1fr) 70px",
+  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
   gap: "14px",
   alignItems: "start",
   padding: "10px 0",
   borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
 } as const
 
-const sourceTypeList = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "4px",
+const sourceGroup = {
+  borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
+} as const
+
+const sourceTotalRow = {
+  display: "grid",
+  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
+  gap: "14px",
+  padding: "8px 0 12px",
+  opacity: 0.82,
+  fontSize: "13px",
 } as const
 
 const rowStyle = {

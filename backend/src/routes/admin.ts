@@ -547,13 +547,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           nullif(trim(j.lead_source_detail), ''),
           'unknown'
         ) as source,
+        coalesce(nullif(trim(j.stage), ''), 'unknown') as current_stage,
         coalesce(nullif(trim(j.job_type), ''), 'unknown') as job_type,
         count(*)::int as count
       from jobs j
       where j.tenant_id = $1
       ${dateFilter}
-      group by 1, 2
-      order by 1 asc, count desc, 2 asc
+      group by 1, 2, 3
+      order by 1 asc, count desc, 2 asc, 3 asc
       `,
       [tenantId]
     );
