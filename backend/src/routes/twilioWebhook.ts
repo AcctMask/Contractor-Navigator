@@ -389,10 +389,11 @@ async function hasFollowupSmsForCall(callSid: string | null | undefined) {
   return Boolean(result.rowCount)
 }
 
-async function getLatestJobByPhone(phone: string | null) {
+async function getLatestJobByPhone(
+  phone: string | null,
+  tenantId: number
+) {
   if (!phone) return null
-
-  const tenantId = 1
 
   const activeJobId = await getActiveConversationJob(tenantId, phone)
 
@@ -408,9 +409,10 @@ async function getLatestJobByPhone(phone: string | null) {
       join tenants t
         on t.id = j.tenant_id
       where j.id = $1
+        and j.tenant_id = $2
       limit 1
       `,
-      [activeJobId]
+      [activeJobId, tenantId]
     )
 
     if (activeJob.rowCount) {
@@ -447,8 +449,9 @@ async function getLatestJobByPhone(phone: string | null) {
     left join latest_outbound lo
       on lo.tenant_id = j.tenant_id
      and lo.job_id = j.id
-    where regexp_replace(c.phone, '\\D', '', 'g')
-      = regexp_replace($1, '\\D', '', 'g')
+    where j.tenant_id = $2
+      and regexp_replace(c.phone, '\\D', '', 'g')
+        = regexp_replace($1, '\\D', '', 'g')
     order by
       case when lo.last_outbound_at is not null then 0 else 1 end,
       lo.last_outbound_at desc nulls last,
@@ -463,7 +466,7 @@ async function getLatestJobByPhone(phone: string | null) {
       j.id desc
     limit 1
     `,
-    [phone]
+    [phone, tenantId]
   )
 
   if (!result.rowCount) return null
@@ -1053,13 +1056,30 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     const body = (req as any).body || {}
 
     const from = normalizePhone(body.From ? String(body.From) : null)
+    const to = normalizePhone(body.To ? String(body.To) : null)
     const message = String(body.Body || "").trim()
 
     if (!from || !message) {
       return reply.send({ ok: true, skipped: true })
     }
 
-    const latest = await getLatestJobByPhone(from)
+    const tenantSlug = resolveInboundVoiceTenant(to)
+
+    if (!tenantSlug || !to) {
+      req.log.warn(
+        { to, from },
+        "Inbound Twilio SMS rejected: destination number is not assigned to a Navigator tenant"
+      )
+
+      return reply.send({
+        ok: true,
+        skipped: true,
+        reason: "unrecognized_destination_number",
+      })
+    }
+
+    const tenantId = await getTenantIdBySlug(tenantSlug)
+    const latest = await getLatestJobByPhone(from, tenantId)
 
     if (detectDncOptOut(message)) {
       if (latest) {
@@ -1099,7 +1119,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       try {
         await sendSMS(
           from,
-          "You have been opted out of automated text messages from Good2Go Roofing. Reply START if you want to opt back in."
+          `You have been opted out of automated text messages from ${tenantSlug === "actual-assistant-llc" ? "Actual Assistant" : "Good2Go Roofing"}. Reply START if you want to opt back in.`,
+          to
         )
       } catch {}
 
@@ -1130,7 +1151,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       try {
         await sendSMS(
           from,
-          "You have been opted back in for automated text messages from Good2Go Roofing."
+          `You have been opted back in for automated text messages from ${tenantSlug === "actual-assistant-llc" ? "Actual Assistant" : "Good2Go Roofing"}.`,
+          to
         )
       } catch {}
 
@@ -1164,7 +1186,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       String(latest.tenant_slug),
       Number(latest.job_id),
       message,
-      from
+      from,
+      to
     )
 
     return reply.send(response)

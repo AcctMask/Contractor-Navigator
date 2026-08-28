@@ -19,8 +19,28 @@ function getClient() {
   return client
 }
 
-export async function sendSMS(to: string, body: string) {
+export async function sendSMS(
+  to: string,
+  body: string,
+  explicitFrom?: string | null
+) {
   const twilioClient = getClient()
+
+  if (explicitFrom) {
+    const message = await twilioClient.messages.create({
+      body,
+      from: explicitFrom,
+      to,
+    })
+
+    return {
+      sid: message.sid,
+      status: message.status,
+      to,
+      sender_type: "direct_number",
+      from: explicitFrom,
+    }
+  }
 
   if (messagingServiceSid) {
     const message = await twilioClient.messages.create({

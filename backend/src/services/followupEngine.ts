@@ -2521,7 +2521,8 @@ export async function handleInboundMessageByTenantSlug(
   tenantSlug: string,
   jobId: number,
   inboundMessage: string,
-  from: string | null
+  from: string | null,
+  replyFrom: string | null = null
 ) {
   const tenantId = await getTenantIdBySlug(tenantSlug)
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
@@ -2679,10 +2680,7 @@ export async function handleInboundMessageByTenantSlug(
     if (callbackNumber) {
       try {
         const sms =
-          await sendSMS(
-            callbackNumber,
-            apology
-          )
+          await sendSMS(callbackNumber, apology, replyFrom)
 
         apologyResult = {
           sent: true,
@@ -2938,7 +2936,7 @@ export async function handleInboundMessageByTenantSlug(
         ? `Hi ${String(job.customer_name || "there").trim().split(/\s+/)[0]} — got your message. Briefly, what do you need help with? For example: roof leak, estimate, inspection, tarp, repair, or insurance claim.`
         : "Got it — what’s your full name?"
 
-      await sendSMS(callbackNumber, question)
+      await sendSMS(callbackNumber, question, replyFrom)
 
       await addTimelineEvent(
         tenantId,
@@ -3076,7 +3074,7 @@ export async function handleInboundMessageByTenantSlug(
 
       const nextQuestion = "Thanks — what’s the property address or ZIP?"
 
-      await sendSMS(callbackNumber, nextQuestion)
+      await sendSMS(callbackNumber, nextQuestion, replyFrom)
 
       await addTimelineEvent(
         tenantId,
@@ -3118,7 +3116,7 @@ export async function handleInboundMessageByTenantSlug(
     const nextQuestion =
       "Thanks — briefly, what do you need help with? For example: roof leak, estimate, inspection, tarp, repair, or insurance claim."
 
-    await sendSMS(callbackNumber, nextQuestion)
+    await sendSMS(callbackNumber, nextQuestion, replyFrom)
 
     await addTimelineEvent(
       tenantId,
@@ -3170,7 +3168,7 @@ export async function handleInboundMessageByTenantSlug(
       message: trimmed,
     })
 
-    const sms = await sendSMS(callbackNumber, salesIntentReply)
+    const sms = await sendSMS(callbackNumber, salesIntentReply, replyFrom)
 
     await addTimelineEvent(
       tenantId,
