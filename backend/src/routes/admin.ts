@@ -513,7 +513,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const bySource = await pool.query(
       `
       select
-        coalesce(nullif(trim(j.lead_source_detail), ''), nullif(trim(j.lead_source), ''), 'unknown') as label,
+        coalesce(nullif(trim(j.lead_source), ''), nullif(trim(j.lead_source_detail), ''), 'unknown') as label,
         count(*)::int as count
       from jobs j
       where j.tenant_id = $1

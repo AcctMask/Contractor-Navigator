@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useCompanyDna } from "../context/CompanyDnaContext"
 import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
@@ -16,6 +17,7 @@ type ReportData = {
 }
 
 export default function ReportsPage() {
+  const { workspace } = useCompanyDna()
   const [range, setRange] = useState("30d")
   const [data, setData] = useState<ReportData | null>(null)
   const [error, setError] = useState("")
@@ -36,6 +38,11 @@ export default function ReportsPage() {
   useEffect(() => {
     loadReports(range)
   }, [range])
+
+  const stageRows = buildStageRows(
+    data?.by_stage || [],
+    workspace.dashboard.pipeline_cards || []
+  )
 
   return (
     <div style={page}>
@@ -59,10 +66,82 @@ export default function ReportsPage() {
       <div style={grid}>
         <ReportCard title="Jobs by Lead Source" rows={data?.by_source || []} />
         <ReportCard title="Jobs by Type" rows={data?.by_job_type || []} />
-        <ReportCard title="Jobs by Stage" rows={data?.by_stage || []} />
+        <ReportCard title="Jobs by Stage" rows={stageRows} />
       </div>
     </div>
   )
+}
+
+function buildStageRows(
+  rows: ReportRow[],
+  pipelineCards: Array<{
+    label: string
+    filter_type: "stage" | "stage_any" | "buying_signal"
+    filter_value?: string | null
+    filter_values?: string[]
+  }>
+): ReportRow[] {
+  const counts = new Map(
+    rows.map((row) => [
+      String(row.label || "unknown"),
+      Number(row.count || 0),
+    ])
+  )
+
+  const consumedStages = new Set<string>()
+  const configuredRows: ReportRow[] = []
+
+  for (const card of pipelineCards) {
+    if (card.filter_type === "buying_signal") {
+      continue
+    }
+
+    if (card.filter_type === "stage") {
+      const stage = String(card.filter_value || "").trim()
+      if (!stage) continue
+
+      configuredRows.push({
+        label: card.label || humanizeStage(stage),
+        count: counts.get(stage) || 0,
+      })
+
+      consumedStages.add(stage)
+      continue
+    }
+
+    const stages = (card.filter_values || [])
+      .map((stage) => String(stage || "").trim())
+      .filter(Boolean)
+
+    if (!stages.length) continue
+
+    configuredRows.push({
+      label: card.label || stages.map(humanizeStage).join(" / "),
+      count: stages.reduce(
+        (sum, stage) => sum + (counts.get(stage) || 0),
+        0
+      ),
+    })
+
+    for (const stage of stages) {
+      consumedStages.add(stage)
+    }
+  }
+
+  const unexpectedRows = rows
+    .filter((row) => !consumedStages.has(String(row.label || "unknown")))
+    .map((row) => ({
+      label: humanizeStage(String(row.label || "unknown")),
+      count: Number(row.count || 0),
+    }))
+
+  return [...configuredRows, ...unexpectedRows]
+}
+
+function humanizeStage(value: string) {
+  return String(value || "unknown")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function ReportCard({ title, rows }: { title: string; rows: ReportRow[] }) {
