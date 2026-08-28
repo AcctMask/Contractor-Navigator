@@ -73,9 +73,11 @@ export default function ReportsPage() {
 
       {error && <p style={danger}>{error}</p>}
 
-      <div style={grid}>
+      <div style={reportsLayout}>
         <SourceTypeCard rows={sourceTypeRows} />
-        <ReportCard title="Jobs by Stage" rows={stageRows} />
+        <div style={stageSection}>
+          <ReportCard title="Jobs by Stage" rows={stageRows} />
+        </div>
       </div>
     </div>
   )
@@ -300,11 +302,15 @@ const page = {
   padding: "24px",
 } as const
 
-const grid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+const reportsLayout = {
+  display: "flex",
+  flexDirection: "column",
   gap: "18px",
   marginTop: "20px",
+} as const
+
+const stageSection = {
+  width: "100%",
 } as const
 
 const card = {
