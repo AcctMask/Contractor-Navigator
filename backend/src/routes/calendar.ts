@@ -4,6 +4,62 @@ import {
   ensureCalendarAutomationFoundation,
   recordCalendarRescheduleActivity,
 } from "../services/calendarAutomationService"
+import { getCurrentUserFromToken } from "../services/authService"
+
+function getBearerToken(request: any) {
+  const auth = String(request.headers.authorization || "")
+  return auth.startsWith("Bearer ") ? auth.slice(7) : ""
+}
+
+async function requireCalendarUser(
+  request: any,
+  reply: any,
+  tenantId: number
+) {
+  const token = getBearerToken(request)
+
+  if (!token) {
+    reply.code(401)
+    return null
+  }
+
+  try {
+    const user = await getCurrentUserFromToken(token)
+
+    if (!user?.is_active) {
+      reply.code(401)
+      return null
+    }
+
+    if (
+      String(user.role) !== "platform_owner" &&
+      Number(user.tenant_id) !== tenantId
+    ) {
+      reply.code(403)
+      return null
+    }
+
+    return user
+  } catch {
+    reply.code(401)
+    return null
+  }
+}
+
+function calendarActorMeta(user: any) {
+  return {
+    actor_name:
+      user?.full_name ||
+      user?.email ||
+      "User",
+    actor_email:
+      user?.email ||
+      null,
+    actor_user_id:
+      user?.id ||
+      null,
+  }
+}
 
 async function ensureCalendarTable() {
   await pool.query(`
@@ -77,6 +133,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           ce.created_at,
           ce.updated_at,
           c.full_name as customer_name,
+          j.stage as job_stage,
           concat_ws(
             ', ',
             nullif(trim(j.address1), ''),
@@ -113,6 +170,11 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const actor = await requireCalendarUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
 
       const body = request.body || {}
 
@@ -167,6 +229,38 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
         ]
       )
 
+      if (result.rows[0]?.job_id) {
+        await pool.query(
+          `
+          insert into timeline_events (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+          values ($1, $2, $3, $4, $5::jsonb, now())
+          `,
+          [
+            tenantId,
+            Number(result.rows[0].job_id),
+            "calendar_event_created",
+            `Calendar event created by ${
+              actor.full_name || actor.email || "User"
+            }: ${result.rows[0].title}`,
+            JSON.stringify({
+              ...calendarActorMeta(actor),
+              event_id: result.rows[0].id,
+              event_type: result.rows[0].event_type,
+              start_time: result.rows[0].start_time,
+              end_time: result.rows[0].end_time,
+              source: "calendar_ui",
+            }),
+          ]
+        )
+      }
+
       return {
         ok: true,
         event: result.rows[0],
@@ -182,6 +276,12 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       const { tenantSlug, eventId } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const actor = await requireCalendarUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
+
       const body = request.body || {}
 
       const previousResult = await pool.query(
@@ -271,6 +371,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
         before: previousResult.rows[0],
         after: result.rows[0],
         source: body.audit_source || "calendar_ui",
+        actor: calendarActorMeta(actor),
       })
 
       return { ok: true, event: result.rows[0] }
@@ -286,13 +387,24 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       const { tenantSlug, eventId } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const actor = await requireCalendarUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
 
       const result = await pool.query(
         `
         delete from calendar_events
         where tenant_id = $1
           and id = $2
-        returning id
+        returning
+          id,
+          job_id,
+          title,
+          start_time,
+          end_time,
+          event_type
         `,
         [tenantId, Number(eventId)]
       )
@@ -300,6 +412,40 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
       if (!result.rowCount) {
         reply.code(404)
         return { ok: false, error: "Calendar event not found" }
+      }
+
+      const deleted = result.rows[0]
+
+      if (deleted?.job_id) {
+        await pool.query(
+          `
+          insert into timeline_events (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+          values ($1, $2, $3, $4, $5::jsonb, now())
+          `,
+          [
+            tenantId,
+            Number(deleted.job_id),
+            "calendar_event_deleted",
+            `Calendar event deleted by ${
+              actor.full_name || actor.email || "User"
+            }: ${deleted.title}`,
+            JSON.stringify({
+              ...calendarActorMeta(actor),
+              event_id: deleted.id,
+              event_type: deleted.event_type,
+              start_time: deleted.start_time,
+              end_time: deleted.end_time,
+              source: "calendar_ui",
+            }),
+          ]
+        )
       }
 
       return { ok: true, deleted_event_id: Number(eventId) }

@@ -6,6 +6,7 @@ import {
   tenantDisplayName,
 } from "../lib/tenant"
 import { useCompanyDna } from "../context/CompanyDnaContext"
+import { stagePresentation } from "../lib/stagePresentation"
 
 const API_BASE = import.meta.env.VITE_API_BASE
 type DashboardJob = {
@@ -61,12 +62,12 @@ type CalendarEventSummary = {
   id: number
   title?: string | null
   event_type?: string | null
-  start_at?: string | null
-  end_at?: string | null
-  status?: string | null
-  assigned_to?: string | null
+  start_time?: string | null
+  end_time?: string | null
   customer_name?: string | null
   job_id?: number | null
+  automation_managed?: boolean
+  automation_stage_key?: string | null
 }
 
 function fmtDate(value?: string | null) {
@@ -124,7 +125,7 @@ export default function DashboardPage() {
 
       const [jobsRes, eventsRes, recentActivityRes] = await Promise.all([
         fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=250`),
-        fetch(`${API_BASE}/admin/calendar/${getTenantSlug()}?limit=20`),
+        fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`),
         fetch(`${API_BASE}/admin/recent-activity/${getTenantSlug()}?limit=10`)
       ])
 
@@ -236,8 +237,8 @@ export default function DashboardPage() {
   const newestJobs = filteredJobs.slice(0, 10)
   const upcomingEvents = [...events]
     .sort((a, b) => {
-      const aTime = new Date(a.start_at || 0).getTime()
-      const bTime = new Date(b.start_at || 0).getTime()
+      const aTime = new Date(a.start_time || 0).getTime()
+      const bTime = new Date(b.start_time || 0).getTime()
       return aTime - bTime
     })
     .slice(0, 6)
@@ -459,45 +460,57 @@ export default function DashboardPage() {
                 label,
                 count,
                 attention,
-              }) => (
-                <button
-                  key={id}
-                  onClick={() =>
-                    setSelectedStage(
-                      selectedStage === id
-                        ? null
-                        : id,
-                    )
-                  }
-                  style={{
-                    ...statCard,
-                    ...(attention
-                      ? statCardAttention
-                      : {}),
-                    ...(selectedStage === id
-                      ? statCardActive
-                      : {}),
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                >
-                  <div style={statNumber}>
-                    {loading
-                      ? "…"
-                      : count}
-                  </div>
+                filter_type,
+                filter_value,
+              }) => {
+                const stageColors =
+                  filter_type === "stage"
+                    ? stagePresentation(
+                        String(filter_value || ""),
+                      )
+                    : null
 
-                  <div style={statLabel}>
-                    {label}
-                  </div>
+                return (
+                  <button
+                    key={id}
+                    onClick={() =>
+                      setSelectedStage(
+                        selectedStage === id
+                          ? null
+                          : id,
+                      )
+                    }
+                    style={{
+                      ...statCard,
+                      ...(stageColors || {}),
+                      ...(attention
+                        ? statCardAttention
+                        : {}),
+                      ...(selectedStage === id
+                        ? statCardActive
+                        : {}),
+                      cursor: "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div style={statNumber}>
+                      {loading
+                        ? "…"
+                        : count}
+                    </div>
 
-                  <div style={statSub}>
-                    {selectedStage === id
-                      ? "Showing below"
-                      : "Click to filter"}
-                  </div>
-                </button>
-              ),
+                    <div style={statLabel}>
+                      {label}
+                    </div>
+
+                    <div style={statSub}>
+                      {selectedStage === id
+                        ? "Showing below"
+                        : "Click to filter"}
+                    </div>
+                  </button>
+                )
+              },
             )}
           </section>
 
@@ -597,8 +610,7 @@ export default function DashboardPage() {
                       <div style={{ fontWeight: 800, marginBottom: 6 }}>
                         {event.title || "Untitled Event"}
                       </div>
-                      <div>{fmtDate(event.start_at)}</div>
-                      <div>Status: {event.status || "scheduled"}</div>
+                      <div>{fmtDate(event.start_time)}</div>
                       <div>Type: {event.event_type || "appointment"}</div>
                       <div>Customer: {event.customer_name || "—"}</div>
                       {event.job_id ? (

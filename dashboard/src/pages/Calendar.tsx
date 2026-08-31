@@ -10,6 +10,7 @@ import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
 import "react-big-calendar/lib/addons/dragAndDrop/styles.css"
 import { getTenantSlug } from "../lib/tenant"
+import { stagePresentation } from "../lib/stagePresentation"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const EASTERN_TIME_ZONE = "America/New_York"
@@ -51,6 +52,7 @@ type CalendarEvent = {
   job_address?: string
   automation_managed?: boolean
   automation_stage_key?: string | null
+  job_stage?: string | null
 }
 
 export default function CalendarPage() {
@@ -91,6 +93,7 @@ export default function CalendarPage() {
         job_address: e.job_address || "",
         automation_managed: Boolean(e.automation_managed),
         automation_stage_key: e.automation_stage_key || null,
+        job_stage: e.job_stage || null,
       }))
 
       setEvents(mapped)
@@ -441,6 +444,22 @@ export default function CalendarPage() {
           startAccessor="start"
           endAccessor="end"
           tooltipAccessor={tooltip}
+          eventPropGetter={(event: CalendarEvent) => {
+            const heat = stagePresentation(
+              event.automation_stage_key || event.job_stage
+            )
+
+            return {
+              style: {
+                backgroundColor: heat.backgroundColor,
+                borderColor: heat.borderColor,
+                color: heat.color,
+                borderWidth: 2,
+                borderStyle: "solid",
+                fontWeight: 700,
+              },
+            }
+          }}
           onSelectEvent={handleSelectEvent}
           onEventDrop={handleEventDrop}
           onEventResize={handleEventResize}

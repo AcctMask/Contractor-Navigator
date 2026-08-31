@@ -393,6 +393,11 @@ export async function recordCalendarRescheduleActivity(args: {
   before: CalendarEventRow
   after: CalendarEventRow
   source?: string
+  actor?: {
+    actor_name?: string | null
+    actor_email?: string | null
+    actor_user_id?: number | string | null
+  }
 }) {
   const { tenantId, before, after } = args
 
@@ -449,6 +454,7 @@ export async function recordCalendarRescheduleActivity(args: {
         new_start_time: after.start_time || null,
         new_end_time: after.end_time || null,
         source: args.source || "calendar_update",
+        ...(args.actor || {}),
       }),
     ]
   )
