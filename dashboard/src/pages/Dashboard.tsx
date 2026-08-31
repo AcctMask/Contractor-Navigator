@@ -235,10 +235,23 @@ export default function DashboardPage() {
       : sortedJobs
 
   const newestJobs = filteredJobs.slice(0, 10)
-  const upcomingEvents = [...events]
+  const now = Date.now()
+
+  const upcomingEvents = events
+    .filter((event) => {
+      const startTime = new Date(event.start_time || "").getTime()
+      if (Number.isNaN(startTime)) return false
+
+      const endTime = new Date(event.end_time || "").getTime()
+      const effectiveEndTime = Number.isNaN(endTime)
+        ? startTime
+        : endTime
+
+      return effectiveEndTime >= now
+    })
     .sort((a, b) => {
-      const aTime = new Date(a.start_time || 0).getTime()
-      const bTime = new Date(b.start_time || 0).getTime()
+      const aTime = new Date(a.start_time || "").getTime()
+      const bTime = new Date(b.start_time || "").getTime()
       return aTime - bTime
     })
     .slice(0, 6)
