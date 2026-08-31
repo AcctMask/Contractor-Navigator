@@ -137,7 +137,11 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
   return result.rows as SchedJob[]
 }
 
-async function getStageStats(jobId: number, stage: string): Promise<StageStats> {
+async function getStageStats(
+  jobId: number,
+  stage: string,
+  workflowStartedAt: string | null
+): Promise<StageStats> {
   const result = await pool.query(
     `
     select
@@ -147,8 +151,17 @@ async function getStageStats(jobId: number, stage: string): Promise<StageStats> 
     where job_id = $1
       and lower(kind) = $3
       and coalesce(meta->>'stage', '') = $2
+      and (
+        $4::timestamptz is null
+        or created_at >= $4::timestamptz
+      )
     `,
-    [jobId, stage, AI_FOLLOWUP_PROGRESS_KIND]
+    [
+      jobId,
+      stage,
+      AI_FOLLOWUP_PROGRESS_KIND,
+      workflowStartedAt,
+    ]
   )
 
   return {
@@ -324,7 +337,11 @@ async function processJob(job: SchedJob) {
     workflowClockAt
   )
 
-  const stats = await getStageStats(job.id, automationKey)
+  const stats = await getStageStats(
+    job.id,
+    automationKey,
+    job.followup_workflow_started_at
+  )
 
   const continuousOperationalWorkflow =
     automationKey === "wa_sent" ||

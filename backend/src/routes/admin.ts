@@ -846,6 +846,9 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'voice_address_match_ambiguous',
           'user_invitation_sent',
           'user_invitation_accepted',
+          'manual_stage_updated',
+          'ai_followup_workflow_started',
+          'ai_followup_workflow_restarted',
           'calendar_stage_event_created',
           'calendar_stage_event_rescheduled',
           'calendar_event_rescheduled'
