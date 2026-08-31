@@ -235,7 +235,9 @@ export default function DashboardPage() {
       : sortedJobs
 
   const newestJobs = filteredJobs.slice(0, 10)
-  const now = Date.now()
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const startOfToday = today.getTime()
 
   const upcomingEvents = events
     .filter((event) => {
@@ -247,7 +249,7 @@ export default function DashboardPage() {
         ? startTime
         : endTime
 
-      return effectiveEndTime >= now
+      return effectiveEndTime >= startOfToday
     })
     .sort((a, b) => {
       const aTime = new Date(a.start_time || "").getTime()
