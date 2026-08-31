@@ -10,6 +10,7 @@ import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
 import "react-big-calendar/lib/addons/dragAndDrop/styles.css"
 import { getTenantSlug } from "../lib/tenant"
+import { getToken } from "../lib/auth"
 import { stagePresentation } from "../lib/stagePresentation"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
@@ -42,6 +43,7 @@ function dateTimeLocalValue(value: Date) {
 type CalendarEvent = {
   id: number
   title: string
+  stored_title: string
   start: Date
   end: Date
   job_id?: number | null
@@ -53,6 +55,32 @@ type CalendarEvent = {
   automation_managed?: boolean
   automation_stage_key?: string | null
   job_stage?: string | null
+}
+
+function calendarDisplayTitle(
+  title?: string | null,
+  customerName?: string | null
+) {
+  const storedTitle = String(title || "").trim()
+  const customer = String(customerName || "").trim()
+
+  if (!customer) {
+    return storedTitle || "Untitled"
+  }
+
+  if (!storedTitle) {
+    return customer
+  }
+
+  if (
+    storedTitle
+      .toLowerCase()
+      .includes(customer.toLowerCase())
+  ) {
+    return storedTitle
+  }
+
+  return `${customer} — ${storedTitle}`
 }
 
 export default function CalendarPage() {
@@ -82,7 +110,8 @@ export default function CalendarPage() {
 
       const mapped = (data.events || []).map((e: any) => ({
         id: Number(e.id),
-        title: e.title || e.customer_name || "Untitled",
+        title: calendarDisplayTitle(e.title, e.customer_name),
+        stored_title: e.title || e.customer_name || "Untitled",
         start: new Date(e.start_time),
         end: new Date(e.end_time || e.start_time),
         job_id: e.job_id ? Number(e.job_id) : null,
@@ -113,7 +142,10 @@ export default function CalendarPage() {
 
       const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+        },
         body: JSON.stringify({
           title,
           job_id: jobId ? Number(jobId) : null,
@@ -171,6 +203,9 @@ export default function CalendarPage() {
 
       const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events/${selectedEvent.id}`, {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
       })
 
       const data = await res.json()
@@ -211,9 +246,12 @@ export default function CalendarPage() {
         `${API_BASE}/calendar/${getTenantSlug()}/events/${event.id}`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
           body: JSON.stringify({
-            title: event.title,
+            title: event.stored_title,
             start_time: start.toISOString(),
             end_time: end.toISOString(),
             location: event.location || "",
