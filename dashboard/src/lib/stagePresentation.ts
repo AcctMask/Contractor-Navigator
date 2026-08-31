@@ -16,8 +16,8 @@ export function stagePresentation(
     case "callback":
     case "inspection":
       return {
-        backgroundColor: "#fde68a",
-        borderColor: "#d6a514",
+        backgroundColor: "#fbd650",
+        borderColor: "#bb8410",
         color: "#111827",
       }
 
@@ -25,8 +25,8 @@ export function stagePresentation(
     case "estimate_sent":
     case "wa_sent":
       return {
-        backgroundColor: "#fdba74",
-        borderColor: "#e07a28",
+        backgroundColor: "#fda158",
+        borderColor: "#d15e1a",
         color: "#111827",
       }
 
@@ -34,24 +34,24 @@ export function stagePresentation(
     case "contract_sent":
     case "tarp":
       return {
-        backgroundColor: "#fca5a5",
-        borderColor: "#dc6262",
+        backgroundColor: "#f57575",
+        borderColor: "#ba3f3f",
         color: "#111827",
       }
 
     // Major commitment / production preparation
     case "pre_production":
       return {
-        backgroundColor: "#93c5fd",
-        borderColor: "#4f8ed8",
+        backgroundColor: "#5c94f4",
+        borderColor: "#3764b1",
         color: "#111827",
       }
 
     // Hottest active production state
     case "in_production":
       return {
-        backgroundColor: "#f8fafc",
-        borderColor: "#93a4ba",
+        backgroundColor: "#fcfdfe",
+        borderColor: "#5879c9",
         color: "#111827",
       }
 
@@ -59,23 +59,23 @@ export function stagePresentation(
     case "tarp_complete":
     case "completed":
       return {
-        backgroundColor: "#bbf7d0",
-        borderColor: "#62b982",
+        backgroundColor: "#a1f3be",
+        borderColor: "#3cae66",
         color: "#111827",
       }
 
     // Financial completion progression
     case "invoiced":
       return {
-        backgroundColor: "#86efac",
-        borderColor: "#4eae70",
+        backgroundColor: "#54da85",
+        borderColor: "#329758",
         color: "#111827",
       }
 
     case "paid":
       return {
-        backgroundColor: "#4ade80",
-        borderColor: "#2d9955",
+        backgroundColor: "#30af5f",
+        borderColor: "#21663f",
         color: "#111827",
       }
 
@@ -84,16 +84,16 @@ export function stagePresentation(
     case "dnc":
     case "archived":
       return {
-        backgroundColor: "#cbd5e1",
-        borderColor: "#94a3b8",
+        backgroundColor: "#b4bcc8",
+        borderColor: "#707c8e",
         color: "#111827",
       }
 
     // Neutral fallback for non-stage / unknown presentation.
     default:
       return {
-        backgroundColor: "#e2e8f0",
-        borderColor: "#a8b5c7",
+        backgroundColor: "#dfe7eb",
+        borderColor: "#849db0",
         color: "#111827",
       }
   }

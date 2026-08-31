@@ -873,20 +873,20 @@ const statNumber: CSSProperties = {
   fontWeight: 800,
   lineHeight: 1,
   marginBottom: "6px",
-  color: "#ffffff",
+  color: "#111827",
 }
 
 const statLabel: CSSProperties = {
   fontSize: "13px",
   fontWeight: 800,
-  color: "#ffffff",
+  color: "#111827",
   textTransform: "capitalize",
 }
 
 const statSub: CSSProperties = {
   fontSize: "12px",
   opacity: 0.9,
-  color: "#dbeafe",
+  color: "#111827",
   marginTop: "6px",
 }
 
