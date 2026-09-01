@@ -77,6 +77,99 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         params
       )
 
+      // Historical production milestones are intentionally independent
+      // of the job's current CRM stage.
+      //
+      // A completed tarp remains a completed tarp even if that property
+      // later becomes a roof job and advances through the roofing pipeline.
+      //
+      // A completed roof is an actual roofing-production job that is
+      // currently completed or has historical stage-transition evidence
+      // showing it reached completed. Estimate-only roof records are excluded.
+      //
+      // The same job may therefore count once as a completed tarp and once
+      // as a completed roof. That overlap is the tarp-to-roof conversion.
+      const productionMilestonesResult = await pool.query(
+        `
+          with production_jobs as (
+            select
+              j.id,
+              j.tenant_id,
+              lower(coalesce(trim(j.job_type), '')) as job_type,
+              coalesce(j.stage, '') as current_stage,
+              (
+                coalesce(j.tarp_conversion_active, false) = true
+                or j.stage = 'tarp_complete'
+                or exists (
+                  select 1
+                  from timeline_events te
+                  where te.tenant_id = j.tenant_id
+                    and te.job_id = j.id
+                    and te.kind = 'manual_stage_updated'
+                    and coalesce(te.meta->>'stage', '') = 'tarp_complete'
+                )
+              ) as completed_tarp,
+              (
+                (
+                  lower(coalesce(trim(j.job_type), '')) = 'roof'
+                  or lower(coalesce(trim(j.job_type), '')) = 'roof_replacement'
+                  or lower(coalesce(trim(j.job_type), '')) like '%roof replacement%'
+                  or lower(coalesce(trim(j.job_type), '')) like '%new build roof%'
+                  or lower(coalesce(trim(j.job_type), '')) like '%roof installation%'
+                  or lower(coalesce(trim(j.job_type), '')) = 'residential roofing'
+                )
+                and lower(coalesce(trim(j.job_type), '')) not like '%estimate only%'
+                and (
+                  j.stage = 'completed'
+                  or exists (
+                    select 1
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind = 'manual_stage_updated'
+                      and coalesce(te.meta->>'stage', '') = 'completed'
+                  )
+                )
+              ) as completed_roof
+            from jobs j
+            ${tenant ? "where j.tenant_id = $1" : ""}
+          )
+          select
+            count(*) filter (
+              where completed_tarp
+            )::int as completed_tarps,
+            count(*) filter (
+              where completed_roof
+            )::int as completed_roofs,
+            count(*) filter (
+              where completed_tarp and completed_roof
+            )::int as tarp_to_roof_conversions
+          from production_jobs
+        `,
+        params
+      )
+
+      const completedTarps =
+        Number(productionMilestonesResult.rows[0]?.completed_tarps || 0)
+
+      const completedRoofs =
+        Number(productionMilestonesResult.rows[0]?.completed_roofs || 0)
+
+      const tarpToRoofConversions =
+        Number(
+          productionMilestonesResult.rows[0]?.tarp_to_roof_conversions || 0
+        )
+
+      const tarpToRoofConversionRate =
+        completedTarps > 0
+          ? Number(
+              (
+                (tarpToRoofConversions / completedTarps) *
+                100
+              ).toFixed(2)
+            )
+          : 0
+
       const timelineResult = await pool.query(
         `
           select
@@ -252,7 +345,15 @@ return reply.send({
           contract_activity:
             contractResult.rows[0]?.total || 0,
           ai_activity:
-            aiActivityResult.rows[0]?.total || 0
+            aiActivityResult.rows[0]?.total || 0,
+          completed_tarps:
+            completedTarps,
+          completed_roofs:
+            completedRoofs,
+          tarp_to_roof_conversions:
+            tarpToRoofConversions,
+          tarp_to_roof_conversion_rate:
+            tarpToRoofConversionRate
         },
         stage_breakdown:
           stagesResult.rows,
