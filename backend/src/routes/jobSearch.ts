@@ -7,6 +7,10 @@ import {
   setEmergencyTarpNeededByTenantSlug,
 } from "../services/documentPipelineService"
 import { getCurrentUserFromToken } from "../services/authService"
+import {
+  getDeveloperSettingsByTenantSlug,
+  getStageFollowupConfig,
+} from "../services/devSettingsService"
 
 // helper
 function digitsOnly(value: string) {
@@ -300,8 +304,25 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
       const { tenantSlug, jobId } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
 
-      const { stage, crm_substatus, bot_paused } = request.body || {}
+      const actor = await requireJobReadUser(
+        request,
+        reply,
+        tenantId
+      )
 
+      if (!actor) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const {
+        stage,
+        crm_substatus,
+        bot_paused,
+        bot_pause_reason,
+      } = request.body || {}
+
+      const requestedPauseReason =
+        String(bot_pause_reason || "").trim()
       const previousStageResult = await pool.query(
         `
         select
@@ -331,9 +352,22 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
       const realStageTransition =
         Boolean(stage) && nextStage !== previousStage
 
+      const intentionalPause =
+        previousBotPaused === false &&
+        bot_paused === true
+
       const intentionalUnpause =
         previousBotPaused === true &&
         bot_paused === false
+
+      if (intentionalPause && !requestedPauseReason) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error: "Pause reason is required when pausing AI Follow-Up",
+        }
+      }
 
       if (stage === "wa_sent" && previousStage !== "wa_sent") {
         await setEmergencyTarpNeededByTenantSlug(
@@ -375,7 +409,10 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               when $3 = 'disqualified'
                 then 'disqualified'
               when $5 = true
-                then coalesce(bot_pause_reason, 'office_stop')
+                then coalesce(
+                  nullif(btrim($6::text), ''),
+                  bot_pause_reason
+                )
               when $5 = false
                 then null
               else bot_pause_reason
@@ -414,54 +451,136 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           stage || null,
           crm_substatus || null,
           typeof bot_paused === "boolean" ? bot_paused : null,
+          requestedPauseReason || null,
         ]
       )
 
-      if (intentionalUnpause && !realStageTransition && nextStage) {
+      if (intentionalPause) {
         await pool.query(
           `
-          update jobs
-          set
-            active_followup_workflow =
-              case
-                when (
-                  select
-                    jsonb_typeof(ds.settings->'stage_followups'->$3->'messages') = 'array'
-                    and jsonb_array_length(ds.settings->'stage_followups'->$3->'messages') > 0
-                    and jsonb_typeof(ds.settings->'stage_followups'->$3->'timings_minutes') = 'array'
-                    and jsonb_array_length(ds.settings->'stage_followups'->$3->'timings_minutes') > 0
-                  from developer_settings ds
-                  where ds.tenant_id = $1
-                  limit 1
-                )
-                then $3
-                else active_followup_workflow
-              end,
-            followup_workflow_started_at =
-              case
-                when (
-                  select
-                    jsonb_typeof(ds.settings->'stage_followups'->$3->'messages') = 'array'
-                    and jsonb_array_length(ds.settings->'stage_followups'->$3->'messages') > 0
-                    and jsonb_typeof(ds.settings->'stage_followups'->$3->'timings_minutes') = 'array'
-                    and jsonb_array_length(ds.settings->'stage_followups'->$3->'timings_minutes') > 0
-                  from developer_settings ds
-                  where ds.tenant_id = $1
-                  limit 1
-                )
-                then now()
-                else followup_workflow_started_at
-              end,
-            updated_at = now()
-          where tenant_id = $1
-            and id = $2
+          insert into timeline_events
+            (
+              tenant_id,
+              job_id,
+              kind,
+              message,
+              meta,
+              created_at
+            )
+          values
+            (
+              $1,
+              $2,
+              'ai_followup_paused',
+              $3,
+              $4::jsonb,
+              now()
+            )
           `,
           [
             tenantId,
             Number(jobId),
-            nextStage,
+            `AI Follow-Up paused — ${requestedPauseReason}`,
+            JSON.stringify({
+              reason: requestedPauseReason,
+              actor_user_id: actor.id,
+              actor_email: actor.email || null,
+              actor_name: actor.full_name || actor.email || null,
+              source: "staff_ui",
+            }),
           ]
         )
+      }
+
+      if (intentionalUnpause) {
+        await pool.query(
+          `
+          insert into timeline_events
+            (
+              tenant_id,
+              job_id,
+              kind,
+              message,
+              meta,
+              created_at
+            )
+          values
+            (
+              $1,
+              $2,
+              'ai_followup_unpaused',
+              'AI Follow-Up unpaused',
+              $3::jsonb,
+              now()
+            )
+          `,
+          [
+            tenantId,
+            Number(jobId),
+            JSON.stringify({
+              actor_user_id: actor.id,
+              actor_email: actor.email || null,
+              actor_name: actor.full_name || actor.email || null,
+              source: "staff_ui",
+            }),
+          ]
+        )
+      }
+
+      let restartedFollowupWorkflow = ""
+      let restartedFollowupMessage1 = ""
+
+      if (intentionalUnpause && !realStageTransition) {
+        const workflowState = await pool.query(
+          `
+          select active_followup_workflow
+          from jobs
+          where tenant_id = $1
+            and id = $2
+          limit 1
+          `,
+          [tenantId, Number(jobId)]
+        )
+
+        const activeWorkflow =
+          String(
+            workflowState.rows[0]?.active_followup_workflow || ""
+          ).trim()
+
+        if (activeWorkflow) {
+          const settings =
+            await getDeveloperSettingsByTenantSlug(tenantSlug)
+
+          const configuration =
+            getStageFollowupConfig(settings, activeWorkflow)
+
+          const messages =
+            (configuration?.messages || [])
+              .map((value: any) =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+
+          const timings =
+            configuration?.timings_minutes || []
+
+          if (messages.length > 0 && timings.length > 0) {
+            await pool.query(
+              `
+              update jobs
+              set
+                followup_workflow_started_at = now(),
+                updated_at = now()
+              where tenant_id = $1
+                and id = $2
+              `,
+              [tenantId, Number(jobId)]
+            )
+
+            restartedFollowupWorkflow = activeWorkflow
+            restartedFollowupMessage1 = messages[0]
+          }
+        }
       }
 
       if (realStageTransition) {
@@ -493,6 +612,9 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             JSON.stringify({
               previous_stage: previousStage || null,
               stage: nextStage,
+              actor_user_id: actor.id,
+              actor_email: actor.email || null,
+              actor_name: actor.full_name || actor.email || null,
               source: "staff_ui",
             }),
           ]
@@ -517,6 +639,45 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           ).trim()
 
         if (activeWorkflow === nextStage) {
+          const settings =
+            await getDeveloperSettingsByTenantSlug(tenantSlug)
+
+          const configuration =
+            getStageFollowupConfig(settings, activeWorkflow)
+
+          const messages =
+            (configuration?.messages || [])
+              .map((value: any) =>
+                String(value || "").trim()
+              )
+              .filter(Boolean)
+
+          const message1 = messages[0] || ""
+
+          const currentPauseState = await pool.query(
+            `
+            select bot_paused
+            from jobs
+            where tenant_id = $1
+              and id = $2
+            limit 1
+            `,
+            [tenantId, Number(jobId)]
+          )
+
+          const workflowPaused =
+            Boolean(currentPauseState.rows[0]?.bot_paused)
+
+          const activityKind =
+            workflowPaused
+              ? "ai_followup_workflow_ready_paused"
+              : "ai_followup_workflow_started"
+
+          const activityMessage =
+            workflowPaused
+              ? `AI Follow-Up ready for ${nextStage} — currently paused${message1 ? ` — Message 1: ${message1}` : ""}`
+              : `AI Follow-Up started: ${nextStage}${message1 ? ` — Message 1: ${message1}` : " — beginning at Message 1"}`
+
           await pool.query(
             `
             insert into timeline_events
@@ -532,78 +693,69 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               (
                 $1,
                 $2,
-                'ai_followup_workflow_started',
                 $3,
-                $4::jsonb,
+                $4,
+                $5::jsonb,
                 now()
               )
             `,
             [
               tenantId,
               Number(jobId),
-              `AI Follow-Up started: ${nextStage} — beginning at Message 1`,
+              activityKind,
+              activityMessage,
               JSON.stringify({
                 stage: nextStage,
                 previous_stage: previousStage || null,
                 source: "stage_transition",
                 restart_from_message: 1,
+                message_1: message1 || null,
+                paused: workflowPaused,
               }),
             ]
           )
         }
       }
 
-      if (intentionalUnpause && !realStageTransition) {
-        const workflowState = await pool.query(
+      if (
+        intentionalUnpause &&
+        !realStageTransition &&
+        restartedFollowupWorkflow
+      ) {
+        await pool.query(
           `
-          select active_followup_workflow
-          from jobs
-          where tenant_id = $1
-            and id = $2
-          limit 1
+          insert into timeline_events
+            (
+              tenant_id,
+              job_id,
+              kind,
+              message,
+              meta,
+              created_at
+            )
+          values
+            (
+              $1,
+              $2,
+              'ai_followup_workflow_restarted',
+              $3,
+              $4::jsonb,
+              now()
+            )
           `,
-          [tenantId, Number(jobId)]
+          [
+            tenantId,
+            Number(jobId),
+            `AI Follow-Up restarted after pause: ${restartedFollowupWorkflow} — Message 1: ${restartedFollowupMessage1}`,
+            JSON.stringify({
+              workflow: restartedFollowupWorkflow,
+              current_stage: nextStage || null,
+              source: "bot_unpause",
+              restart_from_message: 1,
+              message_1: restartedFollowupMessage1,
+            }),
+          ]
         )
-
-        const activeWorkflow =
-          String(
-            workflowState.rows[0]?.active_followup_workflow || ""
-          ).trim()
-
-        if (activeWorkflow === nextStage) {
-          await pool.query(
-            `
-            insert into timeline_events
-              (
-                tenant_id,
-                job_id,
-                kind,
-                message,
-                meta,
-                created_at
-              )
-            values
-              (
-                $1,
-                $2,
-                'ai_followup_workflow_restarted',
-                $3,
-                $4::jsonb,
-                now()
-              )
-            `,
-            [
-              tenantId,
-              Number(jobId),
-              `AI Follow-Up restarted after pause: ${nextStage} — beginning at Message 1`,
-              JSON.stringify({
-                stage: nextStage,
-                source: "bot_unpause",
-                restart_from_message: 1,
-              }),
-            ]
-          )
-        }
       }
 
       if (stage && ["archived", "disqualified"].includes(stage)) {

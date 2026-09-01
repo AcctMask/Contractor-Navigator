@@ -435,6 +435,14 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         end if;
 
         if stage_key is null then
+          new.active_followup_workflow :=
+            case when tg_op = 'UPDATE' then old.active_followup_workflow else null end;
+          new.followup_workflow_started_at :=
+            case when tg_op = 'UPDATE' then old.followup_workflow_started_at else null end;
+          return new;
+        end if;
+
+        if stage_key in ('archived', 'disqualified') then
           new.active_followup_workflow := null;
           new.followup_workflow_started_at := null;
           return new;
@@ -468,6 +476,9 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         if has_messages and has_timings then
           new.active_followup_workflow := stage_key;
           new.followup_workflow_started_at := now();
+        elsif tg_op = 'UPDATE' then
+          new.active_followup_workflow := old.active_followup_workflow;
+          new.followup_workflow_started_at := old.followup_workflow_started_at;
         else
           new.active_followup_workflow := null;
           new.followup_workflow_started_at := null;

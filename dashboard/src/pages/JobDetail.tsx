@@ -59,6 +59,7 @@ export default function JobDetail() {
   const [stage, setStage] = useState("lead")
   const [crmSubstatus, setCrmSubstatus] = useState("")
   const [botPaused, setBotPaused] = useState(false)
+  const [botPauseReason, setBotPauseReason] = useState("")
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
@@ -107,6 +108,7 @@ export default function JobDetail() {
     setStage(data.job.stage || "lead")
     setCrmSubstatus(data.job.crm_substatus || "")
     setBotPaused(Boolean(data.job.bot_paused))
+    setBotPauseReason(String(data.job.bot_pause_reason || ""))
     setCrewAssignments(Array.isArray(data.crew_assignments) ? data.crew_assignments : [])
 
     const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
@@ -131,6 +133,9 @@ export default function JobDetail() {
         "manual_stage_updated",
         "ai_followup_workflow_started",
         "ai_followup_workflow_restarted",
+        "ai_followup_workflow_ready_paused",
+        "ai_followup_paused",
+        "ai_followup_unpaused",
         "calendar_stage_event_created",
         "calendar_stage_event_rescheduled",
         "calendar_event_rescheduled",
@@ -497,16 +502,29 @@ export default function JobDetail() {
   async function saveStage() {
     if (!id) return
 
+    const pauseReason = botPauseReason.trim()
+
+    if (botPaused && !pauseReason) {
+      errorToast("Pause reason is required when pausing AI Follow-Up")
+      return
+    }
+
     setError("")
     setStatus("Saving stage...")
 
+    const token = getToken()
+
     const res = await fetch(`${API_BASE}/admin/${getTenantSlug()}/jobs/${id}/stage`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
       body: JSON.stringify({
         stage,
         crm_substatus: crmSubstatus,
         bot_paused: botPaused,
+        bot_pause_reason: botPaused ? pauseReason : null,
       }),
     })
 
@@ -1874,9 +1892,32 @@ export default function JobDetail() {
             <input value={crmSubstatus} onChange={(e) => setCrmSubstatus(e.target.value)} style={input} />
 
             <label style={checkRow}>
-              <input type="checkbox" checked={botPaused} onChange={(e) => setBotPaused(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={botPaused}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  setBotPaused(checked)
+
+                  if (!checked) {
+                    setBotPauseReason("")
+                  }
+                }}
+              />
               Pause bot for this job
             </label>
+
+            {botPaused ? (
+              <div style={{ marginTop: 8 }}>
+                <label style={label}>Pause reason *</label>
+                <input
+                  value={botPauseReason}
+                  onChange={(e) => setBotPauseReason(e.target.value)}
+                  placeholder="Waiting on adjuster, waiting on TPA, customer requested hold..."
+                  style={input}
+                />
+              </div>
+            ) : null}
 
             <button onClick={saveStage} style={button}>Save Stage</button>
 
