@@ -11,6 +11,7 @@ import {
   getDeveloperSettingsByTenantSlug,
   getStageFollowupConfig,
 } from "../services/devSettingsService"
+import { sendAlertEmail } from "../services/emailService"
 
 // helper
 function digitsOnly(value: string) {
@@ -580,6 +581,192 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             restartedFollowupWorkflow = activeWorkflow
             restartedFollowupMessage1 = messages[0]
           }
+        }
+      }
+
+      if (
+        realStageTransition &&
+        tenantSlug === "g2g-roofing"
+      ) {
+        await pool.query(
+          `
+          update scheduled_actions
+          set
+            status = 'cancelled',
+            updated_at = now()
+          where tenant_id = $1
+            and job_id = $2
+            and action_key = 'g2g_estimate_needed_reminder'
+            and status = 'pending'
+          `,
+          [tenantId, Number(jobId)]
+        )
+
+        if (nextStage === "estimate_needed") {
+          const notificationContext = await pool.query(
+            `
+            select
+              j.id,
+              j.external_job_id,
+              j.zip,
+              c.full_name as customer_name
+            from jobs j
+            left join customers c
+              on c.id = j.customer_id
+             and c.tenant_id = j.tenant_id
+            where j.tenant_id = $1
+              and j.id = $2
+            limit 1
+            `,
+            [tenantId, Number(jobId)]
+          )
+
+          const notificationJob =
+            notificationContext.rows[0] || {}
+
+          const recipient =
+            String(
+              process.env.G2G_GMAIL_TO ||
+              process.env.ALERT_EMAIL_TO ||
+              ""
+            ).trim()
+
+          const customerName =
+            String(
+              notificationJob.customer_name ||
+              `Job #${jobId}`
+            ).trim()
+
+          const jobReference =
+            String(
+              notificationJob.external_job_id ||
+              jobId
+            ).trim()
+
+          if (recipient) {
+            const emailResult = await sendAlertEmail(
+              recipient,
+              `Estimate Needed: ${customerName}`,
+              [
+                "Good2Go has a job that needs an estimate.",
+                "",
+                `Customer: ${customerName}`,
+                `Job: ${jobReference}`,
+                `ZIP: ${notificationJob.zip || "Not supplied"}`,
+                "",
+                "This is the initial Estimate Needed request.",
+              ].join("\n")
+            )
+
+            const notificationSent =
+              Boolean(emailResult?.ok)
+
+            await pool.query(
+              `
+              insert into timeline_events
+                (
+                  tenant_id,
+                  job_id,
+                  kind,
+                  message,
+                  meta,
+                  created_at
+                )
+              values
+                (
+                  $1,
+                  $2,
+                  $3,
+                  $4,
+                  $5::jsonb,
+                  now()
+                )
+              `,
+              [
+                tenantId,
+                Number(jobId),
+                notificationSent
+                  ? "estimate_needed_notification_sent"
+                  : "estimate_needed_notification_failed",
+                notificationSent
+                  ? "Estimate Needed notification #1 sent to Good2Go."
+                  : "Estimate Needed notification #1 failed; reminder cycle remains scheduled.",
+                JSON.stringify({
+                  request_number: 1,
+                  recipient,
+                  source: "navigator_system",
+                  email_result: emailResult,
+                }),
+              ]
+            )
+          } else {
+            await pool.query(
+              `
+              insert into timeline_events
+                (
+                  tenant_id,
+                  job_id,
+                  kind,
+                  message,
+                  meta,
+                  created_at
+                )
+              values
+                (
+                  $1,
+                  $2,
+                  'estimate_needed_notification_skipped',
+                  $3,
+                  $4::jsonb,
+                  now()
+                )
+              `,
+              [
+                tenantId,
+                Number(jobId),
+                "Estimate Needed notification skipped because no Good2Go notification recipient is configured.",
+                JSON.stringify({
+                  request_number: 1,
+                  source: "navigator_system",
+                }),
+              ]
+            )
+          }
+
+          await pool.query(
+            `
+            insert into scheduled_actions
+              (
+                tenant_id,
+                job_id,
+                action_key,
+                run_at,
+                status,
+                payload,
+                created_at,
+                updated_at
+              )
+            values
+              (
+                $1,
+                $2,
+                'g2g_estimate_needed_reminder',
+                now() + interval '48 hours',
+                'pending',
+                $3::jsonb,
+                now(),
+                now()
+              )
+            `,
+            [
+              tenantId,
+              Number(jobId),
+              JSON.stringify({
+                request_number: 2,
+                tenant_slug: tenantSlug,
+              }),
+            ]
+          )
         }
       }
 

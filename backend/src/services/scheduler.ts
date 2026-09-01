@@ -6,6 +6,7 @@ import {
 import {
   sendCustomerAcknowledgmentEmail,
   sendActualAssistantNavigatorEmail,
+  sendAlertEmail,
 } from "./emailService";
 
 import {
@@ -727,6 +728,198 @@ async function runUserInvitationExpiration(
   )
 }
 
+async function runG2gEstimateNeededReminder(
+  action: ScheduledActionRow
+) {
+  const tenantId = action.tenant_id
+  const jobId = action.job_id
+  const payload = action.payload || {}
+
+  if (!jobId) {
+    await timeline(
+      tenantId,
+      null,
+      "estimate_needed_notification_skipped",
+      "Estimate Needed reminder skipped because job_id is missing.",
+      {
+        action_id: action.id,
+      }
+    )
+    return
+  }
+
+  const requestNumber =
+    Math.max(
+      2,
+      Number(payload.request_number || 2)
+    )
+
+  const result = await pool.query(
+    `
+    select
+      j.id,
+      j.external_job_id,
+      j.stage,
+      j.zip,
+      c.full_name as customer_name,
+      t.slug as tenant_slug
+    from jobs j
+    join tenants t
+      on t.id = j.tenant_id
+    left join customers c
+      on c.id = j.customer_id
+     and c.tenant_id = j.tenant_id
+    where j.tenant_id = $1
+      and j.id = $2
+    limit 1
+    `,
+    [tenantId, jobId]
+  )
+
+  if (!result.rowCount) {
+    await timeline(
+      tenantId,
+      jobId,
+      "estimate_needed_notification_skipped",
+      "Estimate Needed reminder stopped because the job no longer exists.",
+      {
+        action_id: action.id,
+        request_number: requestNumber,
+      }
+    )
+    return
+  }
+
+  const job = result.rows[0]
+
+  if (
+    String(job.tenant_slug || "") !== "g2g-roofing" ||
+    String(job.stage || "") !== "estimate_needed"
+  ) {
+    await timeline(
+      tenantId,
+      jobId,
+      "estimate_needed_notification_stopped",
+      "Estimate Needed reminder cycle stopped because the job is no longer in Estimate Needed.",
+      {
+        action_id: action.id,
+        request_number: requestNumber,
+        tenant_slug: job.tenant_slug || null,
+        current_stage: job.stage || null,
+      }
+    )
+    return
+  }
+
+  const recipient =
+    String(
+      process.env.G2G_GMAIL_TO ||
+      process.env.ALERT_EMAIL_TO ||
+      ""
+    ).trim()
+
+  if (!recipient) {
+    throw new Error(
+      "Good2Go Estimate Needed reminder has no notification recipient"
+    )
+  }
+
+  const customerName =
+    String(
+      job.customer_name ||
+      `Job #${jobId}`
+    ).trim()
+
+  const jobReference =
+    String(
+      job.external_job_id ||
+      jobId
+    ).trim()
+
+  const subject =
+    requestNumber === 2
+      ? `2nd Request — Estimate Still Needed: ${customerName}`
+      : requestNumber === 3
+        ? `3rd Request — Estimate Still Needed: ${customerName}`
+        : `Estimate Still Needed — Request #${requestNumber}: ${customerName}`
+
+  const emailResult = await sendAlertEmail(
+    recipient,
+    subject,
+    [
+      `Good2Go job ${jobReference} is still in Estimate Needed.`,
+      "",
+      `Customer: ${customerName}`,
+      `Job: ${jobReference}`,
+      `ZIP: ${job.zip || "Not supplied"}`,
+      "",
+      requestNumber <= 3
+        ? `This is Estimate Needed request #${requestNumber}.`
+        : `This is continuing Estimate Needed reminder #${requestNumber}.`,
+    ].join("\n")
+  )
+
+  if (!emailResult?.ok) {
+    throw new Error(
+      emailResult?.error ||
+      "Estimate Needed notification email failed"
+    )
+  }
+
+  await timeline(
+    tenantId,
+    jobId,
+    "estimate_needed_notification_sent",
+    `Estimate Needed notification #${requestNumber} sent to Good2Go.`,
+    {
+      action_id: action.id,
+      request_number: requestNumber,
+      recipient,
+      source: "navigator_system",
+      email_result: emailResult,
+    }
+  )
+
+  const nextDelayHours =
+    requestNumber === 2 ? 48 : 72
+
+  await pool.query(
+    `
+    insert into scheduled_actions
+      (
+        tenant_id,
+        job_id,
+        action_key,
+        run_at,
+        status,
+        payload,
+        created_at,
+        updated_at
+      )
+    values
+      (
+        $1,
+        $2,
+        'g2g_estimate_needed_reminder',
+        now() + ($3::text || ' hours')::interval,
+        'pending',
+        $4::jsonb,
+        now(),
+        now()
+      )
+    `,
+    [
+      tenantId,
+      jobId,
+      String(nextDelayHours),
+      JSON.stringify({
+        request_number: requestNumber + 1,
+        tenant_slug: "g2g-roofing",
+      }),
+    ]
+  )
+}
+
 async function runAction(action: ScheduledActionRow) {
   const tenantId = action.tenant_id;
   const jobId = action.job_id;
@@ -748,6 +941,13 @@ async function runAction(action: ScheduledActionRow) {
     "user_invitation_expiration"
   ) {
     await runUserInvitationExpiration(
+      action
+    );
+  } else if (
+    action.action_key ===
+    "g2g_estimate_needed_reminder"
+  ) {
+    await runG2gEstimateNeededReminder(
       action
     );
   } else {
