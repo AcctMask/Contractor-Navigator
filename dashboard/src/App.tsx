@@ -55,6 +55,9 @@ function HeaderBar() {
   const [tenantDirectoryError, setTenantDirectoryError] =
     useState("")
 
+  const [financialOperationsError, setFinancialOperationsError] =
+    useState("")
+
   const API_BASE =
     import.meta.env.VITE_API_BASE
 
@@ -288,12 +291,32 @@ function HeaderBar() {
                       href="#"
                       onClick={(event) => {
                         event.preventDefault()
+                        setFinancialOperationsError("")
+
                         void openFinancialOperations()
+                          .catch((error) => {
+                            setFinancialOperationsError(
+                              error?.message ||
+                                "Financial Operations could not be opened"
+                            )
+                          })
                       }}
                       style={mutedLinkStyle}
                     >
                       Financial Operations
                     </a>
+                  ) : null}
+                  {item.route === "/" &&
+                  financialOperationsError ? (
+                    <span
+                      style={{
+                        color: "#fecaca",
+                        fontSize: "12px",
+                        fontWeight: 700,
+                      }}
+                    >
+                      ❌ {financialOperationsError}
+                    </span>
                   ) : null}
                 </div>
               ),
