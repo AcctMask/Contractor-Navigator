@@ -386,6 +386,99 @@ export async function registerFinancialOperationsHandoffRoutes(
     }
   )
 
+  app.get(
+    "/integrations/financial-operations/:tenantSlug/users",
+    async (request: any, reply) => {
+      try {
+        if (!requireFinancialOperationsService(request)) {
+          return reply.code(401).send({
+            ok: false,
+            error: "Authentication required",
+          })
+        }
+
+        const tenantSlug = String(
+          request.params?.tenantSlug || ""
+        ).trim()
+
+        if (!tenantSlug) {
+          return reply.code(400).send({
+            ok: false,
+            error: "Tenant is required",
+          })
+        }
+
+        const tenantResult = await pool.query(
+          `
+            select id, slug
+            from tenants
+            where slug = $1
+            limit 1
+          `,
+          [tenantSlug]
+        )
+
+        if (!tenantResult.rowCount) {
+          return reply.code(404).send({
+            ok: false,
+            error: "Tenant not found",
+          })
+        }
+
+        const tenant = tenantResult.rows[0]
+
+        const usersResult = await pool.query(
+          `
+            select
+              id,
+              tenant_id,
+              email,
+              full_name,
+              role,
+              is_active,
+              financials_authorized
+            from app_users
+            where tenant_id = $1
+              and is_active = true
+              and financials_authorized = true
+            order by
+              case when role = 'platform_owner' then 0 else 1 end,
+              full_name asc,
+              id asc
+          `,
+          [Number(tenant.id)]
+        )
+
+        return {
+          ok: true,
+          tenant: {
+            id: Number(tenant.id),
+            slug: String(tenant.slug),
+          },
+          users: usersResult.rows.map((user) => ({
+            navigator_user_id: Number(user.id),
+            tenant_id: Number(user.tenant_id),
+            email: String(user.email),
+            full_name: user.full_name || null,
+            role: String(user.role),
+            is_active: Boolean(user.is_active),
+            financials_authorized: Boolean(
+              user.financials_authorized
+            ),
+          })),
+        }
+      } catch (error: any) {
+        request.log.error(error)
+        return reply.code(400).send({
+          ok: false,
+          error:
+            error?.message ||
+            "Financial Operations user directory lookup failed",
+        })
+      }
+    }
+  )
+
   app.post(
     "/integrations/financial-operations/handoff/exchange",
     async (request: any, reply) => {
