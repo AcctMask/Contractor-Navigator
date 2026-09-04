@@ -24,6 +24,7 @@ import { registerReportingRoutes } from "./routes/reporting"
 import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { registerFinancialOperationsBridgeRoutes } from "./routes/financialOperationsBridge"
+import { registerFinancialOperationsHandoffRoutes } from "./routes/financialOperationsHandoff"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { ensureFollowupLifecycleAuthority } from "./services/followupLifecycleService"
 import {
@@ -76,6 +77,7 @@ await registerReportingRoutes(app)
 await registerSalesPerformanceReportingRoutes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerFinancialOperationsBridgeRoutes(app)
+await registerFinancialOperationsHandoffRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
 await registerSalesEmailIntakeRoutes(app)
 await registerBusinessDevelopmentIntakeRoutes(app)

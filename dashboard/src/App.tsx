@@ -34,6 +34,7 @@ import { useTenant } from "./context/TenantContext"
 import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
+import { openFinancialOperations } from "./lib/financialOperations"
 
 function HeaderBar() {
   const location = useLocation()
@@ -284,7 +285,11 @@ function HeaderBar() {
                   </Link>
                   {item.route === "/" ? (
                     <a
-                      href="https://actual-assistant-financial-operatio.vercel.app"
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        void openFinancialOperations()
+                      }}
                       style={mutedLinkStyle}
                     >
                       Financial Operations

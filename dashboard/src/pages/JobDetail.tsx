@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
+import { openFinancialOperations } from "../lib/financialOperations"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
@@ -1329,7 +1330,28 @@ export default function JobDetail() {
           ← Back to My Assigned Jobs
         </Link>
 
+        <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
         <h1 style={{ color: "white" }}>Job #{id}</h1>
+        <button
+          type="button"
+          style={linkStyle}
+          onClick={() => {
+            const jobId = Number(id)
+            if (Number.isInteger(jobId) && jobId > 0) {
+              void openFinancialOperations(jobId)
+            }
+          }}
+        >
+          Financial Operations
+        </button>
+      </div>
 
         {error ? <p style={danger}>{error}</p> : null}
 
@@ -1540,7 +1562,28 @@ export default function JobDetail() {
       ) : null}
       <Link to="/job-admin" style={linkStyle}>← Back to Job Admin</Link>
 
-      <h1 style={{ color: "white" }}>Job #{id}</h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <h1 style={{ color: "white" }}>Job #{id}</h1>
+        <button
+          type="button"
+          style={linkStyle}
+          onClick={() => {
+            const jobId = Number(id)
+            if (Number.isInteger(jobId) && jobId > 0) {
+              void openFinancialOperations(jobId)
+            }
+          }}
+        >
+          Financial Operations
+        </button>
+      </div>
 
       {status && <p style={success}>{status}</p>}
       {error && <p style={danger}>{error}</p>}
