@@ -4,7 +4,7 @@ const API_BASE = import.meta.env.VITE_API_BASE
 
 const FOM_BASE_URL =
   import.meta.env.VITE_FINANCIAL_OPERATIONS_URL ||
-  "https://actual-assistant-financial-operatio.vercel.app"
+  "https://financials.actualassistance.com"
 
 export async function openFinancialOperations(
   jobId?: number
