@@ -9,6 +9,7 @@ type UserRow = {
   full_name?: string | null
   role: string
   is_active?: boolean
+  financials_authorized?: boolean
   deactivated_at?: string | null
   created_at?: string
   updated_at?: string
@@ -378,6 +379,74 @@ export default function UsersPage() {
       setManageError(
         err?.message ||
           "Role update failed"
+      )
+      setManageStatus("")
+    } finally {
+      setManaging(false)
+    }
+  }
+
+  async function setManagedFinancialsAuthorized(
+    user: UserRow,
+    financialsAuthorized: boolean
+  ) {
+    if (!user.id) return
+
+    setManaging(true)
+    setManageError("")
+    setManageStatus(
+      financialsAuthorized
+        ? "Authorizing Financial Operations..."
+        : "Revoking Financial Operations..."
+    )
+
+    try {
+      const res =
+        await fetch(
+          `${API_BASE}/auth/${getTenantSlug()}/users/${user.id}/financials-authorized`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${getToken()}`,
+            },
+            body: JSON.stringify({
+              financials_authorized:
+                financialsAuthorized,
+            }),
+          }
+        )
+
+      const json =
+        await res.json()
+          .catch(() => ({}))
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(
+          json?.error ||
+            "Financial Operations authorization update failed"
+        )
+      }
+
+      if (
+        selectedUser &&
+        String(selectedUser.id) ===
+          String(user.id)
+      ) {
+        setSelectedUser(json.user)
+      }
+
+      await loadAll()
+
+      setManageStatus(
+        financialsAuthorized
+          ? "Financial Operations authorized"
+          : "Financial Operations access revoked"
+      )
+    } catch (err: any) {
+      setManageError(
+        err?.message ||
+          "Financial Operations authorization update failed"
       )
       setManageStatus("")
     } finally {
@@ -937,6 +1006,77 @@ export default function UsersPage() {
                     Role / Permissions
                   </h3>
 
+                  <div
+                    style={{
+                      marginBottom:
+                        "18px",
+                      padding:
+                        "14px",
+                      borderRadius:
+                        "14px",
+                      border:
+                        "1px solid rgba(255,255,255,0.10)",
+                      background:
+                        "rgba(255,255,255,0.05)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      Financial Operations
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop:
+                          "6px",
+                        opacity:
+                          0.75,
+                        fontSize:
+                          "13px",
+                        lineHeight:
+                          1.5,
+                      }}
+                    >
+                      Master access to this user's
+                      Financial Operations workspace.
+                      Detailed financial permissions
+                      are managed inside Financial
+                      Operations.
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={managing}
+                      onClick={() =>
+                        setManagedFinancialsAuthorized(
+                          selectedUser,
+                          !Boolean(
+                            selectedUser
+                              .financials_authorized
+                          )
+                        )
+                      }
+                      style={{
+                        ...secondaryButtonStyle,
+                        marginTop:
+                          "12px",
+                        fontWeight:
+                          800,
+                      }}
+                    >
+                      Financials Authorized:{" "}
+                      {selectedUser
+                        .financials_authorized
+                        ? "ON"
+                        : "OFF"}
+                    </button>
+                  </div>
+
+
                   <select
                     value={
                       managedRole
@@ -1214,6 +1354,20 @@ export default function UsersPage() {
                       >
                         Role:{" "}
                         {user.role}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop:
+                            "6px",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        Financials Authorized:{" "}
+                        {user.financials_authorized
+                          ? "ON"
+                          : "OFF"}
                       </div>
 
                       <div

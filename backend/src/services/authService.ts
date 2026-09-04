@@ -10,6 +10,7 @@ type AppUser = {
   full_name: string
   role: string
   is_active: boolean
+  financials_authorized: boolean
 }
 
 const JWT_SECRET = process.env.JWT_SECRET || "contractor-autopilot-local-secret"
@@ -24,6 +25,7 @@ async function ensureAuthTables() {
       password_hash text not null,
       role text not null default 'staff',
       is_active boolean not null default true,
+      financials_authorized boolean not null default false,
       deactivated_at timestamptz null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
@@ -34,6 +36,11 @@ async function ensureAuthTables() {
   await pool.query(`
     alter table app_users
       add column if not exists deactivated_at timestamptz null
+  `)
+
+  await pool.query(`
+    alter table app_users
+      add column if not exists financials_authorized boolean not null default false
   `)
 
   await pool.query(`
@@ -726,6 +733,7 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
       full_name,
       role,
       is_active,
+      financials_authorized,
       deactivated_at,
       created_at,
       updated_at
@@ -776,7 +784,8 @@ async function logUserManagementActivity(
   kind:
     | "user_role_changed"
     | "user_password_reset"
-    | "user_deactivated",
+    | "user_deactivated"
+    | "user_financials_authorization_changed",
   message: string,
   meta: Record<string, unknown>
 ) {
@@ -831,6 +840,7 @@ async function getManagedUser(
         full_name,
         role,
         is_active,
+        financials_authorized,
         deactivated_at,
         created_at,
         updated_at
@@ -960,6 +970,112 @@ export async function updateManagedUserRoleByTenantSlug(
         target.role,
       new_role:
         user.role,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
+export async function updateManagedUserFinancialsAuthorizationByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  authorizedInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have Financial Operations access changed"
+    )
+  }
+
+  if (typeof authorizedInput !== "boolean") {
+    throw new Error(
+      "financials_authorized must be true or false"
+    )
+  }
+
+  const nextAuthorized =
+    authorizedInput
+
+  if (
+    Boolean(target.financials_authorized) ===
+    nextAuthorized
+  ) {
+    return target
+  }
+
+  const result =
+    await pool.query(
+      `
+        update app_users
+        set
+          financials_authorized = $1,
+          updated_at = now()
+        where tenant_id = $2
+          and id = $3
+        returning
+          id,
+          tenant_id,
+          email,
+          full_name,
+          role,
+          is_active,
+          financials_authorized,
+          deactivated_at,
+          created_at,
+          updated_at
+      `,
+      [
+        nextAuthorized,
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_financials_authorization_changed",
+    `Financial Operations access ${nextAuthorized ? "authorized" : "revoked"} for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      old_financials_authorized:
+        Boolean(
+          target.financials_authorized
+        ),
+      new_financials_authorized:
+        Boolean(
+          user.financials_authorized
+        ),
       actor_user_id:
         actor.id,
       actor_email:

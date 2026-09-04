@@ -10,6 +10,7 @@ import {
   changePasswordForUser,
   getTenantIdBySlug,
   updateManagedUserRoleByTenantSlug,
+  updateManagedUserFinancialsAuthorizationByTenantSlug,
   resetManagedUserPasswordByTenantSlug,
   deactivateManagedUserByTenantSlug,
   recordUserInvitationEmailSent,
@@ -451,6 +452,54 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       }
     }
   })
+
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/financials-authorized",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const user =
+          await updateManagedUserFinancialsAuthorizationByTenantSlug(
+            tenantSlug,
+            Number(userId),
+            request.body?.financials_authorized,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
 
   app.patch(
     "/auth/:tenantSlug/users/:userId/role",
