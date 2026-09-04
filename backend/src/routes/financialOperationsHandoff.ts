@@ -118,6 +118,36 @@ export async function registerFinancialOperationsHandoffRoutes(
           })
         }
 
+        const financialAuthorizationResult =
+          await pool.query(
+            `
+              select financials_authorized
+              from app_users
+              where id = $1
+                and tenant_id = $2
+                and is_active = true
+              limit 1
+            `,
+            [
+              Number(user.id),
+              Number(user.tenant_id),
+            ]
+          )
+
+        if (
+          !financialAuthorizationResult.rowCount ||
+          !Boolean(
+            financialAuthorizationResult.rows[0]
+              .financials_authorized
+          )
+        ) {
+          return reply.code(403).send({
+            ok: false,
+            error:
+              "Financial Operations access is not authorized",
+          })
+        }
+
         const requestedJobId =
           request.body?.job_id == null
             ? null
@@ -264,6 +294,99 @@ export async function registerFinancialOperationsHandoffRoutes(
   )
 
   app.post(
+    "/integrations/financial-operations/authorization",
+    async (request: any, reply) => {
+      try {
+        if (!requireFinancialOperationsService(request)) {
+          return reply.code(401).send({
+            ok: false,
+            error: "Authentication required",
+          })
+        }
+
+        const tenantSlug = String(
+          request.body?.tenant_slug || ""
+        ).trim()
+
+        const email = String(
+          request.body?.email || ""
+        )
+          .trim()
+          .toLowerCase()
+
+        if (!tenantSlug || !email) {
+          return reply.code(400).send({
+            ok: false,
+            error: "Tenant and email are required",
+          })
+        }
+
+        const result = await pool.query(
+          `
+            select
+              u.id,
+              u.tenant_id,
+              u.email,
+              u.full_name,
+              u.role,
+              u.is_active,
+              u.financials_authorized,
+              t.slug as tenant_slug
+            from app_users u
+            join tenants t
+              on t.id = u.tenant_id
+            where t.slug = $1
+              and lower(u.email) = $2
+            limit 1
+          `,
+          [
+            tenantSlug,
+            email,
+          ]
+        )
+
+        if (!result.rowCount) {
+          return reply.code(404).send({
+            ok: false,
+            authorized: false,
+            error: "Navigator user not found",
+          })
+        }
+
+        const user = result.rows[0]
+
+        return {
+          ok: true,
+          authorized:
+            Boolean(user.is_active) &&
+            Boolean(user.financials_authorized),
+          user: {
+            navigator_user_id: Number(user.id),
+            tenant_id: Number(user.tenant_id),
+            tenant_slug: String(user.tenant_slug),
+            email: String(user.email),
+            full_name: user.full_name || null,
+            role: String(user.role),
+            is_active: Boolean(user.is_active),
+            financials_authorized: Boolean(
+              user.financials_authorized
+            ),
+          },
+        }
+      } catch (error: any) {
+        request.log.error(error)
+        return reply.code(400).send({
+          ok: false,
+          authorized: false,
+          error:
+            error?.message ||
+            "Financial Operations authorization lookup failed",
+        })
+      }
+    }
+  )
+
+  app.post(
     "/integrations/financial-operations/handoff/exchange",
     async (request: any, reply) => {
       try {
@@ -317,9 +440,60 @@ export async function registerFinancialOperationsHandoffRoutes(
           })
         }
 
+        const handoff = result.rows[0]
+
+        const authorizationResult =
+          await pool.query(
+            `
+              select
+                id,
+                tenant_id,
+                email,
+                full_name,
+                role,
+                is_active,
+                financials_authorized
+              from app_users
+              where id = $1
+                and tenant_id = $2
+                and lower(email) = $3
+              limit 1
+            `,
+            [
+              Number(handoff.navigator_user_id),
+              Number(handoff.tenant_id),
+              String(handoff.email || "")
+                .trim()
+                .toLowerCase(),
+            ]
+          )
+
+        const authorizedUser =
+          authorizationResult.rows[0]
+
+        if (
+          !authorizationResult.rowCount ||
+          !Boolean(authorizedUser.is_active) ||
+          !Boolean(
+            authorizedUser.financials_authorized
+          )
+        ) {
+          return reply.code(403).send({
+            ok: false,
+            error:
+              "Financial Operations access is not authorized",
+          })
+        }
+
         return {
           ok: true,
-          handoff: result.rows[0],
+          handoff: {
+            ...handoff,
+            email: authorizedUser.email,
+            full_name: authorizedUser.full_name,
+            role: authorizedUser.role,
+            financials_authorized: true,
+          },
         }
       } catch (error: any) {
         request.log.error(error)
