@@ -293,7 +293,19 @@ function HeaderBar() {
                         event.preventDefault()
                         setFinancialOperationsError("")
 
-                        void openFinancialOperations()
+                        const jobRouteMatch =
+                          location.pathname.match(
+                            /^\/job\/(\d+)$/
+                          )
+
+                        const currentJobId =
+                          jobRouteMatch
+                            ? Number(jobRouteMatch[1])
+                            : undefined
+
+                        void openFinancialOperations(
+                          currentJobId
+                        )
                           .catch((error) => {
                             setFinancialOperationsError(
                               error?.message ||
