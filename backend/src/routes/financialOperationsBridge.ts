@@ -112,11 +112,15 @@ export async function registerFinancialOperationsBridgeRoutes(
             j.zip,
             j.created_at,
             j.updated_at,
-            c.full_name as customer_name
+            c.full_name as customer_name,
+            jed.contract_amount
           from jobs j
           left join customers c
             on c.id = j.customer_id
            and c.tenant_id = j.tenant_id
+          left join job_estimate_details jed
+            on jed.job_id = j.id
+           and jed.tenant_id = j.tenant_id
           where j.tenant_id = $1
             and j.id = $2
           limit 1
@@ -158,6 +162,7 @@ export async function registerFinancialOperationsBridgeRoutes(
           zip: row.zip || null,
           created_at: row.created_at || null,
           updated_at: row.updated_at || null,
+          contract_amount: row.contract_amount ?? null,
         },
       })
     }
