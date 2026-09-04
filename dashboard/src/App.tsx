@@ -264,19 +264,33 @@ function HeaderBar() {
           <>
             {workspace.navigation.map(
               (item) => (
-                <Link
+                <div
                   key={item.id}
-                  to={item.route}
-                  style={
-                    navigationIsActive(
-                      item.route,
-                    )
-                      ? activeLinkStyle
-                      : mutedLinkStyle
-                  }
+                  style={{
+                    display: "contents",
+                  }}
                 >
-                  {item.label}
-                </Link>
+                  <Link
+                    to={item.route}
+                    style={
+                      navigationIsActive(
+                        item.route,
+                      )
+                        ? activeLinkStyle
+                        : mutedLinkStyle
+                    }
+                  >
+                    {item.label}
+                  </Link>
+                  {item.route === "/" ? (
+                    <a
+                      href="https://actual-assistant-financial-operatio.vercel.app"
+                      style={mutedLinkStyle}
+                    >
+                      Financial Operations
+                    </a>
+                  ) : null}
+                </div>
               ),
             )}
 
