@@ -177,6 +177,13 @@ export async function registerFinancialOperationsBridgeRoutes(
         request.params?.tenantSlug || ""
       ).trim()
 
+      const view =
+        String(request.query?.view || "active")
+          .trim()
+          .toLowerCase() === "archived"
+          ? "archived"
+          : "active"
+
       if (!tenantSlug) {
         return reply.code(400).send({
           ok: false,
@@ -195,56 +202,43 @@ export async function registerFinancialOperationsBridgeRoutes(
 
       const result = await pool.query(
         `
-          with cust as (
-            select id, full_name, created_at, updated_at
-            from customers
-            where tenant_id = $1
-          ),
-          jobs_counts as (
-            select customer_id, count(*)::int as jobs_count
-            from jobs
-            where tenant_id = $1
-              and customer_id is not null
-            group by customer_id
-          ),
-          last_evt_detail as (
-            select distinct on ((meta->>'customer_id')::bigint)
-              (meta->>'customer_id')::bigint as customer_id,
-              kind as last_kind,
-              message as last_message,
-              created_at as last_activity_at
-            from timeline_events
-            where tenant_id = $1
-              and (meta ? 'customer_id')
-            order by
-              (meta->>'customer_id')::bigint,
-              created_at desc
-          )
           select
             c.id,
             c.full_name,
             c.created_at,
             c.updated_at,
-            coalesce(j.jobs_count, 0) as jobs_count,
-            d.last_activity_at,
-            d.last_kind,
-            d.last_message
-          from cust c
-          left join jobs_counts j
+            count(j.id)::int as jobs_count
+          from customers c
+          join jobs j
             on j.customer_id = c.id
-          left join last_evt_detail d
-            on d.customer_id = c.id
+           and j.tenant_id = c.tenant_id
+          where c.tenant_id = $1
+            and (
+              ($2 = 'archived' and j.stage = 'archived')
+              or
+              (
+                $2 = 'active'
+                and coalesce(j.stage, '') <> 'archived'
+              )
+            )
+          group by
+            c.id,
+            c.full_name,
+            c.created_at,
+            c.updated_at
+          having count(j.id) > 0
           order by
-            coalesce(d.last_activity_at, c.created_at) desc,
+            c.full_name asc nulls last,
             c.id desc
           limit 500
         `,
-        [tenant.id]
+        [tenant.id, view]
       )
 
       return reply.send({
         ok: true,
         source: "contractor-navigator",
+        view,
         tenant: {
           id: tenant.id,
           slug: tenant.slug,
@@ -253,9 +247,6 @@ export async function registerFinancialOperationsBridgeRoutes(
           id: Number(row.id),
           name: row.full_name || null,
           jobs_count: Number(row.jobs_count || 0),
-          last_activity_at: row.last_activity_at || null,
-          last_kind: row.last_kind || null,
-          last_message: row.last_message || null,
           created_at: row.created_at || null,
           updated_at: row.updated_at || null,
         })),
@@ -280,6 +271,13 @@ export async function registerFinancialOperationsBridgeRoutes(
       const customerId = Number(
         request.params?.customerId
       )
+
+      const view =
+        String(request.query?.view || "active")
+          .trim()
+          .toLowerCase() === "archived"
+          ? "archived"
+          : "active"
 
       if (
         !Number.isInteger(customerId) ||
@@ -338,10 +336,18 @@ export async function registerFinancialOperationsBridgeRoutes(
           from jobs
           where tenant_id = $1
             and customer_id = $2
+            and (
+              ($3 = 'archived' and stage = 'archived')
+              or
+              (
+                $3 = 'active'
+                and coalesce(stage, '') <> 'archived'
+              )
+            )
           order by id desc
           limit 200
         `,
-        [tenant.id, customerId]
+        [tenant.id, customerId, view]
       )
 
       const customer = customerResult.rows[0]
@@ -349,6 +355,7 @@ export async function registerFinancialOperationsBridgeRoutes(
       return reply.send({
         ok: true,
         source: "contractor-navigator",
+        view,
         tenant: {
           id: tenant.id,
           slug: tenant.slug,
