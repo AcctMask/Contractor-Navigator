@@ -1,5 +1,6 @@
 import { getMe, getToken } from "../lib/auth"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo,
+  useRef, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE
@@ -65,6 +66,9 @@ export default function UsersPage() {
 
   const [selectedUser, setSelectedUser] =
     useState<UserRow | null>(null)
+
+  const managePanelRef =
+    useRef<HTMLElement | null>(null)
 
   const [managedRole, setManagedRole] =
     useState("staff")
@@ -295,6 +299,13 @@ export default function UsersPage() {
     user: UserRow
   ) {
     setSelectedUser(user)
+
+    window.setTimeout(() => {
+      managePanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      })
+    }, 0)
     setManagedRole(
       user.role ||
         "staff"
@@ -805,7 +816,10 @@ export default function UsersPage() {
         </div>
 
         {selectedUser ? (
-          <section style={cardStyle}>
+          <section
+            ref={managePanelRef}
+            style={cardStyle}
+          >
             <div
               style={{
                 display:
