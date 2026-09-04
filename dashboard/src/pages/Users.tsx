@@ -2,7 +2,7 @@ import { getMe, getToken } from "../lib/auth"
 import { useEffect, useMemo, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
 
-const API_BASE = import.meta.env.VITE_API_BASE 
+const API_BASE = import.meta.env.VITE_API_BASE
 type UserRow = {
   id?: string | number | null
   email: string
@@ -935,7 +935,35 @@ export default function UsersPage() {
                 }}
               >
                 Platform owner is protected.
-              </div>
+
+                <div
+                  style={{
+                    marginTop: "14px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    disabled={managing}
+                    onClick={() =>
+                      setManagedFinancialsAuthorized(
+                        selectedUser,
+                        !Boolean(
+                          selectedUser.financials_authorized
+                        )
+                      )
+                    }
+                    style={{
+                      ...secondaryButtonStyle,
+                      fontWeight: 800,
+                    }}
+                  >
+                    Financials Authorized:{" "}
+                    {selectedUser.financials_authorized
+                      ? "ON"
+                      : "OFF"}
+                  </button>
+                </div>
+</div>
             ) : Number(
                 selectedUser.id
               ) ===

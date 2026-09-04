@@ -1001,11 +1001,6 @@ export async function updateManagedUserFinancialsAuthorizationByTenantSlug(
       userId
     )
 
-  assertManagedUserIsMutable(
-    target,
-    actor
-  )
-
   if (!target.is_active) {
     throw new Error(
       "Former users cannot have Financial Operations access changed"
