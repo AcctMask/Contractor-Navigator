@@ -164,6 +164,108 @@ export async function registerFinancialOperationsBridgeRoutes(
   )
 
   app.get(
+    "/integrations/financial-operations/:tenantSlug/jobs",
+    async (request: any, reply) => {
+      if (!requireFinancialOperationsService(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || ""
+      ).trim()
+
+      const view =
+        String(request.query?.view || "active")
+          .trim()
+          .toLowerCase() === "archived"
+          ? "archived"
+          : "active"
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required",
+        })
+      }
+
+      const tenant = await getTenantBySlug(tenantSlug)
+
+      if (!tenant) {
+        return reply.code(404).send({
+          ok: false,
+          error: "Tenant not found",
+        })
+      }
+
+      const result = await pool.query(
+        `
+          select
+            j.id,
+            j.external_job_id,
+            j.stage,
+            j.job_type,
+            j.address1,
+            j.city,
+            j.state,
+            j.zip,
+            j.created_at,
+            j.updated_at,
+            c.id as customer_id,
+            c.full_name as customer_name
+          from jobs j
+          left join customers c
+            on c.id = j.customer_id
+           and c.tenant_id = j.tenant_id
+          where j.tenant_id = $1
+            and (
+              ($2 = 'archived' and j.stage = 'archived')
+              or
+              (
+                $2 = 'active'
+                and coalesce(j.stage, '') <> 'archived'
+              )
+            )
+          order by j.id desc
+          limit 500
+        `,
+        [tenant.id, view]
+      )
+
+      return reply.send({
+        ok: true,
+        source: "contractor-navigator",
+        view,
+        tenant: {
+          id: tenant.id,
+          slug: tenant.slug,
+        },
+        jobs: result.rows.map((row) => ({
+          id: Number(row.id),
+          external_job_id: row.external_job_id || null,
+          stage: row.stage || null,
+          job_type: row.job_type || null,
+          address1: row.address1 || null,
+          city: row.city || null,
+          state: row.state || null,
+          zip: row.zip || null,
+          created_at: row.created_at || null,
+          updated_at: row.updated_at || null,
+          customer: {
+            id:
+              row.customer_id == null
+                ? null
+                : Number(row.customer_id),
+            name: row.customer_name || null,
+          },
+        })),
+      })
+    }
+  )
+
+  app.get(
     "/integrations/financial-operations/:tenantSlug/customers",
     async (request: any, reply) => {
       if (!requireFinancialOperationsService(request)) {
