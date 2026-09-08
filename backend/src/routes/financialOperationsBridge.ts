@@ -419,6 +419,92 @@ export async function registerFinancialOperationsBridgeRoutes(
 
       const row = result.rows[0]
 
+      const timelineResult = await pool.query(
+        `
+          select
+            id,
+            kind,
+            message,
+            meta,
+            created_at
+          from timeline_events
+          where tenant_id = $1
+            and job_id = $2
+          order by created_at asc, id asc
+        `,
+        [tenant.id, jobId]
+      )
+
+      const packagesResult = await pool.query(
+        `
+          select
+            id,
+            package_type,
+            document_title,
+            status,
+            payload,
+            sent_at,
+            signed_at,
+            signed_file_path,
+            created_at,
+            updated_at
+          from job_document_packages
+          where tenant_id = $1
+            and job_id = $2
+          order by created_at asc, id asc
+        `,
+        [tenant.id, jobId]
+      )
+
+      const assetsResult = await pool.query(
+        `
+          select
+            id,
+            asset_type,
+            original_name,
+            mime_type,
+            note,
+            uploaded_by,
+            created_at
+          from job_assets
+          where tenant_id = $1
+            and job_id = $2
+          order by created_at asc, id asc
+        `,
+        [tenant.id, jobId]
+      )
+
+      const timeline = timelineResult.rows.map((item) => ({
+        id: Number(item.id),
+        kind: item.kind || null,
+        message: item.message || null,
+        meta: item.meta || {},
+        created_at: item.created_at || null,
+      }))
+
+      const documentPackages = packagesResult.rows.map((item) => ({
+        id: Number(item.id),
+        package_type: item.package_type || null,
+        document_title: item.document_title || null,
+        status: item.status || null,
+        payload: item.payload || {},
+        sent_at: item.sent_at || null,
+        signed_at: item.signed_at || null,
+        signed_file_path: item.signed_file_path || null,
+        created_at: item.created_at || null,
+        updated_at: item.updated_at || null,
+      }))
+
+      const assets = assetsResult.rows.map((item) => ({
+        id: Number(item.id),
+        asset_type: item.asset_type || null,
+        original_name: item.original_name || null,
+        mime_type: item.mime_type || null,
+        note: item.note || null,
+        uploaded_by: item.uploaded_by || null,
+        created_at: item.created_at || null,
+      }))
+
       return reply.send({
         ok: true,
         source: "contractor-navigator",
@@ -445,6 +531,11 @@ export async function registerFinancialOperationsBridgeRoutes(
           created_at: row.created_at || null,
           updated_at: row.updated_at || null,
           contract_amount: row.contract_amount ?? null,
+        },
+        evidence: {
+          timeline,
+          document_packages: documentPackages,
+          assets,
         },
       })
     }
