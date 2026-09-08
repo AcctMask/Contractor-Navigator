@@ -60,6 +60,288 @@ export async function registerFinancialOperationsBridgeRoutes(
   app: FastifyInstance
 ) {
   app.get(
+    "/integrations/financial-operations/:tenantSlug/financial-census",
+    async (request: any, reply) => {
+      if (!requireFinancialOperationsService(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || ""
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required",
+        })
+      }
+
+      const tenant = await getTenantBySlug(tenantSlug)
+
+      if (!tenant) {
+        return reply.code(404).send({
+          ok: false,
+          error: "Tenant not found",
+        })
+      }
+
+      const jobsResult = await pool.query(
+        `
+          select
+            j.id as job_id,
+            j.customer_id,
+            j.external_job_id,
+            j.stage,
+            j.job_type,
+            j.address1,
+            j.city,
+            j.state,
+            j.zip,
+            j.created_at,
+            j.updated_at,
+            c.full_name as customer_name,
+            c.phone as customer_phone,
+            c.email as customer_email,
+            jed.contract_amount
+          from jobs j
+          left join customers c
+            on c.id = j.customer_id
+           and c.tenant_id = j.tenant_id
+          left join job_estimate_details jed
+            on jed.job_id = j.id
+           and jed.tenant_id = j.tenant_id
+          where j.tenant_id = $1
+          order by j.id asc
+        `,
+        [tenant.id]
+      )
+
+      const timelineResult = await pool.query(
+        `
+          select
+            id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          from timeline_events
+          where tenant_id = $1
+          order by job_id asc, created_at asc, id asc
+        `,
+        [tenant.id]
+      )
+
+      const packagesResult = await pool.query(
+        `
+          select
+            id,
+            job_id,
+            package_type,
+            document_title,
+            status,
+            payload,
+            sent_at,
+            signed_at,
+            signed_file_path,
+            created_at,
+            updated_at
+          from job_document_packages
+          where tenant_id = $1
+          order by job_id asc, created_at asc, id asc
+        `,
+        [tenant.id]
+      )
+
+      const assetsResult = await pool.query(
+        `
+          select
+            id,
+            job_id,
+            asset_type,
+            original_name,
+            mime_type,
+            note,
+            uploaded_by,
+            created_at
+          from job_assets
+          where tenant_id = $1
+          order by job_id asc, created_at asc, id asc
+        `,
+        [tenant.id]
+      )
+
+      const timelineByJob = new Map<number, any[]>()
+      for (const row of timelineResult.rows) {
+        const jobId = Number(row.job_id)
+        const items = timelineByJob.get(jobId) || []
+        items.push({
+          id: Number(row.id),
+          kind: row.kind || null,
+          message: row.message || null,
+          meta: row.meta || {},
+          created_at: row.created_at || null,
+        })
+        timelineByJob.set(jobId, items)
+      }
+
+      const packagesByJob = new Map<number, any[]>()
+      for (const row of packagesResult.rows) {
+        const jobId = Number(row.job_id)
+        const items = packagesByJob.get(jobId) || []
+        items.push({
+          id: Number(row.id),
+          package_type: row.package_type || null,
+          document_title: row.document_title || null,
+          status: row.status || null,
+          payload: row.payload || {},
+          sent_at: row.sent_at || null,
+          signed_at: row.signed_at || null,
+          signed_file_path: row.signed_file_path || null,
+          created_at: row.created_at || null,
+          updated_at: row.updated_at || null,
+        })
+        packagesByJob.set(jobId, items)
+      }
+
+      const assetsByJob = new Map<number, any[]>()
+      for (const row of assetsResult.rows) {
+        const jobId = Number(row.job_id)
+        const items = assetsByJob.get(jobId) || []
+        items.push({
+          id: Number(row.id),
+          asset_type: row.asset_type || null,
+          original_name: row.original_name || null,
+          mime_type: row.mime_type || null,
+          note: row.note || null,
+          uploaded_by: row.uploaded_by || null,
+          created_at: row.created_at || null,
+        })
+        assetsByJob.set(jobId, items)
+      }
+
+      const jobs = jobsResult.rows.map((row) => {
+        const jobId = Number(row.job_id)
+        const timeline = timelineByJob.get(jobId) || []
+        const documentPackages = packagesByJob.get(jobId) || []
+        const assets = assetsByJob.get(jobId) || []
+
+        const hasStructuredContractValue =
+          row.contract_amount !== null &&
+          row.contract_amount !== undefined
+
+        const hasSignedDocument = documentPackages.some(
+          (item) =>
+            item.status === "signed" ||
+            item.signed_at !== null
+        )
+
+        const hasInvoiceAsset = assets.some(
+          (item) => item.asset_type === "invoice"
+        )
+
+        const hasSupportingEvidence =
+          timeline.length > 0 ||
+          documentPackages.length > 0 ||
+          assets.length > 0
+
+        const flags: string[] = []
+
+        if (hasStructuredContractValue) {
+          flags.push("STRUCTURED_CONTRACT_VALUE")
+        }
+
+        if (hasSignedDocument) {
+          flags.push("SIGNED_FINANCIAL_DOCUMENT")
+        }
+
+        if (hasInvoiceAsset) {
+          flags.push("INVOICE_ASSET_EVIDENCE")
+        }
+
+        if (
+          hasStructuredContractValue &&
+          hasSupportingEvidence
+        ) {
+          flags.push(
+            "STRUCTURED_VALUE_PLUS_SUPPORTING_EVIDENCE"
+          )
+        }
+
+        if (
+          !hasStructuredContractValue &&
+          !hasSupportingEvidence
+        ) {
+          flags.push("NO_FINANCIAL_EVIDENCE")
+        }
+
+        if (
+          !hasStructuredContractValue &&
+          hasSupportingEvidence
+        ) {
+          flags.push("REVIEW_REQUIRED")
+        }
+
+        return {
+          job_id: jobId,
+          external_job_id: row.external_job_id || null,
+          customer: {
+            id:
+              row.customer_id === null
+                ? null
+                : Number(row.customer_id),
+            name: row.customer_name || null,
+            phone: row.customer_phone || null,
+            email: row.customer_email || null,
+          },
+          job_type: row.job_type || null,
+          stage: row.stage || null,
+          archived: row.stage === "archived",
+          address1: row.address1 || null,
+          city: row.city || null,
+          state: row.state || null,
+          zip: row.zip || null,
+          created_at: row.created_at || null,
+          updated_at: row.updated_at || null,
+          structured_financial: {
+            contract_amount:
+              row.contract_amount ?? null,
+            authority:
+              "job_estimate_details.contract_amount",
+          },
+          evidence: {
+            timeline,
+            document_packages: documentPackages,
+            assets,
+          },
+          flags,
+        }
+      })
+
+      return reply.send({
+        ok: true,
+        source: "contractor-navigator",
+        mode: "read-only-financial-census",
+        tenant: {
+          id: tenant.id,
+          slug: tenant.slug,
+        },
+        population: {
+          total_jobs: jobsResult.rowCount || 0,
+          returned_jobs: jobs.length,
+          complete:
+            (jobsResult.rowCount || 0) === jobs.length,
+        },
+        jobs,
+      })
+    }
+  )
+
+  app.get(
     "/integrations/financial-operations/:tenantSlug/jobs/:jobId",
     async (request: any, reply) => {
       if (!requireFinancialOperationsService(request)) {
