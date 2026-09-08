@@ -120,12 +120,29 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = request.params
       const numericJobId = Number(jobId)
-      const { package_id } = request.body || {}
+      const { package_id, asset_ids } = request.body || {}
+
+      const normalizedAssetIds = Array.isArray(asset_ids)
+
+        ? asset_ids
+
+            .map((value: unknown) => Number(value))
+
+            .filter((value: number) => Number.isInteger(value) && value > 0)
+
+        : []
+
 
       const result = await sendDocumentPackage(
+
         tenantSlug,
+
         numericJobId,
-        Number(package_id)
+
+        Number(package_id),
+
+        normalizedAssetIds
+
       )
 
       return result

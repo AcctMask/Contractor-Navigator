@@ -112,6 +112,74 @@ export async function listJobAssetsByTenantSlug(tenantSlug: string, jobId: numbe
   return result.rows
 }
 
+export async function resolveJobAssetsForOutbound(
+  tenantSlug: string,
+  jobId: number,
+  assetIds: number[]
+) {
+  await ensureAssetTable()
+
+  const tenantId = await getTenantIdBySlug(tenantSlug)
+  await ensureJobExists(tenantId, jobId)
+
+  const normalizedIds = Array.from(
+    new Set(
+      (Array.isArray(assetIds) ? assetIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  )
+
+  if (!normalizedIds.length) {
+    return []
+  }
+
+  const result = await pool.query(
+    `
+      select
+        id,
+        original_name,
+        stored_path,
+        mime_type,
+        file_size_bytes
+      from job_assets
+      where tenant_id = $1
+        and job_id = $2
+        and id = any($3::bigint[])
+      order by created_at asc, id asc
+    `,
+    [tenantId, jobId, normalizedIds]
+  )
+
+  if (result.rowCount !== normalizedIds.length) {
+    throw new Error(
+      "One or more selected attachments do not belong to this tenant/job"
+    )
+  }
+
+  const rowsById = new Map(
+    result.rows.map((row) => [Number(row.id), row])
+  )
+
+  const orderedRows = normalizedIds.map((id) => rowsById.get(id))
+
+  for (const row of orderedRows) {
+    if (!row) {
+      throw new Error("Selected attachment could not be resolved")
+    }
+
+    try {
+      await fs.access(String(row.stored_path))
+    } catch {
+      throw new Error(
+        `Attachment file is unavailable: ${row.original_name || row.id}`
+      )
+    }
+  }
+
+  return orderedRows
+}
+
 export async function saveJobAssetByTenantSlug(params: {
   tenantSlug: string
   jobId: number

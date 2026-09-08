@@ -1,7 +1,10 @@
 import { pool } from "../db/db"
 import { sendAlertEmail } from "./emailService"
 import { sendSMS } from "./twilioService"
-import { saveJobAssetByTenantSlug } from "./jobAssetsService"
+import {
+  resolveJobAssetsForOutbound,
+  saveJobAssetByTenantSlug,
+} from "./jobAssetsService"
 import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractHtml"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import fs from "fs"
@@ -1059,7 +1062,8 @@ export async function createDocumentPackageByTenantSlug(
 export async function sendDocumentPackage(
   tenantSlug: string,
   jobId: number,
-  packageId: number
+  packageId: number,
+  assetIds: number[] = []
 ) {
   await ensureDocumentTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -1108,6 +1112,20 @@ Sign here: ${signUrl}`
   let internalSmsResult: any = null
   let internalEmailResult: any = null
 
+  const selectedAssets = await resolveJobAssetsForOutbound(
+    tenantSlug,
+    jobId,
+    assetIds
+  )
+
+  const emailAttachments = await Promise.all(
+    selectedAssets.map(async (asset: any) => ({
+      filename: String(asset.original_name || `attachment-${asset.id}`),
+      content: (await fs.promises.readFile(String(asset.stored_path))).toString("base64"),
+      content_type: asset.mime_type ? String(asset.mime_type) : undefined,
+    }))
+  )
+
   if (job.customer_phone) {
     smsResult = await sendSMS(job.customer_phone, message)
   }
@@ -1116,7 +1134,10 @@ Sign here: ${signUrl}`
     emailResult = await sendAlertEmail(
       job.customer_email,
       documentPackage.document_title,
-      message
+      message,
+      emailAttachments.length
+        ? { attachments: emailAttachments }
+        : undefined
     )
   }
 
@@ -1226,6 +1247,8 @@ Sign here: ${signUrl}`
         package_type: documentPackage.package_type,
         document_title: documentPackage.document_title,
         sign_url: signUrl,
+        attachment_asset_ids: selectedAssets.map((asset: any) => Number(asset.id)),
+        attachment_names: selectedAssets.map((asset: any) => String(asset.original_name || "")),
         proposal_amount: documentPackage.payload?.proposal_amount ?? documentPackage.payload?.agreed_amount ?? null,
         contract_amount: documentPackage.payload?.contract_amount ?? documentPackage.payload?.agreed_amount ?? null,
         discount_amount: documentPackage.payload?.discount_amount ?? null,

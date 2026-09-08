@@ -201,6 +201,11 @@ export async function sendAlertEmail(
   options?: {
     cc?: string | string[]
     bcc?: string | string[]
+    attachments?: Array<{
+      filename: string
+      content: string
+      content_type?: string
+    }>
   }
 ) {
   try {
@@ -254,6 +259,17 @@ export async function sendAlertEmail(
         to,
         ...(options?.cc ? { cc: options.cc } : {}),
         ...(options?.bcc ? { bcc: options.bcc } : {}),
+        ...(options?.attachments?.length
+          ? {
+              attachments: options.attachments.map((attachment) => ({
+                filename: attachment.filename,
+                content: attachment.content,
+                ...(attachment.content_type
+                  ? { content_type: attachment.content_type }
+                  : {}),
+              })),
+            }
+          : {}),
         subject: safeSubject,
         text: safeText,
         html,

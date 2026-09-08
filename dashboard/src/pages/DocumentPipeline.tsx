@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { G2G_TERMS_AND_CONDITIONS } from "../lib/g2gTerms"
+import { getToken } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
 
 const API_BASE = import.meta.env.VITE_API_BASE 
@@ -58,6 +59,17 @@ type DocumentPackage = {
   created_at?: string
 }
 
+type JobAsset = {
+  id: number
+  asset_type?: string | null
+  asset_category?: string | null
+  original_name: string
+  mime_type?: string | null
+  file_size_bytes?: number | null
+  note?: string | null
+  created_at?: string | null
+}
+
 function addressLine(job?: JobSummary | null) {
   if (!job) return "—"
   return [job.address1, job.city, job.state, job.zip].filter(Boolean).join(", ") || "—"
@@ -85,6 +97,16 @@ export default function DocumentPipelinePage() {
   const [jobId, setJobId] = useState(() => searchParams.get("jobId") || "")
   const [job, setJob] = useState<JobSummary | null>(null)
   const [documents, setDocuments] = useState<DocumentPackage[]>([])
+  const [assets, setAssets] = useState<JobAsset[]>([])
+  const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([])
+  const [attachmentProgress, setAttachmentProgress] = useState<
+    Array<{
+      assetId: number
+      name: string
+      state: "pending" | "preparing" | "sent" | "failed"
+    }>
+  >([])
+  const [isSendingPackage, setIsSendingPackage] = useState(false)
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
@@ -232,6 +254,59 @@ export default function DocumentPipelinePage() {
     }
   }
 
+  async function loadAttachmentAssets() {
+    if (!jobId) {
+      setAssets([])
+      setSelectedAssetIds([])
+      return
+    }
+
+    try {
+      const token = getToken()
+
+      const res = await fetch(
+        `${API_BASE}/assets/${getTenantSlug()}/job/${jobId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      const json = await res.json()
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || "Failed to load job files")
+      }
+
+      const loadedAssets = Array.isArray(json.assets)
+        ? json.assets
+        : []
+
+      setAssets(loadedAssets)
+
+      setSelectedAssetIds((current) =>
+        current.filter((id) =>
+          loadedAssets.some(
+            (asset: JobAsset) =>
+              Number(asset.id) === id
+          )
+        )
+      )
+    } catch (err: any) {
+      setAssets([])
+      setSelectedAssetIds([])
+      errorToast(
+        err?.message ||
+          "Failed to load job files"
+      )
+    }
+  }
+
+  useEffect(() => {
+    void loadAttachmentAssets()
+  }, [jobId])
+
   async function saveEstimateDetails() {
     setError("")
     setStatus("Saving estimate details...")
@@ -292,19 +367,54 @@ export default function DocumentPipelinePage() {
   }
 
   async function sendPackage(packageId: number) {
+    if (isSendingPackage) return
+
     setError("")
-    setStatus("Sending package for signature...")
+    setIsSendingPackage(true)
+
+    const selectedAssets = selectedAssetIds
+      .map((assetId) =>
+        assets.find((asset) => Number(asset.id) === assetId)
+      )
+      .filter((asset): asset is JobAsset => Boolean(asset))
+
+    setAttachmentProgress(
+      selectedAssets.map((asset) => ({
+        assetId: Number(asset.id),
+        name: asset.original_name,
+        state: "pending",
+      }))
+    )
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/send-package`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          package_id: packageId,
-        }),
-      })
+      for (const asset of selectedAssets) {
+        setAttachmentProgress((current) =>
+          current.map((item) =>
+            item.assetId === Number(asset.id)
+              ? { ...item, state: "preparing" }
+              : item
+          )
+        )
+
+        setStatus(`Preparing attachment: ${asset.original_name}`)
+        await Promise.resolve()
+      }
+
+      setStatus("Sending package for signature...")
+
+      const res = await fetch(
+        `${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/send-package`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            package_id: packageId,
+            asset_ids: selectedAssetIds,
+          }),
+        }
+      )
 
       const json = await res.json()
 
@@ -312,11 +422,34 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Send package failed")
       }
 
-      successToast("Package sent for signature")
+      setAttachmentProgress((current) =>
+        current.map((item) => ({
+          ...item,
+          state: "sent",
+        }))
+      )
+
+      successToast(
+        selectedAssets.length
+          ? `Package sent with ${selectedAssets.length} document${
+              selectedAssets.length === 1 ? "" : "s"
+            }`
+          : "Package sent for signature"
+      )
+
       await loadJob()
     } catch (err: any) {
+      setAttachmentProgress((current) =>
+        current.map((item) => ({
+          ...item,
+          state: "failed",
+        }))
+      )
+
       errorToast(err?.message || "Send package failed")
       setStatus("Send package failed")
+    } finally {
+      setIsSendingPackage(false)
     }
   }
 
@@ -732,6 +865,150 @@ export default function DocumentPipelinePage() {
       </section>
 
       <section style={cardStyle}>
+        <h2 style={{ marginTop: 0 }}>Attachments</h2>
+
+        <p style={{ marginTop: 0, opacity: 0.8 }}>
+          Select existing job files to include with the customer email.
+          Nothing selected preserves the current send behavior.
+        </p>
+
+        {assets.filter(
+          (asset) =>
+            String(asset.asset_category || "").trim() === "Documents"
+        ).length ? (
+          <div style={{ display: "grid", gap: "10px" }}>
+            {assets
+              .filter(
+                (asset) =>
+                  String(asset.asset_category || "").trim() === "Documents"
+              )
+              .map((asset) => {
+              const assetId = Number(asset.id)
+              const checked =
+                selectedAssetIds.includes(assetId)
+
+              return (
+                <label
+                  key={assetId}
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "flex-start",
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      setSelectedAssetIds(
+                        (current) =>
+                          event.target.checked
+                            ? Array.from(
+                                new Set([
+                                  ...current,
+                                  assetId,
+                                ])
+                              )
+                            : current.filter(
+                                (id) =>
+                                  id !== assetId
+                              )
+                      )
+                    }}
+                  />
+
+                  <span>
+                    <strong>
+                      {asset.original_name}
+                    </strong>
+
+                    <span
+                      style={{
+                        display: "block",
+                        opacity: 0.7,
+                        fontSize: "0.9rem",
+                      }}
+                    >
+                      {asset.asset_category ||
+                        asset.asset_type ||
+                        "Job file"}
+                      {asset.note
+                        ? ` — ${asset.note}`
+                        : ""}
+                    </span>
+                  </span>
+                </label>
+              )
+            })}
+
+            <div
+              style={{
+                marginTop: "6px",
+                opacity: 0.75,
+              }}
+            >
+              {selectedAssetIds.length
+                ? `${selectedAssetIds.length} attachment${
+                    selectedAssetIds.length === 1
+                      ? ""
+                      : "s"
+                  } selected`
+                : "No attachments selected"}
+            </div>
+          </div>
+        ) : (
+          <p style={{ opacity: 0.75 }}>
+            No job documents are available to attach.
+          </p>
+        )}
+      </section>
+
+      {attachmentProgress.length ? (
+        <section style={cardStyle}>
+          <h2 style={{ marginTop: 0 }}>Send Progress</h2>
+
+          <div style={{ display: "grid", gap: "8px" }}>
+            {attachmentProgress.map((item) => (
+              <div
+                key={item.assetId}
+                style={{
+                  fontWeight: 700,
+                  color:
+                    item.state === "sent"
+                      ? "#86efac"
+                      : item.state === "failed"
+                        ? "#fca5a5"
+                        : "inherit",
+                }}
+              >
+                {item.state === "pending" ? "○ " : null}
+                {item.state === "preparing" ? "⏳ " : null}
+                {item.state === "sent" ? "✓ " : null}
+                {item.state === "failed" ? "✕ " : null}
+
+                {item.state === "pending"
+                  ? `Waiting: ${item.name}`
+                  : null}
+
+                {item.state === "preparing"
+                  ? `Preparing ${item.name}...`
+                  : null}
+
+                {item.state === "sent"
+                  ? `Sent: ${item.name}`
+                  : null}
+
+                {item.state === "failed"
+                  ? `Failed: ${item.name}`
+                  : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section style={cardStyle}>
         <h2 style={{ marginTop: 0 }}>Generated Packages</h2>
 
         {documents.length ? (
@@ -758,8 +1035,19 @@ export default function DocumentPipelinePage() {
                   <a href={`/sign/${doc.id}`} target="_blank" rel="noreferrer" style={linkButtonStyle}>
                     View / Sign
                   </a>
-                  <button type="button" onClick={() => sendPackage(doc.id)} style={buttonStyle}>
-                    Send For Signature
+                  <button
+                    type="button"
+                    onClick={() => sendPackage(doc.id)}
+                    disabled={isSendingPackage}
+                    style={{
+                      ...buttonStyle,
+                      opacity: isSendingPackage ? 0.72 : 1,
+                      cursor: isSendingPackage ? "wait" : "pointer",
+                    }}
+                  >
+                    {isSendingPackage
+                      ? "⏳ Sending..."
+                      : "Send For Signature"}
                   </button>
                 </div>
               </div>
