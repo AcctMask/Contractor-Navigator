@@ -828,8 +828,33 @@ async function recordNavigatorHeadquartersExecutionSelection(
   )
 }
 
-function countExistingAiMessagesForStage(timeline: TimelineRow[], stage: string) {
-  return countCompletedAiFollowups(timeline, stage)
+function countExistingAiMessagesForStage(
+  timeline: TimelineRow[],
+  stage: string,
+  workflowStartedAt?: string | null
+) {
+  const workflowStartMs =
+    workflowStartedAt
+      ? new Date(workflowStartedAt).getTime()
+      : Number.NaN
+
+  const scopedTimeline =
+    Number.isFinite(workflowStartMs)
+      ? timeline.filter((event) => {
+          const eventMs =
+            new Date(event.created_at).getTime()
+
+          return (
+            Number.isFinite(eventMs) &&
+            eventMs >= workflowStartMs
+          )
+        })
+      : timeline
+
+  return countCompletedAiFollowups(
+    scopedTimeline,
+    stage
+  )
 }
 
 function hasTimelineKind(timeline: TimelineRow[], kind: string) {
@@ -1012,7 +1037,11 @@ function buildAiMessage(job: JobRow, timeline: TimelineRow[], settings: DevSetti
   const stageMessages = workflow.messages.filter((m) => String(m || "").trim().length > 0)
   if (!stageMessages.length) return null
 
-  const count = countExistingAiMessagesForStage(timeline, workflow.workflowKey)
+  const count = countExistingAiMessagesForStage(
+    timeline,
+    workflow.workflowKey,
+    job.followup_workflow_started_at
+  )
   const rawMessage = stageMessages[Math.min(count, stageMessages.length - 1)]
 
   return {
