@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "crypto"
+import fs from "node:fs"
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
+import { resolveJobAssetsForOutbound } from "../services/jobAssetsService"
 
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
@@ -861,5 +863,101 @@ export async function registerFinancialOperationsBridgeRoutes(
       })
     }
   )
+
+
+  app.get(
+    "/integrations/financial-operations/:tenantSlug/jobs/:jobId/assets/:assetId/file",
+    async (request: any, reply) => {
+      if (!requireFinancialOperationsService(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || ""
+      ).trim()
+
+      const jobId = Number(request.params?.jobId)
+      const assetId = Number(request.params?.assetId)
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required",
+        })
+      }
+
+      if (!Number.isInteger(jobId) || jobId <= 0) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Valid jobId is required",
+        })
+      }
+
+      if (!Number.isInteger(assetId) || assetId <= 0) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Valid assetId is required",
+        })
+      }
+
+      try {
+        const assets = await resolveJobAssetsForOutbound(
+          tenantSlug,
+          jobId,
+          [assetId]
+        )
+
+        if (assets.length !== 1) {
+          return reply.code(404).send({
+            ok: false,
+            error: "Asset not found",
+          })
+        }
+
+        const asset = assets[0] as {
+          id: number
+          original_name: string | null
+          stored_path: string
+          mime_type: string | null
+          file_size_bytes: number | null
+        }
+
+        reply.header(
+          "Content-Type",
+          asset.mime_type || "application/octet-stream"
+        )
+
+        reply.header(
+          "Content-Disposition",
+          `inline; filename="${String(
+            asset.original_name || `asset-${assetId}`
+          ).replace(/["\r\n]/g, "")}"`
+        )
+
+        return reply.send(
+          fs.createReadStream(asset.stored_path)
+        )
+      } catch (error: any) {
+        request.log.error(
+          {
+            err: error,
+            tenantSlug,
+            jobId,
+            assetId,
+          },
+          "Financial Operations asset bridge failed"
+        )
+
+        return reply.code(404).send({
+          ok: false,
+          error: "Asset not found",
+        })
+      }
+    }
+  )
+
 
 }
