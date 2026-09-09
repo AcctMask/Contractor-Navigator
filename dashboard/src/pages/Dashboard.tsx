@@ -498,7 +498,7 @@ export default function DashboardPage() {
                     style={{
                       ...statCard,
                       ...(stageColors || {}),
-                      ...(attention
+                      ...(attention && filter_type !== "stage"
                         ? statCardAttention
                         : {}),
                       ...(selectedStage === id
