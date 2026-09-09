@@ -389,6 +389,65 @@ async function hasFollowupSmsForCall(callSid: string | null | undefined) {
   return Boolean(result.rowCount)
 }
 
+
+async function hasGood2GoVoiceAlertForCall(
+  callSid: string | null | undefined
+) {
+  if (!callSid) return false
+
+  const result = await pool.query(
+    `
+    select id
+    from timeline_events
+    where kind = 'voice_good2go_alert_sent'
+      and meta->>'call_sid' = $1
+    limit 1
+    `,
+    [callSid]
+  )
+
+  return Boolean(result.rowCount)
+}
+
+async function sendGood2GoVoiceAlertOnce(
+  tenantSlug: string,
+  jobId: number,
+  callSid: string | null | undefined,
+  trigger: "urgent_reason" | "completed_intake"
+) {
+  const normalizedCallSid =
+    String(callSid || "").trim() || null
+
+  if (
+    normalizedCallSid &&
+    await hasGood2GoVoiceAlertForCall(normalizedCallSid)
+  ) {
+    return false
+  }
+
+  await sendVoiceIntakeAlert(
+    tenantSlug,
+    jobId
+  )
+
+  const tenantId =
+    await getTenantIdBySlug(tenantSlug)
+
+  await addTimelineEvent(
+    tenantId,
+    jobId,
+    "voice_good2go_alert_sent",
+    "Good2Go inbound voice alert sent",
+    {
+      channel: "voice",
+      call_sid: normalizedCallSid,
+      trigger,
+    }
+  )
+
+  return true
+}
+
 async function getLatestJobByPhone(
   phone: string | null,
   tenantId: number
@@ -483,8 +542,38 @@ async function getOrCreateVoiceJob(tenantSlug: string, from: string | null, call
     }
   }
 
-  const created = await startVoiceIntakeLead(tenantSlug, from)
   const tenantId = await getTenantIdBySlug(tenantSlug)
+
+  if (from) {
+    const existingJob = await getLatestJobByPhone(from, tenantId)
+
+    if (existingJob?.job_id) {
+      const existingJobId = Number(existingJob.job_id)
+
+      await addVoiceCallReceivedOnce(
+        tenantId,
+        existingJobId,
+        callSid,
+        from
+      )
+
+      console.log("[VOICE_DIAG] inbound caller matched existing Navigator job by phone", {
+        tenantSlug,
+        tenantId,
+        jobId: existingJobId,
+        from,
+        callSid,
+      })
+
+      return {
+        tenant_id: tenantId,
+        job_id: existingJobId,
+        reused: true,
+      }
+    }
+  }
+
+  const created = await startVoiceIntakeLead(tenantSlug, from)
 
   await addVoiceCallReceivedOnce(tenantId, Number(created.job_id), callSid, from)
 
@@ -2550,6 +2639,15 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       routingReason
     )
 
+    if (routingReason === "Emergency tarp or emergency service") {
+      await sendGood2GoVoiceAlertOnce(
+        String(tenantSlug),
+        Number(jobId),
+        String(callSid || ""),
+        "urgent_reason"
+      )
+    }
+
     const actionUrl =
       buildActionUrl(
         "/twilio/voice/name",
@@ -2892,7 +2990,12 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       reason
     )
 
-    await sendVoiceIntakeAlert(String(tenantSlug), Number(jobId))
+    await sendGood2GoVoiceAlertOnce(
+      String(tenantSlug),
+      Number(jobId),
+      String(callSid || ""),
+      "completed_intake"
+    )
 
     const summary = await getVoiceSummary(String(tenantSlug), Number(jobId))
     const finalMessage = await getVoiceFinalConfirmation(String(tenantSlug), Number(jobId))
