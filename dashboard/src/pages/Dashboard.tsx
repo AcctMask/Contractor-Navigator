@@ -864,7 +864,7 @@ const statsGrid: CSSProperties = {
 
 
 const statCard: CSSProperties = {
-  background: "rgba(30, 58, 138, 0.55)",
+  backgroundColor: "rgba(30, 58, 138, 0.55)",
   border: "1px solid rgba(147, 197, 253, 0.42)",
   borderRadius: "16px",
   padding: "10px 12px",
@@ -873,12 +873,12 @@ const statCard: CSSProperties = {
 
 const statCardActive: CSSProperties = {
   border: "1px solid rgba(191, 219, 254, 0.95)",
-  background: "rgba(59, 130, 246, 0.78)",
+  backgroundColor: "rgba(59, 130, 246, 0.78)",
   boxShadow: "0 0 0 1px rgba(147, 197, 253, 0.45), 0 12px 28px rgba(37, 99, 235, 0.28)",
 }
 
 const statCardAttention: CSSProperties = {
-  background: "rgba(180, 83, 9, 0.62)",
+  backgroundColor: "rgba(180, 83, 9, 0.62)",
   border: "1px solid rgba(251, 191, 36, 0.62)",
   boxShadow: "0 12px 28px rgba(180, 83, 9, 0.18)",
 }
