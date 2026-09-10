@@ -396,7 +396,11 @@ export async function registerFinancialOperationsBridgeRoutes(
             j.zip,
             j.created_at,
             j.updated_at,
+            j.carrier,
+            j.claim_number,
             c.full_name as customer_name,
+            c.phone as customer_phone,
+            c.email as customer_email,
             jed.contract_amount
           from jobs j
           left join customers c
@@ -520,12 +524,16 @@ export async function registerFinancialOperationsBridgeRoutes(
               ? null
               : Number(row.customer_id),
           name: row.customer_name || null,
+          phone: row.customer_phone || null,
+          email: row.customer_email || null,
         },
         job: {
           id: Number(row.job_id),
           external_job_id: row.external_job_id || null,
           stage: row.stage || null,
           job_type: row.job_type || null,
+          carrier: row.carrier || null,
+          claim_number: row.claim_number || null,
           address1: row.address1 || null,
           city: row.city || null,
           state: row.state || null,
