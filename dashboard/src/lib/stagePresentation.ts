@@ -56,6 +56,7 @@ export function stagePresentation(
       }
 
     // Work completed
+    case "contract_signed":
     case "tarp_complete":
     case "completed":
       return {

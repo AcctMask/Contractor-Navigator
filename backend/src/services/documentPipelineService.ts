@@ -1332,6 +1332,20 @@ export async function signDocumentPackage(
 
   const isEmsTarp = doc.package_type === "ems_tarp"
 
+  if (!isEmsTarp) {
+    await pool.query(
+      `
+      update jobs
+      set
+        stage = 'contract_signed',
+        updated_at = now()
+      where tenant_id = $1
+        and id = $2
+      `,
+      [Number(doc.tenant_id), Number(doc.job_id)]
+    )
+  }
+
   if (isEmsTarp) {
     try {
       await saveSignedEmsWaPdfAsset({
@@ -1434,7 +1448,7 @@ export async function signDocumentPackage(
         terms_accepted: updatedPayload.terms_accepted ?? null,
         terms_version: updatedPayload.terms_version ?? null,
         terms_url: updatedPayload.terms_url ?? null,
-        crm_stage: isEmsTarp ? "tarp" : null,
+        crm_stage: isEmsTarp ? "tarp" : "contract_signed",
         crm_substatus: isEmsTarp ? "ems_authorized_ready_for_crew" : null,
         wa_status: isEmsTarp ? "signed" : null,
       }),

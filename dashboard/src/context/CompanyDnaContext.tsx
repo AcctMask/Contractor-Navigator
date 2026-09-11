@@ -229,6 +229,14 @@ const defaultWorkspace: WorkspaceDefinition = {
         attention: true,
       },
       {
+        id: "contract-signed",
+        label: "Contract Signed",
+        filter_type: "stage",
+        filter_value:
+          "contract_signed",
+        attention: false,
+      },
+      {
         id: "pre-production",
         label: "Pre Production",
         filter_type: "stage",
