@@ -309,7 +309,7 @@ export default function DocumentPipelinePage() {
 
   async function saveEstimateDetails() {
     setError("")
-    setStatus("Saving estimate details...")
+    setStatus("Saving contract details...")
 
     try {
       const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/estimate-details`, {
@@ -326,7 +326,7 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Save failed")
       }
 
-      successToast("Estimate details saved")
+      successToast("Contract details saved")
       await loadJob()
     } catch (err: any) {
       errorToast(err?.message || "Save failed")
@@ -458,6 +458,31 @@ export default function DocumentPipelinePage() {
     setStatus(`Creating ${packageType} package...`)
 
     try {
+      if (packageType === "retail_estimate") {
+        setStatus("Saving current contract details...")
+
+        const saveRes = await fetch(
+          `${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/estimate-details`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(cleanEstimatePayload(form)),
+          }
+        )
+
+        const saveJson = await saveRes.json()
+
+        if (!saveRes.ok) {
+          throw new Error(
+            saveJson?.error || "Save contract details failed"
+          )
+        }
+
+        setStatus("Creating contract...")
+      }
+
       const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/create-package`, {
         method: "POST",
         headers: {
@@ -568,7 +593,7 @@ export default function DocumentPipelinePage() {
       </section>
 
       <section style={cardStyle}>
-        <h2 style={{ marginTop: 0 }}>Estimator Details</h2>
+        <h2 style={{ marginTop: 0 }}>Contract Details</h2>
 
         <div style={{ display: "grid", gap: "14px" }}>
           <div>
@@ -593,118 +618,30 @@ export default function DocumentPipelinePage() {
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
             <div>
-              <label style={labelStyle}>Low Amount</label>
-              <input
-                value={form.low_amount ?? ""}
-                onChange={(e) =>
-                  setField("low_amount", e.target.value === "" ? null : Number(e.target.value))
-                }
-                placeholder="9800"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>High Amount</label>
-              <input
-                value={form.high_amount ?? ""}
-                onChange={(e) =>
-                  setField("high_amount", e.target.value === "" ? null : Number(e.target.value))
-                }
-                placeholder="11800"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Retail Price</label>
-              <input
-                value={form.agreed_amount ?? ""}
-                onChange={(e) =>
-                  setField("agreed_amount", e.target.value === "" ? null : Number(e.target.value))
-                }
-                placeholder="10500"
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px" }}>
-            <div>
-              <label style={labelStyle}>Proposal Type</label>
+              <label style={labelStyle}>Contract Type</label>
               <select
                 value={form.proposal_type || "retail"}
                 onChange={(e) => setField("proposal_type", e.target.value)}
                 style={inputStyle}
               >
-                <option value="retail">Retail Estimate / Contract</option>
-                <option value="insurance">Insurance Proposal / Contract</option>
+                <option value="retail">Retail Contract</option>
+                <option value="insurance">Insurance Contract</option>
               </select>
-            </div>
-
-            <div>
-              <label style={labelStyle}>Proposal Amount</label>
-              <input
-                value={form.proposal_amount ?? ""}
-                onChange={(e) => {
-                  const proposalAmount = e.target.value === "" ? null : Number(e.target.value)
-                  setForm((prev) => ({
-                    ...prev,
-                    proposal_amount: proposalAmount,
-                    contract_amount: prev.contract_amount ?? proposalAmount,
-                    discount_amount:
-                      proposalAmount != null && prev.contract_amount != null
-                        ? Number(proposalAmount) - Number(prev.contract_amount)
-                        : prev.discount_amount ?? null,
-                  }))
-                }}
-                placeholder="18500"
-                style={inputStyle}
-              />
             </div>
 
             <div>
               <label style={labelStyle}>Contract Amount</label>
               <input
                 value={form.contract_amount ?? ""}
-                onChange={(e) => {
-                  const contractAmount = e.target.value === "" ? null : Number(e.target.value)
-                  setForm((prev) => ({
-                    ...prev,
-                    contract_amount: contractAmount,
-                    discount_amount:
-                      prev.proposal_amount != null && contractAmount != null
-                        ? Number(prev.proposal_amount) - Number(contractAmount)
-                        : null,
-                  }))
-                }}
-                placeholder="17500"
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "14px" }}>
-            <div>
-              <label style={labelStyle}>Discount Amount</label>
-              <input
-                value={form.discount_amount ?? ""}
                 onChange={(e) =>
-                  setField("discount_amount", e.target.value === "" ? null : Number(e.target.value))
+                  setField(
+                    "contract_amount",
+                    e.target.value === "" ? null : Number(e.target.value)
+                  )
                 }
-                placeholder="1000"
-                style={inputStyle}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Discount Reason / Negotiation Note</label>
-              <input
-                value={form.discount_reason || ""}
-                onChange={(e) => setField("discount_reason", e.target.value)}
-                placeholder="Customer agreed to sign today if price reduced by $1,000"
+                placeholder="17500"
                 style={inputStyle}
               />
             </div>
@@ -792,7 +729,7 @@ export default function DocumentPipelinePage() {
           </div>
 
           <div>
-            <label style={labelStyle}>Estimator Remarks</label>
+            <label style={labelStyle}>Contract Notes</label>
             <textarea
               value={form.estimator_remarks || ""}
               onChange={(e) => setField("estimator_remarks", e.target.value)}
@@ -803,7 +740,7 @@ export default function DocumentPipelinePage() {
 
           <div style={{ display: "grid", gap: "12px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center" }}>
-              <label style={{ ...labelStyle, marginBottom: 0 }}>Retail Estimate Line Items</label>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Contract Line Items</label>
               <button type="button" onClick={addLineItem} style={buttonStyle}>
                 Add Line Item
               </button>
@@ -842,7 +779,7 @@ export default function DocumentPipelinePage() {
 
           <div>
             <button onClick={saveEstimateDetails} style={buttonStyle}>
-              Save Estimator Details
+              Save Contract Details
             </button>
           </div>
         </div>
@@ -853,7 +790,7 @@ export default function DocumentPipelinePage() {
 
         <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
           <button onClick={() => createPackage("retail_estimate")} style={buttonStyle}>
-            Create Retail Estimate / Contract
+            Create Contract
           </button>
           <button onClick={() => createPackage("insurance_contract")} style={buttonStyle}>
             Create Insurance Contract
@@ -1019,13 +956,7 @@ export default function DocumentPipelinePage() {
                 <div style={{ opacity: 0.9 }}>Type: {doc.package_type}</div>
                 <div style={{ opacity: 0.9 }}>Status: {doc.status}</div>
                 <div style={{ opacity: 0.9 }}>
-                  Proposal Amount: {doc.payload?.proposal_amount ? `$${Number(doc.payload.proposal_amount).toLocaleString()}` : "—"}
-                </div>
-                <div style={{ opacity: 0.9 }}>
                   Contract Amount: {doc.payload?.contract_amount ? `$${Number(doc.payload.contract_amount).toLocaleString()}` : "—"}
-                </div>
-                <div style={{ opacity: 0.9 }}>
-                  Discount: {doc.payload?.discount_amount ? `$${Number(doc.payload.discount_amount).toLocaleString()}` : "—"}
                 </div>
                 <div style={{ opacity: 0.75 }}>Template: {doc.template_source || "—"}</div>
                 <div style={{ opacity: 0.65 }}>

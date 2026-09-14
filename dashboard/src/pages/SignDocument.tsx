@@ -214,8 +214,8 @@ export default function SignDocument() {
               <Info label="Property Address" value={propertyAddress} />
               {isRetailContract ? (
                 <Info
-                  label="Proposal / Contract Amount"
-                  value={moneyDisplay(contractAmount) || moneyDisplay(proposalAmount) || amountDisplay}
+                  label="Contract Amount"
+                  value={moneyDisplay(contractAmount) || "To be determined"}
                 />
               ) : null}
 
@@ -254,12 +254,12 @@ export default function SignDocument() {
                   </p>
 
                   <p style={docText}>
-                    Proposal / Contract Amount: {moneyDisplay(contractAmount) || moneyDisplay(proposalAmount) || amountDisplay}
+                    Contract Amount: {moneyDisplay(contractAmount) || "To be determined"}
                   </p>
 
                   {Array.isArray(payload.estimate_line_items) && payload.estimate_line_items.length ? (
                     <div style={docText}>
-                      <strong>Retail Estimate Line Items:</strong>
+                      <strong>Contract Line Items:</strong>
                       <ul>
                         {payload.estimate_line_items.map((item: any, index: number) => (
                           <li key={index}>

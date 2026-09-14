@@ -953,7 +953,12 @@ export async function createDocumentPackageByTenantSlug(
         null,
       vip_benefits_included: true,
       document_display_mode: "retail_contract",
-      ready_for_signature: !!details?.agreed_amount,
+      ready_for_signature:
+        !!(
+          details?.contract_amount ??
+          details?.proposal_amount ??
+          details?.agreed_amount
+        ),
     }
   } else if (packageType === "insurance_contract") {
     documentTitle = `Insurance Contract - ${customerName}`

@@ -36,14 +36,36 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
 
   if (displayMode === "retail_contract") {
     rows.push(
-      ["Proposal / Contract Amount", moneyValue(
-        payload.proposal_contract_amount ??
+      ["Contract Amount", moneyValue(
         payload.contract_amount ??
+        payload.proposal_contract_amount ??
         payload.proposal_amount ??
         payload.agreed_amount
       )],
       ["Roof Type", payload.roof_type],
       ["Roof Squares", payload.roof_squares]
+    )
+  }
+
+  if (
+    displayMode === "retail_contract" &&
+    Array.isArray(payload.estimate_line_items)
+  ) {
+    payload.estimate_line_items.forEach(
+      (item: any, index: number) => {
+        rows.push([
+          `Contract Line Item ${index + 1}`,
+          [
+            String(item?.description || "").trim(),
+            item?.amount !== null &&
+            item?.amount !== undefined
+              ? moneyValue(item.amount)
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" — "),
+        ])
+      }
     )
   }
 
@@ -68,7 +90,7 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
 
   if (!isEmsWorkAuthorization) {
     rows.push(
-      ["Estimator Remarks", payload.estimator_remarks]
+      ["Contract Notes", payload.estimator_remarks]
     )
   }
 
