@@ -901,6 +901,29 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               }),
             ]
           )
+
+          if (!workflowPaused) {
+            const alertEmail =
+              String(settings.alert_email_to || "").trim()
+
+            if (alertEmail) {
+              await sendAlertEmail(
+                alertEmail,
+                `AI Follow-Up Started — Job #${jobId} — ${nextStage}`,
+                [
+                  "Navigator started an AI Follow-Up workflow.",
+                  "",
+                  `Job ID: ${jobId}`,
+                  `Previous Stage: ${previousStage || "none"}`,
+                  `New Stage: ${nextStage}`,
+                  `Staff Action By: ${actor.full_name || actor.email || "Authenticated Staff"}`,
+                  "",
+                  "AI Follow-Up has started from Message 1.",
+                  "Customer Message 1 remains scheduled according to this workflow's configured timing sequence.",
+                ].join("\n")
+              )
+            }
+          }
         }
       }
 
@@ -943,6 +966,30 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             }),
           ]
         )
+
+        const restartSettings =
+          await getDeveloperSettingsByTenantSlug(tenantSlug)
+
+        const restartAlertEmail =
+          String(restartSettings.alert_email_to || "").trim()
+
+        if (restartAlertEmail) {
+          await sendAlertEmail(
+            restartAlertEmail,
+            `AI Follow-Up Restarted — Job #${jobId} — ${restartedFollowupWorkflow}`,
+            [
+              "Navigator restarted an AI Follow-Up workflow.",
+              "",
+              `Job ID: ${jobId}`,
+              `Workflow: ${restartedFollowupWorkflow}`,
+              `Staff Action By: ${actor.full_name || actor.email || "Authenticated Staff"}`,
+              "",
+              "Bot was unpaused.",
+              "AI Follow-Up restarted from Message 1.",
+              "Customer Message 1 remains scheduled according to this workflow's configured timing sequence.",
+            ].join("\n")
+          )
+        }
       }
 
       if (stage && ["archived", "disqualified"].includes(stage)) {
