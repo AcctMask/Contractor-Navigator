@@ -3,6 +3,8 @@ import fs from "node:fs"
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { resolveJobAssetsForOutbound } from "../services/jobAssetsService"
+import { getTenantRuntimeBySlug } from "../services/companyDnaRuntimeService"
+import { getDeveloperSettings } from "../services/devSettingsService"
 
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
@@ -398,6 +400,9 @@ export async function registerFinancialOperationsBridgeRoutes(
             j.updated_at,
             j.carrier,
             j.claim_number,
+            j.adjuster_name,
+            j.adjuster_phone,
+            j.adjuster_email,
             c.full_name as customer_name,
             c.phone as customer_phone,
             c.email as customer_email,
@@ -424,6 +429,60 @@ export async function registerFinancialOperationsBridgeRoutes(
       }
 
       const row = result.rows[0]
+
+      let tenantBranding: {
+        business_display_name: string | null
+        dba_name: string | null
+        website: string | null
+        email: string | null
+        phone: string | null
+      } | null = null
+
+      let alertEmailTo: string | null = null
+
+      try {
+        const runtime =
+          await getTenantRuntimeBySlug(tenant.slug)
+
+        tenantBranding = {
+          business_display_name:
+            runtime.branding.business_display_name || null,
+          dba_name:
+            runtime.branding.dba_name || null,
+          website:
+            runtime.branding.website || null,
+          email:
+            runtime.branding.email || null,
+          phone:
+            runtime.branding.phone || null,
+        }
+      } catch (error) {
+        request.log.warn(
+          {
+            err: error,
+            tenantSlug: tenant.slug,
+          },
+          "Unable to resolve Company DNA branding for FOM bridge"
+        )
+      }
+
+      try {
+        const settings =
+          await getDeveloperSettings(tenant.id)
+
+        alertEmailTo =
+          String(
+            settings.alert_email_to || ""
+          ).trim() || null
+      } catch (error) {
+        request.log.warn(
+          {
+            err: error,
+            tenantSlug: tenant.slug,
+          },
+          "Unable to resolve tenant alert email for FOM bridge"
+        )
+      }
 
       const timelineResult = await pool.query(
         `
@@ -517,6 +576,8 @@ export async function registerFinancialOperationsBridgeRoutes(
         tenant: {
           id: tenant.id,
           slug: tenant.slug,
+          branding: tenantBranding,
+          alert_email_to: alertEmailTo,
         },
         customer: {
           id:
@@ -534,6 +595,9 @@ export async function registerFinancialOperationsBridgeRoutes(
           job_type: row.job_type || null,
           carrier: row.carrier || null,
           claim_number: row.claim_number || null,
+          adjuster_name: row.adjuster_name || null,
+          adjuster_phone: row.adjuster_phone || null,
+          adjuster_email: row.adjuster_email || null,
           address1: row.address1 || null,
           city: row.city || null,
           state: row.state || null,
