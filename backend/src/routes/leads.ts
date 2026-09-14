@@ -341,7 +341,11 @@ async function registerLeadRoutes(app: FastifyInstance) {
     const email = asString(body.email);
 
     const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, asString(body.address));
-    const classification = classifyEstimatorLead(body);
+    const classification = {
+      jobType: "ROOF_REPLACEMENT",
+      stage: "estimate_sent",
+      crmSubstatus: null,
+    };
     const leadIntent = classifyLeadIntent(body);
 
 const insertedJob = await pool.query(
@@ -387,7 +391,7 @@ const insertedJob = await pool.query(
     asString(body.zip),
 
     asString(body.lead_source) ||
-      "estimator",
+      "Estimator",
 
     asString(body.lead_source_detail) ||
       asString(body.custSource) ||
