@@ -751,9 +751,11 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
   const decidedStage =
     isVoiceIntakeJob
       ? (
-          qualifiesAsLead
-            ? "lead"
-            : "intake_pending"
+          summary.emergencyTarpRequested
+            ? "tarp"
+            : qualifiesAsLead
+              ? "lead"
+              : "intake_pending"
         )
       : existingStage
 
