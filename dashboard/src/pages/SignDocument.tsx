@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { G2G_TERMS_AND_CONDITIONS } from "../lib/g2gTerms"
 
@@ -104,10 +104,6 @@ export default function SignDocument() {
 
   const customerName = payload.customer_name || "Customer"
   const propertyAddress = payload.job_address || "Address to be confirmed"
-  const lowAmount = payload.low_amount
-  const highAmount = payload.high_amount
-  const agreedAmount = payload.agreed_amount
-  const proposalAmount = payload.proposal_amount
   const contractAmount = payload.contract_amount ?? payload.proposal_amount ?? payload.agreed_amount
   const vipBenefitsIncluded = !!payload.vip_benefits_included
   const documentDisplayMode = String(payload.document_display_mode || "")
@@ -126,18 +122,6 @@ export default function SignDocument() {
             ? payloadTerms
             : G2G_TERMS_AND_CONDITIONS
         )
-  const amountDisplay = useMemo(() => {
-    const agreed = moneyDisplay(agreedAmount)
-    const low = moneyDisplay(lowAmount)
-    const high = moneyDisplay(highAmount)
-
-    if (agreed) return agreed
-    if (low && high) return `${low} - ${high}`
-    if (low) return low
-    if (high) return high
-    return "To be determined"
-  }, [agreedAmount, lowAmount, highAmount])
-
   if (status === "loading") {
     return (
       <div style={page}>
