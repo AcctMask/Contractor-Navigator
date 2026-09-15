@@ -1977,7 +1977,7 @@ export default function JobDetail() {
                   borderRadius: 8,
                 }}
               >
-                Send Proposal / Contract
+                Contract
               </Link>
             ) : null}
           </div>
