@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify"
+import { getCurrentUserFromToken } from "../services/authService"
 import {
+  adminApproveSupplement,
   createDocumentPackageByTenantSlug,
   getDocumentPackageById,
   getEstimateDetailsByTenantSlug,
@@ -98,12 +100,20 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = request.params
       const numericJobId = Number(jobId)
-      const { package_type } = request.body || {}
+      const {
+        package_type,
+        adjustment_description,
+        adjustment_line_items,
+      } = request.body || {}
 
       const documentPackage = await createDocumentPackageByTenantSlug(
         tenantSlug,
         numericJobId,
-        package_type
+        package_type,
+        {
+          adjustment_description,
+          adjustment_line_items,
+        }
       )
 
       return {
@@ -164,6 +174,107 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
       return { ok: false, error: err?.message || String(err) }
     }
   })
+
+
+  app.post(
+    "/pipeline/:tenantSlug/document/:documentPackageId/admin-approve",
+    async (request: any, reply) => {
+      try {
+        const auth = String(request.headers.authorization || "")
+        const token = auth.startsWith("Bearer ")
+          ? auth.slice(7)
+          : ""
+
+        if (!token) {
+          return reply.code(401).send({
+            ok: false,
+            error: "Authentication required",
+          })
+        }
+
+        const actor = await getCurrentUserFromToken(token)
+
+        if (!actor?.is_active) {
+          return reply.code(401).send({
+            ok: false,
+            error: "Authentication required",
+          })
+        }
+
+        const allowedRoles = [
+          "platform_owner",
+          "tenant_admin",
+          "admin",
+          "manager",
+        ]
+
+        if (!allowedRoles.includes(String(actor.role))) {
+          return reply.code(403).send({
+            ok: false,
+            error: "Not authorized to approve Supplements",
+          })
+        }
+
+        const { tenantSlug, documentPackageId } = request.params
+
+        const existingDocument = await getDocumentPackageById(
+          Number(documentPackageId)
+        )
+
+        if (!existingDocument) {
+          return reply.code(404).send({
+            ok: false,
+            error: "Document package not found",
+          })
+        }
+
+        if (
+          String(actor.role) !== "platform_owner" &&
+          Number(actor.tenant_id) !== Number(existingDocument.tenant_id)
+        ) {
+          return reply.code(403).send({
+            ok: false,
+            error: "Tenant access denied",
+          })
+        }
+
+        const explanation = String(
+          request.body?.explanation || ""
+        ).trim()
+
+        if (!explanation) {
+          return reply.code(400).send({
+            ok: false,
+            error:
+              "Administrative approval explanation is required",
+          })
+        }
+
+        const document = await adminApproveSupplement({
+          tenantSlug,
+          documentPackageId: Number(documentPackageId),
+          explanation,
+          actor: {
+            id: Number(actor.id),
+            full_name: actor.full_name || null,
+            email: actor.email || null,
+            role: actor.role || null,
+          },
+        })
+
+        return {
+          ok: true,
+          document,
+        }
+      } catch (err: any) {
+        return reply.code(400).send({
+          ok: false,
+          error: err?.message || String(err),
+        })
+      }
+    }
+  )
+
 
   app.get("/sign/:id", async (request: any, reply) => {
     try {

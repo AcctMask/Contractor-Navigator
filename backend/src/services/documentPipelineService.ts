@@ -14,6 +14,8 @@ export type PackageType =
   | "retail_estimate"
   | "insurance_contract"
   | "ems_tarp"
+  | "change_order"
+  | "supplement"
 
 async function saveDocumentSnapshotAsset(params: {
   tenantSlug: string
@@ -29,7 +31,7 @@ async function saveDocumentSnapshotAsset(params: {
 
   const html = buildDocumentSnapshotHtml(params.doc, params.payload, params.statusLabel)
 
-  await saveJobAssetByTenantSlug({
+  return await saveJobAssetByTenantSlug({
     tenantSlug: params.tenantSlug,
     jobId: params.jobId,
     assetType: "contract",
@@ -568,6 +570,9 @@ export async function getJobSummaryByTenantSlug(tenantSlug: string, jobId: numbe
       j.carrier,
       j.claim_number as job_claim_number,
       j.date_of_loss,
+      j.adjuster_name,
+      j.adjuster_email,
+      j.adjuster_phone,
       c.full_name as customer_name,
       c.email as customer_email,
       c.phone as customer_phone
@@ -911,7 +916,15 @@ export async function regenerateDocumentSnapshotAsset(packageId: number) {
 export async function createDocumentPackageByTenantSlug(
   tenantSlug: string,
   jobId: number,
-  packageType: PackageType
+  packageType: PackageType,
+  packageInput?: {
+    adjustment_description?: string | null
+    adjustment_line_items?: Array<{
+      description?: string | null
+      quantity?: number | null
+      unit_price?: number | null
+    }>
+  }
 ) {
   await ensureDocumentTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -982,6 +995,82 @@ export async function createDocumentPackageByTenantSlug(
       estimator_remarks: details?.estimator_remarks || null,
       document_display_mode: "insurance_contract",
       ready_for_signature: !!(details?.claim_number || job.job_claim_number),
+    }
+  } else if (packageType === "change_order" || packageType === "supplement") {
+    const isChangeOrder = packageType === "change_order"
+    const adjustmentLabel = isChangeOrder ? "Change Order" : "Supplement"
+    const adjustmentDescription = String(
+      packageInput?.adjustment_description || ""
+    ).trim()
+
+    const adjustmentLineItems = Array.isArray(packageInput?.adjustment_line_items)
+      ? packageInput.adjustment_line_items
+          .map((item) => {
+            const description = String(item?.description || "").trim()
+            const quantity = Number(item?.quantity)
+            const unitPrice = Number(item?.unit_price)
+
+            if (
+              !description ||
+              !Number.isFinite(quantity) ||
+              quantity <= 0 ||
+              !Number.isFinite(unitPrice)
+            ) {
+              return null
+            }
+
+            return {
+              description,
+              quantity,
+              unit_price: unitPrice,
+              amount: Number((quantity * unitPrice).toFixed(2)),
+            }
+          })
+          .filter(
+            (
+              item
+            ): item is {
+              description: string
+              quantity: number
+              unit_price: number
+              amount: number
+            } => item !== null
+          )
+      : []
+
+    if (!adjustmentDescription) {
+      throw new Error(`${adjustmentLabel} description is required`)
+    }
+
+    if (!adjustmentLineItems.length) {
+      throw new Error(`${adjustmentLabel} requires at least one valid line item`)
+    }
+
+    const adjustmentAmount = Number(
+      adjustmentLineItems
+        .reduce((sum, item) => sum + item.amount, 0)
+        .toFixed(2)
+    )
+
+    if (!Number.isFinite(adjustmentAmount) || adjustmentAmount === 0) {
+      throw new Error(`${adjustmentLabel} amount cannot be zero`)
+    }
+
+    documentTitle = `${adjustmentLabel} - ${customerName}`
+    templateSource = "Navigator Contract Adjustment"
+    payload = {
+      customer_name: customerName,
+      customer_email: job.customer_email || null,
+      customer_phone: job.customer_phone || null,
+      job_address: address,
+      adjustment_type: packageType,
+      adjustment_title: adjustmentLabel,
+      adjustment_description: adjustmentDescription,
+      adjustment_line_items: adjustmentLineItems,
+      adjustment_amount: adjustmentAmount,
+      terms_and_conditions: details?.terms_and_conditions || null,
+      document_display_mode: packageType,
+      ready_for_signature: true,
     }
   } else if (packageType === "ems_tarp") {
     documentTitle = `EMS Tarp Work Authorization - ${customerName}`
@@ -1099,6 +1188,8 @@ export async function sendDocumentPackage(
 
   const signUrl = `${signBaseUrl.replace(/\/$/, "")}/sign/${documentPackage.id}`
   const isEmsTarp = documentPackage.package_type === "ems_tarp"
+  const isChangeOrder = documentPackage.package_type === "change_order"
+  const isSupplement = documentPackage.package_type === "supplement"
 
   const message = isEmsTarp
     ? `Good2Go Roofing & Construction was assigned by ${documentPackage.payload?.carrier || "your insurance carrier"} to provide emergency services at ${documentPackage.payload?.job_address || "your property"}. Before we can inspect the roof and, if necessary, perform emergency tarp work, we need your signed Emergency Tarp Work Authorization.
@@ -1106,7 +1197,19 @@ export async function sendDocumentPackage(
 Please review and sign the authorization here: ${signUrl}
 
 Once we receive it, your job will move into our emergency service queue for inspection and crew assignment as needed.`
-    : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
+    : isChangeOrder
+      ? `Good2Go Roofing: A Change Order for your project is ready for review and electronic signature.
+
+Please review the requested change, pricing, and terms before signing.
+
+Sign here: ${signUrl}`
+      : isSupplement
+        ? `Good2Go Roofing & Construction has prepared a Supplement for your review and approval.
+
+Please review the supplemental work and pricing here: ${signUrl}
+
+Please reply to Good2Go Roofing with your approval or requested revisions.`
+        : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
 
 Please review the project details, pricing, authorization language, and terms and conditions before signing.
 
@@ -1131,19 +1234,36 @@ Sign here: ${signUrl}`
     }))
   )
 
-  if (job.customer_phone) {
-    smsResult = await sendSMS(job.customer_phone, message)
-  }
+  if (isSupplement) {
+    if (!job.adjuster_email) {
+      throw new Error(
+        "Supplement cannot be sent because this job does not have an adjuster email address"
+      )
+    }
 
-  if (job.customer_email) {
     emailResult = await sendAlertEmail(
-      job.customer_email,
+      String(job.adjuster_email),
       documentPackage.document_title,
       message,
       emailAttachments.length
         ? { attachments: emailAttachments }
         : undefined
     )
+  } else {
+    if (job.customer_phone) {
+      smsResult = await sendSMS(job.customer_phone, message)
+    }
+
+    if (job.customer_email) {
+      emailResult = await sendAlertEmail(
+        job.customer_email,
+        documentPackage.document_title,
+        message,
+        emailAttachments.length
+          ? { attachments: emailAttachments }
+          : undefined
+      )
+    }
   }
 
   await pool.query(
@@ -1174,7 +1294,25 @@ Sign here: ${signUrl}`
       `Email: ${job.customer_email || "Unknown"}\n` +
       `Sign Link: ${signUrl}\n\n` +
       `Status: Waiting on Emergency Tarp Work Authorization signature.`
-    : `CONTRACT SENT\n` +
+    : isChangeOrder
+      ? `CHANGE ORDER SENT\n` +
+        `${documentPackage.document_title}\n` +
+        `Job ID: ${jobId}\n` +
+        `Customer: ${job.customer_name || "Unknown"}\n` +
+        `Phone: ${job.customer_phone || "Unknown"}\n` +
+        `Email: ${job.customer_email || "Unknown"}\n` +
+        `Sign Link: ${signUrl}\n\n` +
+        `Status: Waiting on customer signature.`
+      : isSupplement
+        ? `SUPPLEMENT SENT FOR APPROVAL\n` +
+          `${documentPackage.document_title}\n` +
+          `Job ID: ${jobId}\n` +
+          `Adjuster: ${job.adjuster_name || "Unknown"}\n` +
+          `Adjuster Email: ${job.adjuster_email || "Unknown"}\n` +
+          `Carrier: ${job.carrier || "Unknown"}\n` +
+          `Review Link: ${signUrl}\n\n` +
+          `Status: Waiting on carrier/adjuster approval.`
+        : `CONTRACT SENT\n` +
       `${documentPackage.document_title}\n` +
       `Job ID: ${jobId}\n` +
       `Customer: ${job.customer_name || "Unknown"}\n` +
@@ -1194,7 +1332,11 @@ Sign here: ${signUrl}`
         internalNotificationEmail,
         documentPackage.package_type === "ems_tarp"
           ? `Emergency Tarp WA Sent: ${job.customer_name || `Job #${jobId}`}`
-          : `Contract Sent: ${job.customer_name || `Job #${jobId}`}`,
+          : isChangeOrder
+            ? `Change Order Sent: ${job.customer_name || `Job #${jobId}`}`
+            : isSupplement
+              ? `Supplement Sent for Approval: ${job.customer_name || `Job #${jobId}`}`
+              : `Contract Sent: ${job.customer_name || `Job #${jobId}`}`,
         internalAlertMsg
       )
     }
@@ -1202,7 +1344,11 @@ Sign here: ${signUrl}`
     internalEmailResult = internalEmailResult || { error: err?.message || String(err) }
   }
 
-  if (documentPackage.package_type === "ems_tarp") {
+  const isOriginalContract =
+    documentPackage.package_type === "retail_estimate" ||
+    documentPackage.package_type === "insurance_contract"
+
+  if (isEmsTarp) {
     await pool.query(
       `
       update jobs
@@ -1217,7 +1363,7 @@ Sign here: ${signUrl}`
       `,
       [tenantId, jobId]
     )
-  } else {
+  } else if (isOriginalContract) {
     await pool.query(
       `
       update jobs
@@ -1245,7 +1391,11 @@ Sign here: ${signUrl}`
       jobId,
       documentPackage.package_type === "ems_tarp"
         ? `Emergency Tarp Work Authorization sent for electronic signature: ${documentPackage.document_title}`
-        : `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
+        : isChangeOrder
+          ? `Change Order sent for electronic signature: ${documentPackage.document_title}`
+          : isSupplement
+            ? `Supplement sent for approval: ${documentPackage.document_title}`
+            : `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
       JSON.stringify({
         author: "ECO Document Pipeline",
         package_id: packageId,
@@ -1258,11 +1408,22 @@ Sign here: ${signUrl}`
         contract_amount: documentPackage.payload?.contract_amount ?? documentPackage.payload?.agreed_amount ?? null,
         discount_amount: documentPackage.payload?.discount_amount ?? null,
         discount_reason: documentPackage.payload?.discount_reason ?? null,
-        crm_stage: documentPackage.package_type === "ems_tarp" ? "wa_sent" : "contract_sent",
+        crm_stage:
+          isEmsTarp
+            ? "wa_sent"
+            : isOriginalContract
+              ? "contract_sent"
+              : null,
         crm_substatus:
-          documentPackage.package_type === "ems_tarp"
+          isEmsTarp
             ? "ems_authorization_sent"
-            : "signature_requested",
+            : isOriginalContract
+              ? "signature_requested"
+              : documentPackage.package_type === "change_order"
+                ? "change_order_signature_requested"
+                : documentPackage.package_type === "supplement"
+                  ? "supplement_signature_requested"
+                  : null,
         sms: smsResult,
         email: emailResult,
         internal_sms: internalSmsResult,
@@ -1279,6 +1440,160 @@ Sign here: ${signUrl}`
     email: emailResult,
   }
 }
+
+
+export async function adminApproveSupplement(params: {
+  tenantSlug: string
+  documentPackageId: number
+  explanation: string
+  actor: {
+    id?: number | null
+    full_name?: string | null
+    email?: string | null
+    role?: string | null
+  }
+}) {
+  await ensureDocumentTables()
+
+  const explanation = String(params.explanation || "").trim()
+
+  if (!explanation) {
+    throw new Error("Administrative approval explanation is required")
+  }
+
+  const tenantId = await getTenantIdBySlug(params.tenantSlug)
+
+  const result = await pool.query(
+    `
+    select *
+    from job_document_packages
+    where tenant_id = $1
+      and id = $2
+    limit 1
+    `,
+    [tenantId, params.documentPackageId]
+  )
+
+  if (!result.rowCount) {
+    throw new Error("Document package not found")
+  }
+
+  const doc = result.rows[0]
+
+  if (String(doc.package_type) !== "supplement") {
+    throw new Error(
+      "Administrative approval is only available for Supplements"
+    )
+  }
+
+  if (String(doc.status) === "approved") {
+    throw new Error("Supplement is already approved")
+  }
+
+  if (String(doc.status) === "signed") {
+    throw new Error("Supplement is already signed")
+  }
+
+  const actorName =
+    String(params.actor?.full_name || "").trim() ||
+    String(params.actor?.email || "").trim() ||
+    "Authorized Navigator user"
+
+  const approvedAt = new Date().toISOString()
+
+  const approval = {
+    method: "admin",
+    explanation,
+    approved_at: approvedAt,
+    actor: {
+      app_user_id: params.actor?.id ?? null,
+      full_name: params.actor?.full_name ?? null,
+      email: params.actor?.email ?? null,
+      role: params.actor?.role ?? null,
+    },
+  }
+
+  const updatedPayload = {
+    ...(doc.payload || {}),
+    approval,
+  }
+
+  const updated = await pool.query(
+    `
+    update job_document_packages
+    set
+      status = 'approved',
+      payload = $1::jsonb,
+      updated_at = now()
+    where tenant_id = $2
+      and id = $3
+    returning *
+    `,
+    [
+      JSON.stringify(updatedPayload),
+      tenantId,
+      params.documentPackageId,
+    ]
+  )
+
+  const approvedDoc = updated.rows[0]
+
+  const approvedAsset = await saveDocumentSnapshotAsset({
+    tenantSlug: params.tenantSlug,
+    jobId: Number(approvedDoc.job_id),
+    doc: approvedDoc,
+    payload: updatedPayload,
+    statusLabel: "Approved Supplement",
+  })
+
+  updatedPayload.completed_asset_id = Number(approvedAsset.id)
+
+  await pool.query(
+    `
+    update job_document_packages
+    set
+      payload = $1::jsonb,
+      updated_at = now()
+    where tenant_id = $2
+      and id = $3
+    `,
+    [
+      JSON.stringify(updatedPayload),
+      tenantId,
+      params.documentPackageId,
+    ]
+  )
+
+  approvedDoc.payload = updatedPayload
+
+  await pool.query(
+    `
+    insert into timeline_events
+      (tenant_id, job_id, kind, message, meta, created_at)
+    values
+      ($1, $2, 'supplement_admin_approved', $3, $4::jsonb, now())
+    `,
+    [
+      tenantId,
+      Number(approvedDoc.job_id),
+      `Supplement administratively approved: ${approvedDoc.document_title}`,
+      JSON.stringify({
+        author: actorName,
+        app_user_id: params.actor?.id ?? null,
+        actor_email: params.actor?.email ?? null,
+        actor_role: params.actor?.role ?? null,
+        approval_method: "admin",
+        approved_at: approvedAt,
+        explanation,
+        document_package_id: Number(approvedDoc.id),
+        package_type: "supplement",
+      }),
+    ]
+  )
+
+  return approvedDoc
+}
+
 
 export async function signDocumentPackage(
   packageId: number,
@@ -1321,7 +1636,7 @@ export async function signDocumentPackage(
   )
 
   try {
-    await saveDocumentSnapshotAsset({
+    const signedAsset = await saveDocumentSnapshotAsset({
       tenantSlug: String(doc.tenant_slug || "g2g-roofing"),
       jobId: Number(doc.job_id),
       doc,
@@ -1329,15 +1644,35 @@ export async function signDocumentPackage(
       statusLabel:
         doc.package_type === "ems_tarp"
           ? "Signed Emergency Tarp Work Authorization"
-          : "Signed Proposal Contract",
+          : doc.package_type === "change_order"
+            ? "Signed Change Order Contract"
+            : doc.package_type === "supplement"
+              ? "Signed Supplement Contract"
+              : "Signed Proposal Contract",
     })
+
+    updatedPayload.completed_asset_id = Number(signedAsset.id)
+
+    await pool.query(
+      `
+      update job_document_packages
+      set
+        payload = $2::jsonb,
+        updated_at = now()
+      where id = $1
+      `,
+      [packageId, JSON.stringify(updatedPayload)]
+    )
   } catch (err) {
     console.error("Failed to save signed document snapshot:", err)
   }
 
   const isEmsTarp = doc.package_type === "ems_tarp"
+  const isOriginalContract =
+    doc.package_type === "retail_estimate" ||
+    doc.package_type === "insurance_contract"
 
-  if (!isEmsTarp) {
+  if (isOriginalContract) {
     await pool.query(
       `
       update jobs
@@ -1453,8 +1788,20 @@ export async function signDocumentPackage(
         terms_accepted: updatedPayload.terms_accepted ?? null,
         terms_version: updatedPayload.terms_version ?? null,
         terms_url: updatedPayload.terms_url ?? null,
-        crm_stage: isEmsTarp ? "tarp" : "contract_signed",
-        crm_substatus: isEmsTarp ? "ems_authorized_ready_for_crew" : null,
+        crm_stage:
+          isEmsTarp
+            ? "tarp"
+            : isOriginalContract
+              ? "contract_signed"
+              : null,
+        crm_substatus:
+          isEmsTarp
+            ? "ems_authorized_ready_for_crew"
+            : doc.package_type === "change_order"
+              ? "change_order_signed"
+              : doc.package_type === "supplement"
+                ? "supplement_signed"
+                : null,
         wa_status: isEmsTarp ? "signed" : null,
       }),
     ]

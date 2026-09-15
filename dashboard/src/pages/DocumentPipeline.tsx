@@ -26,6 +26,12 @@ type EstimateLineItem = {
   amount: number | null
 }
 
+type AdjustmentLineItem = {
+  description: string
+  quantity: number | null
+  unit_price: number | null
+}
+
 type EstimateDetails = {
   roof_type?: string | null
   roof_squares?: number | null
@@ -93,6 +99,8 @@ function defaultEstimateLineItems(): EstimateLineItem[] {
 const DEFAULT_TERMS = G2G_TERMS_AND_CONDITIONS
 
 export default function DocumentPipelinePage() {
+  const requestedDocumentType =
+    new URLSearchParams(window.location.search).get("type") || ""
   const [searchParams] = useSearchParams()
   const [jobId, setJobId] = useState(() => searchParams.get("jobId") || "")
   const [job, setJob] = useState<JobSummary | null>(null)
@@ -107,6 +115,10 @@ export default function DocumentPipelinePage() {
     }>
   >([])
   const [isSendingPackage, setIsSendingPackage] = useState(false)
+  const [adjustmentDescription, setAdjustmentDescription] = useState("")
+  const [adjustmentLineItems, setAdjustmentLineItems] = useState<AdjustmentLineItem[]>([
+    { description: "", quantity: 1, unit_price: null },
+  ])
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
@@ -192,6 +204,54 @@ export default function DocumentPipelinePage() {
   function setField<K extends keyof EstimateDetails>(key: K, value: EstimateDetails[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
+
+  function addAdjustmentLineItem() {
+    setAdjustmentLineItems((current) => [
+      ...current,
+      { description: "", quantity: 1, unit_price: null },
+    ])
+  }
+
+  function updateAdjustmentLineItem(
+    index: number,
+    field: keyof AdjustmentLineItem,
+    value: string
+  ) {
+    setAdjustmentLineItems((current) =>
+      current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item
+
+        if (field === "description") {
+          return { ...item, description: value }
+        }
+
+        return {
+          ...item,
+          [field]: value === "" ? null : Number(value),
+        }
+      })
+    )
+  }
+
+  function removeAdjustmentLineItem(index: number) {
+    setAdjustmentLineItems((current) => {
+      const next = current.filter((_, itemIndex) => itemIndex !== index)
+      return next.length
+        ? next
+        : [{ description: "", quantity: 1, unit_price: null }]
+    })
+  }
+
+  const proposedAdjustmentAmount = adjustmentLineItems.reduce((sum, item) => {
+    const quantity = Number(item.quantity)
+    const unitPrice = Number(item.unit_price)
+
+    if (!Number.isFinite(quantity) || !Number.isFinite(unitPrice)) {
+      return sum
+    }
+
+    return sum + quantity * unitPrice
+  }, 0)
 
   useEffect(() => {
     const urlJobId = searchParams.get("jobId")
@@ -453,7 +513,96 @@ export default function DocumentPipelinePage() {
     }
   }
 
-  async function createPackage(packageType: "retail_estimate" | "insurance_contract" | "ems_tarp") {
+  async function openCompletedDocument(doc: DocumentPackage) {
+    const assetId = Number(doc?.payload?.completed_asset_id)
+
+    if (!assetId) {
+      errorToast("Completed document file is unavailable")
+      return
+    }
+
+    const viewingWindow = window.open("", "_blank")
+
+    if (!viewingWindow) {
+      errorToast("Allow pop-ups for Navigator to view files")
+      return
+    }
+
+    viewingWindow.document.title = "Opening document..."
+    viewingWindow.document.body.innerHTML =
+      '<p style="font-family: sans-serif; padding: 24px;">Opening document...</p>'
+
+    try {
+      const token = getToken()
+      const assetUrl =
+        `${API_BASE}/assets/${getTenantSlug()}/file/${assetId}`
+
+      const res = await fetch(assetUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        let message = "Open document failed"
+
+        try {
+          const data = await res.json()
+          message = data?.error || message
+        } catch {
+          // Preserve generic error for non-JSON responses.
+        }
+
+        viewingWindow.close()
+        errorToast(message)
+        return
+      }
+
+      const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
+
+      viewingWindow.location.replace(objectUrl)
+
+      window.setTimeout(
+        () => URL.revokeObjectURL(objectUrl),
+        60000
+      )
+    } catch (err: any) {
+      viewingWindow.close()
+      errorToast(err?.message || "Open document failed")
+    }
+  }
+
+  const hasSignedOriginalContract = documents.some(
+    (doc) =>
+      (doc.package_type === "retail_estimate" ||
+        doc.package_type === "insurance_contract") &&
+      doc.status === "signed"
+  )
+
+  const requestedAdjustmentIsIneligible =
+    (requestedDocumentType === "change_order" ||
+      requestedDocumentType === "supplement") &&
+    !hasSignedOriginalContract
+
+  async function createPackage(
+    packageType:
+      | "retail_estimate"
+      | "insurance_contract"
+      | "ems_tarp"
+      | "change_order"
+      | "supplement"
+  ) {
+    if (
+      (packageType === "change_order" ||
+        packageType === "supplement") &&
+      !hasSignedOriginalContract
+    ) {
+      errorToast("Ineligible without a signed contract")
+      setStatus("Ineligible without a signed contract")
+      return
+    }
+
     setError("")
     setStatus(`Creating ${packageType} package...`)
 
@@ -490,6 +639,12 @@ export default function DocumentPipelinePage() {
         },
         body: JSON.stringify({
           package_type: packageType,
+          ...(packageType === "change_order" || packageType === "supplement"
+            ? {
+                adjustment_description: adjustmentDescription,
+                adjustment_line_items: adjustmentLineItems,
+              }
+            : {}),
         }),
       })
 
@@ -499,7 +654,22 @@ export default function DocumentPipelinePage() {
         throw new Error(json?.error || "Create package failed")
       }
 
-      successToast(`${packageType} package created`)
+      const packageLabel =
+        packageType === "change_order"
+          ? "Change Order"
+          : packageType === "supplement"
+            ? "Supplement"
+            : packageType
+
+      successToast(`${packageLabel} package created`)
+
+      if (packageType === "change_order" || packageType === "supplement") {
+        setAdjustmentDescription("")
+        setAdjustmentLineItems([
+          { description: "", quantity: 1, unit_price: null },
+        ])
+      }
+
       await loadJob()
     } catch (err: any) {
       errorToast(err?.message || "Create package failed")
@@ -535,6 +705,19 @@ export default function DocumentPipelinePage() {
 
       <section style={cardStyle}>
         <h1 style={{ marginTop: 0, fontSize: "42px", lineHeight: 1.1 }}>Document Pipeline</h1>
+        {requestedAdjustmentIsIneligible ? (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              border: "1px solid #f59e0b",
+              borderRadius: 8,
+              fontWeight: 700,
+            }}
+          >
+            Ineligible without a signed contract.
+          </div>
+        ) : null}
         <p style={{ marginTop: "12px", fontSize: "18px", opacity: 0.88 }}>
           Save estimator details, then create the estimate, insurance contract, and EMS tarp document packages.
         </p>
@@ -799,6 +982,138 @@ export default function DocumentPipelinePage() {
             Create EMS Tarp Authorization
           </button>
         </div>
+
+        <div
+          style={{
+            marginTop: "24px",
+            paddingTop: "24px",
+            borderTop: "1px solid rgba(255,255,255,0.12)",
+            display: "grid",
+            gap: "14px",
+          }}
+        >
+          <div>
+            <h3 style={{ margin: 0 }}>Contract Adjustments</h3>
+            <p style={{ marginBottom: 0, opacity: 0.8 }}>
+              Create a proposed Change Order or Supplement. The adjustment
+              becomes part of the contractual job value only after customer
+              signature.
+            </p>
+          </div>
+
+          <div>
+            <label style={labelStyle}>Description / Reason</label>
+            <textarea
+              value={adjustmentDescription}
+              onChange={(e) => setAdjustmentDescription(e.target.value)}
+              placeholder="Describe the additional, removed, or revised scope."
+              style={textareaStyle}
+            />
+          </div>
+
+          <div style={{ display: "grid", gap: "12px" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "12px",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <label style={{ ...labelStyle, marginBottom: 0 }}>
+                Adjustment Line Items
+              </label>
+              <button
+                type="button"
+                onClick={addAdjustmentLineItem}
+                style={buttonStyle}
+              >
+                Add Line Item
+              </button>
+            </div>
+
+            {adjustmentLineItems.map((item, index) => (
+              <div
+                key={index}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 120px 160px 92px",
+                  gap: "10px",
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  value={item.description}
+                  onChange={(e) =>
+                    updateAdjustmentLineItem(
+                      index,
+                      "description",
+                      e.target.value
+                    )
+                  }
+                  placeholder="Description"
+                  style={inputStyle}
+                />
+
+                <input
+                  type="number"
+                  value={item.quantity ?? ""}
+                  onChange={(e) =>
+                    updateAdjustmentLineItem(index, "quantity", e.target.value)
+                  }
+                  placeholder="Qty"
+                  style={inputStyle}
+                />
+
+                <input
+                  type="number"
+                  step="0.01"
+                  value={item.unit_price ?? ""}
+                  onChange={(e) =>
+                    updateAdjustmentLineItem(index, "unit_price", e.target.value)
+                  }
+                  placeholder="Unit Price"
+                  style={inputStyle}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => removeAdjustmentLineItem(index)}
+                  style={secondaryButtonStyle}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ fontSize: "18px", fontWeight: 800 }}>
+            Proposed Adjustment:{" "}
+            {proposedAdjustmentAmount.toLocaleString(undefined, {
+              style: "currency",
+              currency: "USD",
+            })}
+          </div>
+
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => createPackage("change_order")}
+              style={buttonStyle}
+            >
+              Create Change Order
+            </button>
+
+            <button
+              type="button"
+              onClick={() => createPackage("supplement")}
+              style={buttonStyle}
+            >
+              Create Supplement
+            </button>
+          </div>
+        </div>
       </section>
 
       <section style={cardStyle}>
@@ -963,23 +1278,45 @@ export default function DocumentPipelinePage() {
                   Created: {doc.created_at ? new Date(doc.created_at).toLocaleString() : "—"}
                 </div>
                 <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "10px" }}>
-                  <a href={`/sign/${doc.id}`} target="_blank" rel="noreferrer" style={linkButtonStyle}>
-                    View / Sign
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => sendPackage(doc.id)}
-                    disabled={isSendingPackage}
-                    style={{
-                      ...buttonStyle,
-                      opacity: isSendingPackage ? 0.72 : 1,
-                      cursor: isSendingPackage ? "wait" : "pointer",
-                    }}
-                  >
-                    {isSendingPackage
-                      ? "⏳ Sending..."
-                      : "Send For Signature"}
-                  </button>
+                  {doc.status === "signed" || doc.status === "approved" ? (
+                    <button
+                      type="button"
+                      onClick={() => openCompletedDocument(doc)}
+                      style={linkButtonStyle}
+                    >
+                      View Document
+                    </button>
+                  ) : (
+                    <>
+                      <a
+                        href={`/sign/${doc.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={linkButtonStyle}
+                      >
+                        {doc.package_type === "supplement"
+                          ? "Review / Approve"
+                          : "View / Sign"}
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => sendPackage(doc.id)}
+                        disabled={isSendingPackage}
+                        style={{
+                          ...buttonStyle,
+                          opacity: isSendingPackage ? 0.72 : 1,
+                          cursor: isSendingPackage ? "wait" : "pointer",
+                        }}
+                      >
+                        {isSendingPackage
+                          ? "⏳ Sending..."
+                          : doc.package_type === "supplement"
+                            ? "Send For Approval"
+                            : "Send For Signature"}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

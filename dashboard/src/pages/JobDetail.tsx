@@ -1965,20 +1965,56 @@ export default function JobDetail() {
             <button onClick={saveStage} style={button}>Save Stage</button>
 
             {id ? (
-              <Link
-                to={`/document-pipeline?jobId=${id}`}
+              <div
                 style={{
-                  ...button,
-                  display: "inline-block",
+                  display: "flex",
+                  gap: 10,
+                  flexWrap: "wrap",
                   marginTop: 10,
-                  background: "#2563eb",
-                  color: "white",
-                  textDecoration: "none",
-                  borderRadius: 8,
                 }}
               >
-                Contract
-              </Link>
+                <Link
+                  to={`/document-pipeline?jobId=${id}&type=contract`}
+                  style={{
+                    ...button,
+                    display: "inline-block",
+                    background: "#2563eb",
+                    color: "white",
+                    textDecoration: "none",
+                    borderRadius: 8,
+                  }}
+                >
+                  Create Contract
+                </Link>
+
+                <Link
+                  to={`/document-pipeline?jobId=${id}&type=change_order`}
+                  style={{
+                    ...button,
+                    display: "inline-block",
+                    background: "#2563eb",
+                    color: "white",
+                    textDecoration: "none",
+                    borderRadius: 8,
+                  }}
+                >
+                  Create Change Order
+                </Link>
+
+                <Link
+                  to={`/document-pipeline?jobId=${id}&type=supplement`}
+                  style={{
+                    ...button,
+                    display: "inline-block",
+                    background: "#2563eb",
+                    color: "white",
+                    textDecoration: "none",
+                    borderRadius: 8,
+                  }}
+                >
+                  Create Supplement
+                </Link>
+              </div>
             ) : null}
           </div>
         </div>
