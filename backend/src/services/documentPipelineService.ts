@@ -1144,7 +1144,14 @@ export async function createDocumentPackageByTenantSlug(
       jobId,
       doc: createdPackage,
       payload,
-      statusLabel: "Draft Proposal Contract",
+      statusLabel:
+        packageType === "change_order"
+          ? "Draft Change Order"
+          : packageType === "supplement"
+            ? "Draft Supplement"
+            : packageType === "ems_tarp"
+              ? "Draft Emergency Tarp Work Authorization"
+              : "Draft Proposal Contract",
     })
   } catch (err) {
     console.error("Failed to save draft document snapshot:", err)
@@ -1645,9 +1652,9 @@ export async function signDocumentPackage(
         doc.package_type === "ems_tarp"
           ? "Signed Emergency Tarp Work Authorization"
           : doc.package_type === "change_order"
-            ? "Signed Change Order Contract"
+            ? "Signed Change Order"
             : doc.package_type === "supplement"
-              ? "Signed Supplement Contract"
+              ? "Signed Supplement"
               : "Signed Proposal Contract",
     })
 
@@ -1719,11 +1726,19 @@ export async function signDocumentPackage(
 
   const alertMsg = isEmsTarp
     ? `EMS TARP AUTHORIZATION SIGNED\n${doc.document_title}\nSigned by: ${signerName}\nJob ID: ${doc.job_id}\nStatus: READY FOR CREW ASSIGNMENT`
-    : `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
+    : doc.package_type === "change_order"
+      ? `CHANGE ORDER SIGNED\n${doc.document_title}\nSigned by: ${signerName}\nAmount: $${Number(updatedPayload.adjustment_amount || 0).toFixed(2)}`
+      : doc.package_type === "supplement"
+        ? `SUPPLEMENT SIGNED\n${doc.document_title}\nSigned by: ${signerName}\nAmount: $${Number(updatedPayload.adjustment_amount || 0).toFixed(2)}`
+        : `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
 
   const customerAckMsg = isEmsTarp
     ? `Good2Go Roofing: Thank you. We received your Emergency Tarp Work Authorization and your property is now in our emergency tarp queue. We have not forgotten you. We will assign a crew and notify them of your needs. During a major storm, power outages, blocked roads, weather conditions, safety issues, and geographic crew routing can affect response times. If you have a tree on the roof, severe active water intrusion, unsafe access, or another urgent circumstance, reply to this message so our staff and crew can be notified.`
-    : `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
+    : doc.package_type === "change_order"
+      ? `Good2Go Roofing: Thank you. We received your signed Change Order for ${doc.document_title}. A production staff member will review it and contact you if any additional action is needed.`
+      : doc.package_type === "supplement"
+        ? `Good2Go Roofing: Thank you. We received the signed Supplement for ${doc.document_title}. A production staff member will review it and contact you if any additional action is needed.`
+        : `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
 
   try {
     if (process.env.ALERT_SMS_TO) {
@@ -1740,7 +1755,11 @@ export async function signDocumentPackage(
         signedNotificationEmail,
         isEmsTarp
           ? "Emergency Tarp Work Authorization Signed — Ready for Crew"
-          : "Document Signed",
+          : doc.package_type === "change_order"
+            ? "Change Order Signed"
+            : doc.package_type === "supplement"
+              ? "Supplement Signed"
+              : "Document Signed",
         alertMsg
       )
     }
@@ -1750,7 +1769,11 @@ export async function signDocumentPackage(
         String(updatedPayload.customer_email),
         isEmsTarp
           ? "Good2Go Roofing received your Emergency Tarp Work Authorization"
-          : "Good2Go Roofing received your signed Proposal / Contract",
+          : doc.package_type === "change_order"
+            ? "Good2Go Roofing received your signed Change Order"
+            : doc.package_type === "supplement"
+              ? "Good2Go Roofing received your signed Supplement"
+              : "Good2Go Roofing received your signed Proposal / Contract",
         customerAckMsg
       )
     }
@@ -1774,13 +1797,22 @@ export async function signDocumentPackage(
       Number(doc.job_id),
       isEmsTarp
         ? `Emergency Tarp Work Authorization signed — ready for crew: ${doc.document_title}`
-        : `Proposal/Contract electronically signed: ${doc.document_title}`,
+        : doc.package_type === "change_order"
+          ? `Change Order electronically signed: ${doc.document_title}`
+          : doc.package_type === "supplement"
+            ? `Supplement electronically signed: ${doc.document_title}`
+            : `Proposal/Contract electronically signed: ${doc.document_title}`,
       JSON.stringify({
         author: signerName || "Customer",
         package_id: packageId,
         package_type: doc.package_type,
         document_title: doc.document_title,
         signer_name: signerName,
+        adjustment_type: updatedPayload.adjustment_type ?? null,
+        adjustment_title: updatedPayload.adjustment_title ?? null,
+        adjustment_description: updatedPayload.adjustment_description ?? null,
+        adjustment_line_items: updatedPayload.adjustment_line_items ?? null,
+        adjustment_amount: updatedPayload.adjustment_amount ?? null,
         proposal_amount: updatedPayload.proposal_amount ?? updatedPayload.agreed_amount ?? null,
         contract_amount: updatedPayload.contract_amount ?? updatedPayload.agreed_amount ?? null,
         discount_amount: updatedPayload.discount_amount ?? null,

@@ -79,6 +79,43 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     )
   }
 
+  if (
+    displayMode === "change_order" ||
+    displayMode === "supplement"
+  ) {
+    rows.push(
+      ["Adjustment Type", payload.adjustment_title],
+      ["Description", payload.adjustment_description],
+      ["Adjustment Amount", moneyValue(payload.adjustment_amount)]
+    )
+
+    if (Array.isArray(payload.adjustment_line_items)) {
+      payload.adjustment_line_items.forEach(
+        (item: any, index: number) => {
+          const quantity = Number(item?.quantity)
+          const unitPrice = Number(item?.unit_price)
+          const amount = Number(item?.amount)
+
+          rows.push([
+            `${payload.adjustment_title || "Adjustment"} Line Item ${index + 1}`,
+            [
+              String(item?.description || "").trim(),
+              Number.isFinite(quantity) ? `Qty ${quantity}` : "",
+              Number.isFinite(unitPrice)
+                ? `@ ${moneyValue(unitPrice)}`
+                : "",
+              Number.isFinite(amount)
+                ? `= ${moneyValue(amount)}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" — "),
+          ])
+        }
+      )
+    }
+  }
+
   if (displayMode === "ems_work_authorization") {
     rows.push(
       ["TPA", payload.tpa],
@@ -88,7 +125,10 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     )
   }
 
-  if (!isEmsWorkAuthorization) {
+  if (
+    displayMode === "retail_contract" ||
+    displayMode === "insurance_contract"
+  ) {
     rows.push(
       ["Contract Notes", payload.estimator_remarks]
     )
