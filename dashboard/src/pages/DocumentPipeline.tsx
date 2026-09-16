@@ -530,7 +530,7 @@ export default function DocumentPipelinePage() {
       const tenantSlug = getTenantSlug()
 
       const regenerateRes = await fetch(
-        `${API_BASE}/document-pipeline/pipeline/${tenantSlug}/package/${doc.id}/regenerate-snapshot`,
+        `${API_BASE}/pipeline/${tenantSlug}/package/${doc.id}/regenerate-snapshot`,
         {
           method: "POST",
           headers: {
@@ -1377,6 +1377,9 @@ export default function DocumentPipelinePage() {
                 <div style={{ fontWeight: 700 }}>{doc.document_title}</div>
                 <div style={{ opacity: 0.9 }}>Type: {doc.package_type}</div>
                 <div style={{ opacity: 0.9 }}>Status: {doc.status}</div>
+                <div style={{ opacity: 0.9 }}>
+                  Document Number: {String(doc.payload?.document_number || "—")}
+                </div>
                 <div style={{ opacity: 0.9 }}>
                   Contract Amount: {doc.payload?.contract_amount ? `$${Number(doc.payload.contract_amount).toLocaleString()}` : "—"}
                 </div>
