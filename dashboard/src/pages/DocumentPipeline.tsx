@@ -1261,6 +1261,33 @@ export default function DocumentPipelinePage() {
       ) : null}
 
       <section style={cardStyle}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "14px",
+            marginBottom: "18px",
+          }}
+        >
+          <img
+            src="/branding/g2g-logo.png"
+            alt="Good2Go Roofing & Construction LLC"
+            style={{
+              width: "72px",
+              height: "auto",
+              objectFit: "contain",
+            }}
+          />
+          <div>
+            <div style={{ fontWeight: 800, fontSize: "18px" }}>
+              Good2Go Roofing & Construction LLC
+            </div>
+            <div style={{ opacity: 0.72 }}>
+              Document Center
+            </div>
+          </div>
+        </div>
+
         <h2 style={{ marginTop: 0 }}>Generated Packages</h2>
 
         {documents.length ? (
@@ -1294,9 +1321,7 @@ export default function DocumentPipelinePage() {
                         rel="noreferrer"
                         style={linkButtonStyle}
                       >
-                        {doc.package_type === "supplement"
-                          ? "Review / Approve"
-                          : "View / Sign"}
+                        View Document
                       </a>
 
                       <button

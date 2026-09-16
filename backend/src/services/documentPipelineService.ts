@@ -1205,22 +1205,33 @@ Please review and sign the authorization here: ${signUrl}
 
 Once we receive it, your job will move into our emergency service queue for inspection and crew assignment as needed.`
     : isChangeOrder
-      ? `Good2Go Roofing: A Change Order for your project is ready for review and electronic signature.
+      ? `Good2Go Roofing & Construction LLC has prepared a Change Order for your project.
 
-Please review the requested change, pricing, and terms before signing.
+This document describes a change to the work and/or pricing associated with your project. Please open the secure link below, review the Change Order carefully, and electronically sign it if everything is correct.
 
-Sign here: ${signUrl}`
+Review and sign your Change Order:
+${signUrl}
+
+If you have questions or believe a revision is needed, please contact Good2Go Roofing before signing.`
       : isSupplement
-        ? `Good2Go Roofing & Construction has prepared a Supplement for your review and approval.
+        ? `Good2Go Roofing & Construction LLC has prepared a Supplement for this claim for your review and approval.
 
-Please review the supplemental work and pricing here: ${signUrl}
+The Supplement contains additional or revised work and pricing associated with the claim. Please open the secure link below and review the document and supporting information.
 
-Please reply to Good2Go Roofing with your approval or requested revisions.`
-        : `Good2Go Roofing: Your Proposal / Contract is ready for review and electronic signature.
+Review the Supplement:
+${signUrl}
 
-Please review the project details, pricing, authorization language, and terms and conditions before signing.
+Please reply to Good2Go Roofing with your approval or any requested revisions.`
+        : `Good2Go Roofing & Construction LLC has prepared your Proposal / Contract.
 
-Sign here: ${signUrl}`
+Please open the secure link below to review the project scope, pricing, authorization language, and terms and conditions. If everything is correct, complete the electronic signature at the bottom of the document.
+
+Review and sign your Proposal / Contract:
+${signUrl}
+
+Once your signature is submitted, Good2Go Roofing will receive the completed document automatically and a copy will be saved with your project.
+
+If you have any questions or believe something should be changed, please contact us before signing.`
 
   let smsResult: any = null
   let emailResult: any = null
