@@ -63,6 +63,7 @@ function deriveContractualAdjustments(
       document_title: doc.document_title,
       status: doc.status,
       signed_at: doc.signed_at ?? null,
+      approved_at: doc?.payload?.approval?.approved_at ?? null,
       signer:
         doc?.payload?.signed_by ??
         doc?.payload?.signer_name ??
@@ -767,6 +768,7 @@ export async function registerFinancialOperationsBridgeRoutes(
                   (doc: any) => doc.id === document.id
                 )?.sent_at ?? null,
               signed_at: document.signed_at,
+              approved_at: document.approved_at,
               created_at:
                 documentPackages.find(
                   (doc: any) => doc.id === document.id
