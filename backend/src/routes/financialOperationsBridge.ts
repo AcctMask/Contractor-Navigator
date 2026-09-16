@@ -729,7 +729,55 @@ export async function registerFinancialOperationsBridgeRoutes(
             contractualAdjustments.current_contractual_value,
         },
 
-        contractual_adjustments: contractualAdjustments,
+        // Actual Navigator contractual document records.
+        // FOM consumes this existing single-job field as a flat array.
+        // Amounts come directly from each authoritative document package.
+        contractual_adjustments: [
+          ...contractualAdjustments.signed_change_orders.map(
+            (document: any) => ({
+              id: document.id,
+              package_type: "change_order",
+              document_title: document.document_title,
+              status: document.status,
+              amount: document.adjustment_amount,
+              sent_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.sent_at ?? null,
+              signed_at: document.signed_at,
+              created_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.created_at ?? null,
+              updated_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.updated_at ?? null,
+            })
+          ),
+          ...contractualAdjustments.supplements.map(
+            (document: any) => ({
+              id: document.id,
+              package_type: "supplement",
+              document_title: document.document_title,
+              status: document.status,
+              amount: document.adjustment_amount,
+              sent_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.sent_at ?? null,
+              signed_at: document.signed_at,
+              created_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.created_at ?? null,
+              updated_at:
+                documentPackages.find(
+                  (doc: any) => doc.id === document.id
+                )?.updated_at ?? null,
+            })
+          ),
+        ],
 
         evidence: {
           timeline,
