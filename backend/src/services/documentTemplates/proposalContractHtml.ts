@@ -208,6 +208,24 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     <strong>Electronic Signature Statement:</strong> Typed signature accepted as electronic signature.
   </div>
 
+  ${
+    displayMode === "supplement" &&
+    payload?.approval?.method === "admin"
+      ? `
+  <div class="administrative-approval">
+    <strong>Administratively Approved:</strong> Yes<br />
+    <strong>Approved By:</strong> ${escapeHtml(
+      payload.approval.actor?.full_name ||
+      payload.approval.actor?.email ||
+      "Authorized Navigator user"
+    )}<br />
+    <strong>Approved At:</strong> ${escapeHtml(payload.approval.approved_at || "—")}<br />
+    <strong>Approval Reason:</strong> ${escapeHtml(payload.approval.explanation || "—")}
+  </div>
+  `
+      : ""
+  }
+
   <section>
     <h2>Terms and Conditions</h2>
     <div class="terms">${escapeHtml(termsAndConditions)}</div>
