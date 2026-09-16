@@ -661,6 +661,12 @@ export async function registerFinancialOperationsBridgeRoutes(
         created_at: item.created_at || null,
       }))
 
+      const contractualAdjustments =
+        deriveContractualAdjustments(
+          documentPackages,
+          row.contract_amount ?? null
+        )
+
       return reply.send({
         ok: true,
         source: "contractor-navigator",
@@ -696,11 +702,23 @@ export async function registerFinancialOperationsBridgeRoutes(
           created_at: row.created_at || null,
           updated_at: row.updated_at || null,
           contract_amount: row.contract_amount ?? null,
+
+          // Additive contractual-value facts for Financial Operations.
+          // Original Contract remains the authoritative original value.
+          original_contract_amount:
+            contractualAdjustments.original_contract_amount,
+          signed_change_order_total:
+            contractualAdjustments.signed_change_order_total,
+          current_contractual_value:
+            contractualAdjustments.current_contractual_value,
         },
+
+        contractual_adjustments: contractualAdjustments,
+
         evidence: {
           timeline,
           document_packages: documentPackages,
-          contractual_adjustments: deriveContractualAdjustments(documentPackages, row.contract_amount ?? null),
+          contractual_adjustments: contractualAdjustments,
           assets,
         },
       })
