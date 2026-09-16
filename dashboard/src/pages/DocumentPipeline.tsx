@@ -513,6 +513,66 @@ export default function DocumentPipelinePage() {
     }
   }
 
+  async function adminApproveSupplement(doc: DocumentPackage) {
+    const explanation = window.prompt(
+      "Administrative approval explanation (required):"
+    )
+
+    if (explanation === null) {
+      return
+    }
+
+    const trimmedExplanation = explanation.trim()
+
+    if (!trimmedExplanation) {
+      errorToast("Administrative approval explanation is required")
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Administratively approve ${doc.document_title}?\n\n` +
+        `Explanation: ${trimmedExplanation}`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      const token = getToken()
+      const tenantSlug = getTenantSlug()
+
+      const res = await fetch(
+        `${API_BASE}/pipeline/${tenantSlug}/document/${doc.id}/admin-approve`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            explanation: trimmedExplanation,
+          }),
+        }
+      )
+
+      const json = await res.json()
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(
+          json?.error || "Administrative Supplement approval failed"
+        )
+      }
+
+      successToast("Supplement administratively approved")
+      await loadJob()
+    } catch (err: any) {
+      errorToast(
+        err?.message || "Administrative Supplement approval failed"
+      )
+    }
+  }
+
   async function openGeneratedDocument(doc: DocumentPackage) {
     const viewingWindow = window.open("", "_blank")
 
@@ -1422,6 +1482,15 @@ export default function DocumentPipelinePage() {
                             ? "Send For Approval"
                             : "Send For Signature"}
                       </button>
+                      {doc.package_type === "supplement" ? (
+                        <button
+                          type="button"
+                          onClick={() => adminApproveSupplement(doc)}
+                          style={buttonStyle}
+                        >
+                          Admin Approve
+                        </button>
+                      ) : null}
                     </>
                   )}
                 </div>
