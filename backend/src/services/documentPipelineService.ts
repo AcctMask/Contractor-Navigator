@@ -1111,6 +1111,46 @@ export async function createDocumentPackageByTenantSlug(
     throw new Error(`Unsupported package type: ${packageType}`)
   }
 
+  // Stable business-facing contractual document identity.
+  // Stored in package payload so snapshots, signing, regeneration,
+  // and downstream Financial Operations all retain the same identity.
+  if (
+    packageType === "retail_estimate" ||
+    packageType === "insurance_contract" ||
+    packageType === "change_order" ||
+    packageType === "supplement"
+  ) {
+    let documentNumber: string
+
+    if (
+      packageType === "retail_estimate" ||
+      packageType === "insurance_contract"
+    ) {
+      documentNumber = `${jobId}-C`
+    } else {
+      const sequenceResult = await pool.query(
+        `
+        select count(*)::int as count
+        from job_document_packages
+        where tenant_id = $1
+          and job_id = $2
+          and package_type = $3
+        `,
+        [tenantId, jobId, packageType]
+      )
+
+      const sequence =
+        Number(sequenceResult.rows[0]?.count || 0) + 1
+
+      documentNumber =
+        packageType === "change_order"
+          ? `${jobId}-CO-${sequence}`
+          : `${jobId}-S-${sequence}`
+    }
+
+    payload.document_number = documentNumber
+  }
+
   const result = await pool.query(
     `
     insert into job_document_packages (

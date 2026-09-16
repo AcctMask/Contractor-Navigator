@@ -27,6 +27,7 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
 
   const rows: any[][] = [
     ["Document", doc.document_title],
+    ["Document Number", payload.document_number],
     ["Package Type", doc.package_type],
     ["Customer", payload.customer_name],
     ["Phone", payload.customer_phone],
@@ -157,6 +158,8 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     table { border-collapse: collapse; width: 100%; margin-top: 18px; margin-bottom: 28px; }
     td { border: 1px solid #ddd; padding: 10px; vertical-align: top; }
     td:first-child { font-weight: bold; width: 260px; background: #f7f7f7; }
+    tr.document-section-start td { border-top: 4px solid #111; padding-top: 16px; }
+    tr.signature-section-start td { border-top: 4px solid #111; padding-top: 16px; }
     section { margin-top: 28px; }
     .terms { white-space: pre-wrap; border: 1px solid #ddd; padding: 18px; background: #fafafa; }
     .signature-name {
@@ -177,7 +180,15 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     Florida Licenses: CCC1331529 &amp; CBC1259416
   </div>
   <table>
-    ${rows.map(([label, value]) => `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(value || "—")}</td></tr>`).join("\n")}
+    ${rows.map(([label, value]) => {
+      const rowClass =
+        label === "Description"
+          ? "document-section-start"
+          : label === "Terms Accepted"
+            ? "signature-section-start"
+            : ""
+      return `<tr class="${rowClass}"><td>${escapeHtml(label)}</td><td>${escapeHtml(value || "—")}</td></tr>`
+    }).join("\n")}
   </table>
 
   ${isEmsWorkAuthorization ? `
