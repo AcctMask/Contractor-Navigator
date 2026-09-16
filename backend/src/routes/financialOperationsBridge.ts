@@ -6,6 +6,96 @@ import { resolveJobAssetsForOutbound } from "../services/jobAssetsService"
 import { getTenantRuntimeBySlug } from "../services/companyDnaRuntimeService"
 import { getDeveloperSettings } from "../services/devSettingsService"
 
+function deriveContractualAdjustments(
+  documentPackages: any[],
+  originalContractAmount: unknown
+) {
+  const original = Number(originalContractAmount)
+
+  const originalContract =
+    Number.isFinite(original)
+      ? original
+      : 0
+
+  const signedChangeOrders = (documentPackages || [])
+    .filter((doc: any) =>
+      doc?.package_type === "change_order" &&
+      (
+        doc?.status === "signed" ||
+        Boolean(doc?.signed_at)
+      )
+    )
+    .map((doc: any) => ({
+      id: doc.id,
+      document_title: doc.document_title,
+      status: doc.status,
+      signed_at: doc.signed_at ?? null,
+      signer:
+        doc?.payload?.signed_by ??
+        doc?.payload?.signer_name ??
+        null,
+      adjustment_description:
+        doc?.payload?.adjustment_description ??
+        null,
+      adjustment_line_items:
+        doc?.payload?.adjustment_line_items ??
+        [],
+      adjustment_amount:
+        Number(doc?.payload?.adjustment_amount || 0),
+    }))
+
+  const signedChangeOrderTotal =
+    signedChangeOrders.reduce(
+      (sum: number, doc: any) =>
+        sum +
+        (
+          Number.isFinite(Number(doc.adjustment_amount))
+            ? Number(doc.adjustment_amount)
+            : 0
+        ),
+      0
+    )
+
+  const supplements = (documentPackages || [])
+    .filter((doc: any) => doc?.package_type === "supplement")
+    .map((doc: any) => ({
+      id: doc.id,
+      document_title: doc.document_title,
+      status: doc.status,
+      signed_at: doc.signed_at ?? null,
+      signer:
+        doc?.payload?.signed_by ??
+        doc?.payload?.signer_name ??
+        null,
+      adjustment_description:
+        doc?.payload?.adjustment_description ??
+        null,
+      adjustment_line_items:
+        doc?.payload?.adjustment_line_items ??
+        [],
+      adjustment_amount:
+        Number(doc?.payload?.adjustment_amount || 0),
+      financial_state:
+        (
+          doc?.status === "signed" ||
+          doc?.status === "approved" ||
+          Boolean(doc?.signed_at)
+        )
+          ? "committed"
+          : "pending",
+    }))
+
+  return {
+    original_contract_amount: originalContract,
+    signed_change_orders: signedChangeOrders,
+    signed_change_order_total: signedChangeOrderTotal,
+    current_contractual_value:
+      originalContract + signedChangeOrderTotal,
+    supplements,
+  }
+}
+
+
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
   const rightBuffer = Buffer.from(right)
@@ -320,6 +410,7 @@ export async function registerFinancialOperationsBridgeRoutes(
           evidence: {
             timeline,
             document_packages: documentPackages,
+          contractual_adjustments: deriveContractualAdjustments(documentPackages, row.contract_amount ?? null),
             assets,
           },
           flags,
@@ -609,6 +700,7 @@ export async function registerFinancialOperationsBridgeRoutes(
         evidence: {
           timeline,
           document_packages: documentPackages,
+          contractual_adjustments: deriveContractualAdjustments(documentPackages, row.contract_amount ?? null),
           assets,
         },
       })

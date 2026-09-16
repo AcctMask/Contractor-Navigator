@@ -513,6 +513,86 @@ export default function DocumentPipelinePage() {
     }
   }
 
+  async function openGeneratedDocument(doc: DocumentPackage) {
+    const viewingWindow = window.open("", "_blank")
+
+    if (!viewingWindow) {
+      errorToast("Allow pop-ups for Navigator to view documents")
+      return
+    }
+
+    viewingWindow.document.title = "Opening document..."
+    viewingWindow.document.body.innerHTML =
+      '<p style="font-family: sans-serif; padding: 24px;">Opening document...</p>'
+
+    try {
+      const token = getToken()
+      const tenantSlug = getTenantSlug()
+
+      const regenerateRes = await fetch(
+        `${API_BASE}/document-pipeline/pipeline/${tenantSlug}/package/${doc.id}/regenerate-snapshot`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (!regenerateRes.ok) {
+        let message = "Document preview is unavailable"
+
+        try {
+          const data = await regenerateRes.json()
+          message = data?.error || message
+        } catch {
+          // Preserve generic error for non-JSON responses.
+        }
+
+        viewingWindow.close()
+        errorToast(message)
+        return
+      }
+
+      const regenerated = await regenerateRes.json()
+      const assetId = Number(regenerated?.asset_id)
+
+      if (!assetId) {
+        viewingWindow.close()
+        errorToast("Generated document file is unavailable")
+        return
+      }
+
+      const assetRes = await fetch(
+        `${API_BASE}/assets/${tenantSlug}/file/${assetId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      )
+
+      if (!assetRes.ok) {
+        viewingWindow.close()
+        errorToast("Generated document file is unavailable")
+        return
+      }
+
+      const blob = await assetRes.blob()
+      const objectUrl = URL.createObjectURL(blob)
+
+      viewingWindow.location.replace(objectUrl)
+
+      window.setTimeout(
+        () => URL.revokeObjectURL(objectUrl),
+        60000
+      )
+    } catch (err: any) {
+      viewingWindow.close()
+      errorToast(err?.message || "Open document failed")
+    }
+  }
+
   async function openCompletedDocument(doc: DocumentPackage) {
     const assetId = Number(doc?.payload?.completed_asset_id)
 
@@ -1315,14 +1395,13 @@ export default function DocumentPipelinePage() {
                     </button>
                   ) : (
                     <>
-                      <a
-                        href={`/sign/${doc.id}`}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={() => openGeneratedDocument(doc)}
                         style={linkButtonStyle}
                       >
                         View Document
-                      </a>
+                      </button>
 
                       <button
                         type="button"

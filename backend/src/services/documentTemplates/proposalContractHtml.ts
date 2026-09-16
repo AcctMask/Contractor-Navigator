@@ -84,9 +84,7 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     displayMode === "supplement"
   ) {
     rows.push(
-      ["Adjustment Type", payload.adjustment_title],
-      ["Description", payload.adjustment_description],
-      ["Adjustment Amount", moneyValue(payload.adjustment_amount)]
+      ["Description", payload.adjustment_description]
     )
 
     if (Array.isArray(payload.adjustment_line_items)) {
@@ -114,6 +112,13 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
         }
       )
     }
+
+    rows.push([
+      displayMode === "change_order"
+        ? "Change Order Total"
+        : "Supplement Total",
+      moneyValue(payload.adjustment_amount),
+    ])
   }
 
   if (displayMode === "ems_work_authorization") {
@@ -154,6 +159,12 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     td:first-child { font-weight: bold; width: 260px; background: #f7f7f7; }
     section { margin-top: 28px; }
     .terms { white-space: pre-wrap; border: 1px solid #ddd; padding: 18px; background: #fafafa; }
+    .signature-name {
+      font-family: "Brush Script MT", "Segoe Script", cursive;
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
     .signature { margin-top: 32px; padding-top: 16px; border-top: 2px solid #111; }
   </style>
 </head>
@@ -180,7 +191,7 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
   ` : ""}
 
   <div class="signature">
-    <strong>Electronic Signature:</strong> ${escapeHtml(payload.signed_by || "Not signed yet")}<br />
+    <strong>Electronic Signature:</strong> <span class="signature-name">${escapeHtml(payload.signed_by || "Not signed yet")}</span><br />
     <strong>Signed At:</strong> ${escapeHtml(payload.signed_at || "—")}<br />
     <strong>Terms Accepted:</strong> ${payload.terms_accepted === true ? "Yes" : "No / Not signed yet"}<br />
     <strong>Electronic Signature Statement:</strong> Typed signature accepted as electronic signature.

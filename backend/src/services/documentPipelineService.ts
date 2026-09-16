@@ -9,6 +9,7 @@ import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractH
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import fs from "fs"
 import path from "path"
+import { getTenantRuntimeBySlug } from "./companyDnaRuntimeService"
 
 export type PackageType =
   | "retail_estimate"
@@ -866,14 +867,23 @@ export async function regenerateDocumentSnapshotAsset(packageId: number) {
     throw new Error("Document package not found")
   }
 
-  const statusLabel =
-    doc.status === "signed"
-      ? "Signed Proposal Contract"
-      : doc.status === "sent"
-        ? "Sent Proposal Contract"
-        : "Draft Proposal Contract"
+  const documentLabel =
+    doc.package_type === "change_order"
+      ? "Change Order"
+      : doc.package_type === "supplement"
+        ? "Supplement"
+        : doc.package_type === "ems_tarp"
+          ? "Emergency Tarp Work Authorization"
+          : "Proposal Contract"
 
-  await saveDocumentSnapshotAsset({
+  const statusLabel =
+    doc.status === "signed" || doc.status === "approved"
+      ? `${doc.status === "approved" ? "Approved" : "Signed"} ${documentLabel}`
+      : doc.status === "sent"
+        ? `Sent ${documentLabel}`
+        : `Draft ${documentLabel}`
+
+  const snapshotAsset = await saveDocumentSnapshotAsset({
     tenantSlug: String(doc.tenant_slug || "g2g-roofing"),
     jobId: Number(doc.job_id),
     doc,
@@ -910,6 +920,10 @@ export async function regenerateDocumentSnapshotAsset(packageId: number) {
     status: doc.status,
     document_title: doc.document_title,
     status_label: statusLabel,
+    asset_id: Number(snapshotAsset?.id || 0) || null,
+    download_url: snapshotAsset?.id
+      ? `/assets/${String(doc.tenant_slug || "g2g-roofing")}/file/${snapshotAsset.id}`
+      : null,
   }
 }
 
@@ -1743,13 +1757,42 @@ export async function signDocumentPackage(
         ? `SUPPLEMENT SIGNED\n${doc.document_title}\nSigned by: ${signerName}\nAmount: $${Number(updatedPayload.adjustment_amount || 0).toFixed(2)}`
         : `SIGNED DEAL\n${doc.document_title}\nSigned by: ${signerName}`
 
+  let tenantSignatureBlock = ""
+
+  try {
+    const tenantRuntime = await getTenantRuntimeBySlug(
+      String(doc.tenant_slug || "g2g-roofing")
+    )
+
+    const signatureLines = [
+      tenantRuntime.branding.business_display_name,
+      tenantRuntime.branding.phone,
+      tenantRuntime.branding.email,
+      tenantRuntime.branding.website,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+
+    tenantSignatureBlock = signatureLines.join("\n")
+  } catch (err) {
+    console.error(
+      "Unable to resolve tenant Company DNA signature block:",
+      err
+    )
+  }
+
   const customerAckMsg = isEmsTarp
     ? `Good2Go Roofing: Thank you. We received your Emergency Tarp Work Authorization and your property is now in our emergency tarp queue. We have not forgotten you. We will assign a crew and notify them of your needs. During a major storm, power outages, blocked roads, weather conditions, safety issues, and geographic crew routing can affect response times. If you have a tree on the roof, severe active water intrusion, unsafe access, or another urgent circumstance, reply to this message so our staff and crew can be notified.`
     : doc.package_type === "change_order"
-      ? `Good2Go Roofing: Thank you. We received your signed Change Order for ${doc.document_title}. A production staff member will review it and contact you if any additional action is needed.`
+      ? `Thank you. We received your signed Change Order. A production staff member will review it and contact you if any additional action is needed.`
       : doc.package_type === "supplement"
-        ? `Good2Go Roofing: Thank you. We received the signed Supplement for ${doc.document_title}. A production staff member will review it and contact you if any additional action is needed.`
-        : `Good2Go Roofing: Thank you. We received your signed Proposal / Contract for ${doc.document_title}. A production staff member will review it and contact you soon with next steps.`
+        ? `Thank you. We received the signed Supplement. Our team will review it and contact you if any additional action is needed.`
+        : `Thank you. We received your signed Proposal / Contract. A production staff member will review it and contact you soon with next steps.`
+
+  const customerAckEmailMsg =
+    tenantSignatureBlock
+      ? `${customerAckMsg}\n\n${tenantSignatureBlock}`
+      : customerAckMsg
 
   try {
     if (process.env.ALERT_SMS_TO) {
@@ -1785,7 +1828,7 @@ export async function signDocumentPackage(
             : doc.package_type === "supplement"
               ? "Good2Go Roofing received your signed Supplement"
               : "Good2Go Roofing received your signed Proposal / Contract",
-        customerAckMsg
+        customerAckEmailMsg
       )
     }
 
