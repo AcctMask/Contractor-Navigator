@@ -324,6 +324,12 @@ export async function registerFinancialOperationsBridgeRoutes(
         const documentPackages = packagesByJob.get(jobId) || []
         const assets = assetsByJob.get(jobId) || []
 
+        const contractualAdjustments =
+          deriveContractualAdjustments(
+            documentPackages,
+            row.contract_amount ?? null
+          )
+
         const hasStructuredContractValue =
           row.contract_amount !== null &&
           row.contract_amount !== undefined
@@ -404,13 +410,23 @@ export async function registerFinancialOperationsBridgeRoutes(
           structured_financial: {
             contract_amount:
               row.contract_amount ?? null,
+            original_contract_amount:
+              contractualAdjustments.original_contract_amount,
+            signed_change_order_total:
+              contractualAdjustments.signed_change_order_total,
+            current_contractual_value:
+              contractualAdjustments.current_contractual_value,
+            signed_change_orders:
+              contractualAdjustments.signed_change_orders,
+            supplements:
+              contractualAdjustments.supplements,
             authority:
               "job_estimate_details.contract_amount",
           },
           evidence: {
             timeline,
             document_packages: documentPackages,
-          contractual_adjustments: deriveContractualAdjustments(documentPackages, row.contract_amount ?? null),
+          contractual_adjustments: contractualAdjustments,
             assets,
           },
           flags,
