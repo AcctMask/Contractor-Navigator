@@ -102,8 +102,12 @@ export async function registerOpsIntelBridgeRoutes(
             j.state,
             j.zip,
             j.stage,
-            j.created_at
+            j.created_at,
+            jed.contract_amount
           from jobs j
+          left join job_estimate_details jed
+            on jed.job_id = j.id
+           and jed.tenant_id = j.tenant_id
           where j.tenant_id = $1
           order by j.id asc
         `,
@@ -130,6 +134,11 @@ export async function registerOpsIntelBridgeRoutes(
           zip: row.zip ?? null,
           stage: row.stage ?? null,
           created_at: row.created_at ?? null,
+          contract_amount:
+            row.contract_amount === null ||
+            row.contract_amount === undefined
+              ? null
+              : Number(row.contract_amount),
         })),
       })
     }
