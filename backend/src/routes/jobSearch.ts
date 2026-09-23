@@ -70,6 +70,13 @@ async function ensureCrewAssignmentUserColumn() {
   `)
 }
 
+async function ensureProductionPlannerExplanationColumn() {
+  await pool.query(`
+    alter table jobs
+    add column if not exists production_planner_explanation text
+  `)
+}
+
 export async function registerJobSearchRoutes(app: FastifyInstance) {
 
   // 🔍 SEARCH
@@ -222,6 +229,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
       }
 
       await ensureCrewAssignmentUserColumn()
+      await ensureProductionPlannerExplanationColumn()
 
       const result = await pool.query(
         `
@@ -344,6 +352,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
 
         const nextExplanation = rawExplanation || null
 
+        await ensureProductionPlannerExplanationColumn()
         await client.query("begin")
 
         const current = await client.query(
