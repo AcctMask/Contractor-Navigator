@@ -804,10 +804,13 @@ export default function CalendarPage() {
                       style={{
                         background: overdue
                           ? "#6b21a8"
-                          : "#1f2937",
+                          : presentation.backgroundColor,
                         border: overdue
                           ? "2px solid #a855f7"
-                          : "2px solid transparent",
+                          : `2px solid ${presentation.borderColor}`,
+                        color: overdue
+                          ? "#ffffff"
+                          : presentation.color,
                         borderRadius: 8,
                         padding: 10,
                         marginBottom: 6,
