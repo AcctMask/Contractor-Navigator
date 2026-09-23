@@ -301,7 +301,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             )
 
           order by
-            stage_entry.created_at asc nulls first,
+            j.current_stage_entered_at asc nulls first,
             j.id asc
         `,
         [
