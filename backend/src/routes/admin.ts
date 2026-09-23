@@ -396,7 +396,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       add column if not exists wa_signed_at timestamptz,
       add column if not exists lead_source text,
       add column if not exists lead_source_detail text,
-      add column if not exists marketing_campaign text;
+      add column if not exists marketing_campaign text,
+      add column if not exists production_planner_explanation text;
     `);
 
     await pool.query(`

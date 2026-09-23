@@ -40,6 +40,68 @@ function dateTimeLocalValue(value: Date) {
   return adjusted.toISOString().slice(0, 16)
 }
 
+const PRODUCTION_PLANNER_STAGES = [
+  "inspection",
+  "estimate_needed",
+  "contract_signed",
+  "pre_production",
+  "tarp",
+  "in_production",
+] as const
+
+type ProductionPlannerJob = {
+  id: number
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+  stage?: string | null
+  production_planner_explanation?: string | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  customer_email?: string | null
+  stage_since?: string | null
+  crew_name?: string | null
+  crew_app_user_id?: number | null
+  crew_assigned_at?: string | null
+}
+
+function plannerStageLabel(stageValue?: string | null) {
+  const stage = String(stageValue || "").trim().toLowerCase()
+
+  switch (stage) {
+    case "inspection":
+      return "Inspection"
+    case "estimate_needed":
+      return "Estimate Needed"
+    case "contract_signed":
+      return "Contract Signed"
+    case "pre_production":
+      return "Pre-Production"
+    case "tarp":
+      return "Tarp"
+    case "in_production":
+      return "In Production"
+    default:
+      return stageValue || "Unknown"
+  }
+}
+
+function plannerStageSince(value?: string | null) {
+  if (!value) return "UNKNOWN"
+
+  const entered = new Date(value)
+
+  if (Number.isNaN(entered.getTime())) return "UNKNOWN"
+
+  const elapsedMs = Date.now() - entered.getTime()
+  const elapsedDays = Math.max(0, Math.floor(elapsedMs / 86400000))
+
+  return `${entered.toLocaleDateString("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+  })} (${elapsedDays}d)`
+}
+
 type CalendarEvent = {
   id: number
   title: string
@@ -56,6 +118,64 @@ type CalendarEvent = {
   automation_stage_key?: string | null
   job_stage?: string | null
 }
+
+
+function normalizedPlannerStage(value?: string | null) {
+  return String(value || "").trim().toLowerCase()
+}
+
+function plannerRelevantEvent(
+  job: ProductionPlannerJob,
+  events: CalendarEvent[]
+) {
+  const currentStage = normalizedPlannerStage(job.stage)
+
+  const candidates = events.filter(event => {
+    if (Number(event.job_id) !== Number(job.id)) {
+      return false
+    }
+
+    const automationStage = normalizedPlannerStage(
+      event.automation_stage_key
+    )
+
+    const eventType = normalizedPlannerStage(
+      event.event_type
+    )
+
+    if (
+      event.automation_managed &&
+      automationStage
+    ) {
+      return automationStage === currentStage
+    }
+
+    return eventType === currentStage
+  })
+
+  if (!candidates.length) {
+    return null
+  }
+
+  return [...candidates].sort(
+    (a, b) =>
+      b.start.getTime() - a.start.getTime()
+  )[0]
+}
+
+function plannerIsOverdue(
+  job: ProductionPlannerJob,
+  events: CalendarEvent[]
+) {
+  const obligation = plannerRelevantEvent(job, events)
+
+  if (!obligation) {
+    return false
+  }
+
+  return obligation.end.getTime() < Date.now()
+}
+
 
 function calendarDisplayTitle(
   title?: string | null,
@@ -96,6 +216,92 @@ export default function CalendarPage() {
   const [eventType, setEventType] = useState("inspection")
   const [message, setMessage] = useState("")
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
+  const [plannerJobs, setPlannerJobs] = useState<ProductionPlannerJob[]>([])
+  const [plannerMessage, setPlannerMessage] = useState("")
+  const [plannerExplanationDrafts, setPlannerExplanationDrafts] = useState<Record<number, string>>({})
+
+  async function loadProductionPlanner() {
+    try {
+      setPlannerMessage("Loading Production Planner...")
+
+      const res = await fetch(
+        `${API_BASE}/admin/${getTenantSlug()}/production-planner`,
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Failed to load Production Planner")
+      }
+
+      const jobs = data.jobs || []
+
+      setPlannerJobs(jobs)
+      setPlannerExplanationDrafts(
+        Object.fromEntries(
+          jobs.map((job: ProductionPlannerJob) => [
+            Number(job.id),
+            job.production_planner_explanation || "",
+          ])
+        )
+      )
+      setPlannerMessage("")
+    } catch (err: any) {
+      console.error("Production Planner load failed:", err)
+      setPlannerMessage(
+        err?.message || "Failed to load Production Planner"
+      )
+    }
+  }
+
+  async function savePlannerExplanation(job: ProductionPlannerJob) {
+    try {
+      setPlannerMessage(`Saving Production Planner update for Job ${job.id}...`)
+
+      const nextExplanation =
+        plannerExplanationDrafts[job.id] ?? ""
+
+      const res = await fetch(
+        `${API_BASE}/admin/${getTenantSlug()}/jobs/${job.id}/production-planner-explanation`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            explanation: nextExplanation,
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(
+          data?.error || "Failed to save Production Planner explanation"
+        )
+      }
+
+      setPlannerMessage(
+        data.changed
+          ? `Production Planner updated for Job ${job.id}.`
+          : `No Production Planner change for Job ${job.id}.`
+      )
+
+      await loadProductionPlanner()
+    } catch (err: any) {
+      console.error("Production Planner explanation save failed:", err)
+      setPlannerMessage(
+        err?.message || "Failed to save Production Planner explanation"
+      )
+    }
+  }
 
   async function loadEvents() {
     try {
@@ -134,6 +340,56 @@ export default function CalendarPage() {
       console.error("Calendar load failed:", err)
       setMessage(err?.message || "Failed to load events")
     }
+  }
+
+  function preparePlannerSchedule(job: ProductionPlannerJob) {
+    const stage = normalizedPlannerStage(job.stage)
+    const existing = plannerRelevantEvent(job, events)
+
+    setJobId(String(job.id))
+    setEventType(stage || "general")
+
+    setTitle(
+      `${plannerStageLabel(job.stage)} — Job ${job.id}`
+    )
+
+    setLocation(
+      [job.address1, job.city, job.state, job.zip]
+        .filter(Boolean)
+        .join(", ")
+    )
+
+    setNotes(
+      job.production_planner_explanation || ""
+    )
+
+    if (existing) {
+      setStartTime(
+        dateTimeLocalValue(existing.start)
+      )
+
+      setEndTime(
+        dateTimeLocalValue(existing.end)
+      )
+
+      setMessage(
+        `Job ${job.id} already has a matching ${plannerStageLabel(
+          job.stage
+        )} calendar obligation. Select the existing event to drag, resize, or edit it.`
+      )
+    } else {
+      setStartTime("")
+      setEndTime("")
+
+      setMessage(
+        `Job ${job.id} loaded into the existing Calendar form. Choose the date and time, then create the event.`
+      )
+    }
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    })
   }
 
   async function createEvent() {
@@ -331,6 +587,7 @@ export default function CalendarPage() {
 
   useEffect(() => {
     loadEvents()
+    loadProductionPlanner()
   }, [])
 
   return (
@@ -475,8 +732,200 @@ export default function CalendarPage() {
         </div>
       )}
 
-      <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
-        <DraggableCalendar
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(280px, 360px) minmax(0, 1fr)",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
+        <div
+          style={{
+            background: "#111827",
+            color: "white",
+            borderRadius: 12,
+            padding: 14,
+            maxHeight: 650,
+            overflowY: "auto",
+          }}
+        >
+          <h2 style={{ marginTop: 0 }}>Production Planner</h2>
+
+          {plannerMessage && (
+            <p style={{ opacity: 0.8 }}>{plannerMessage}</p>
+          )}
+
+          {PRODUCTION_PLANNER_STAGES.map(stage => {
+            const presentation = stagePresentation(stage)
+            const jobs = plannerJobs.filter(
+              job =>
+                String(job.stage || "").trim().toLowerCase() === stage
+            )
+
+            return (
+              <div key={stage} style={{ marginBottom: 16 }}>
+                <div
+                  style={{
+                    background: presentation.backgroundColor,
+                    border: `2px solid ${presentation.borderColor}`,
+                    color: presentation.color,
+                    borderRadius: 8,
+                    padding: "8px 10px",
+                    fontWeight: 800,
+                    marginBottom: 6,
+                  }}
+                >
+                  {plannerStageLabel(stage)} ({jobs.length})
+                </div>
+
+                {jobs.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "6px 8px",
+                      opacity: 0.65,
+                      fontSize: 13,
+                    }}
+                  >
+                    No jobs
+                  </div>
+                ) : (
+                  jobs.map(job => {
+                    const relevantEvent =
+                      plannerRelevantEvent(job, events)
+
+                    const overdue =
+                      plannerIsOverdue(job, events)
+
+                    return (
+                    <div
+                      key={job.id}
+                      onClick={() => navigate(`/job/${job.id}`)}
+                      style={{
+                        background: overdue
+                          ? "#6b21a8"
+                          : "#1f2937",
+                        border: overdue
+                          ? "2px solid #a855f7"
+                          : "2px solid transparent",
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800 }}>
+                        {job.customer_name || `Job ${job.id}`}
+                      </div>
+
+                      <div style={{ fontSize: 13, opacity: 0.9 }}>
+                        Job {job.id}
+                        {job.address1 ? ` — ${job.address1}` : ""}
+                      </div>
+
+                      <div style={{ fontSize: 13, marginTop: 5 }}>
+                        <strong>Stage Since:</strong>{" "}
+                        {plannerStageSince(job.stage_since)}
+                      </div>
+
+                      <div
+                        style={{ fontSize: 13, marginTop: 6 }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <strong>Why:</strong>
+
+                        <textarea
+                          value={
+                            plannerExplanationDrafts[job.id] ?? ""
+                          }
+                          onChange={e =>
+                            setPlannerExplanationDrafts(current => ({
+                              ...current,
+                              [job.id]: e.target.value,
+                            }))
+                          }
+                          placeholder="Current production explanation"
+                          style={{
+                            width: "100%",
+                            boxSizing: "border-box",
+                            marginTop: 4,
+                            minHeight: 54,
+                            resize: "vertical",
+                          }}
+                        />
+
+                        <button
+                          onClick={() => savePlannerExplanation(job)}
+                          style={{
+                            ...buttonStyle,
+                            marginTop: 4,
+                            padding: "6px 9px",
+                          }}
+                        >
+                          Save Why
+                        </button>
+                      </div>
+
+                      <div style={{ fontSize: 13, marginTop: 5 }}>
+                        <strong>Crew/Sub:</strong>{" "}
+                        {job.crew_name || "Unassigned"}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 13,
+                          marginTop: 6,
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <strong>Schedule:</strong>{" "}
+                        {relevantEvent
+                          ? relevantEvent.start.toLocaleString(
+                              "en-US",
+                              {
+                                timeZone:
+                                  EASTERN_TIME_ZONE,
+                              }
+                            )
+                          : "Not scheduled"}
+
+                        {overdue && (
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontWeight: 800,
+                            }}
+                          >
+                            OVERDUE
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() =>
+                            preparePlannerSchedule(job)
+                          }
+                          style={{
+                            ...buttonStyle,
+                            marginTop: 5,
+                            padding: "6px 9px",
+                          }}
+                        >
+                          {relevantEvent
+                            ? "View / Reschedule"
+                            : "Schedule"}
+                        </button>
+                      </div>
+                    </div>
+                    )
+                  })
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
+          <DraggableCalendar
           localizer={localizer}
           events={events}
           startAccessor="start"
@@ -505,7 +954,8 @@ export default function CalendarPage() {
           views={["month", "week", "day", "agenda"]}
           culture="en-US"
           style={{ height: "100%" }}
-        />
+          />
+        </div>
       </div>
     </div>
   )

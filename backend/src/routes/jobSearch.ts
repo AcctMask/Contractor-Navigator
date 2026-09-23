@@ -210,6 +210,278 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
   })
 
 
+  // 🏗️ PRODUCTION PLANNER — READ-ONLY FIELD PRODUCTION PROJECTION
+  app.get("/admin/:tenantSlug/production-planner", async (request: any, reply) => {
+    try {
+      const { tenantSlug } = request.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const user = await requireJobReadUser(request, reply, tenantId)
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      await ensureCrewAssignmentUserColumn()
+
+      const result = await pool.query(
+        `
+          select
+            j.id,
+            j.address1,
+            j.city,
+            j.state,
+            j.zip,
+            j.stage,
+            j.production_planner_explanation,
+            c.full_name as customer_name,
+            c.phone as customer_phone,
+            c.email as customer_email,
+
+            stage_entry.created_at as stage_since,
+
+            crew.crew_name,
+            crew.app_user_id as crew_app_user_id,
+            crew.assigned_at as crew_assigned_at
+
+          from jobs j
+
+          left join customers c
+            on c.id = j.customer_id
+           and c.tenant_id = j.tenant_id
+
+          left join lateral (
+            select te.created_at
+            from timeline_events te
+            where te.tenant_id = j.tenant_id
+              and te.job_id = j.id
+              and te.kind = 'manual_stage_updated'
+              and coalesce(te.meta->>'stage', '') = coalesce(j.stage, '')
+            order by te.created_at desc
+            limit 1
+          ) stage_entry on true
+
+          left join lateral (
+            select
+              ca.crew_name,
+              ca.app_user_id,
+              ca.assigned_at
+            from crew_assignments ca
+            where ca.tenant_id = j.tenant_id
+              and ca.job_id = j.id
+              and coalesce(ca.status, 'active') = 'active'
+            order by ca.assigned_at desc nulls last, ca.id desc
+            limit 1
+          ) crew on true
+
+          where j.tenant_id = $1
+            and j.stage in (
+              'inspection',
+              'estimate_needed',
+              'contract_signed',
+              'pre_production',
+              'tarp',
+              'in_production'
+            )
+            and (
+              $2::text <> 'subcontractor'
+              or exists (
+                select 1
+                from crew_assignments ca
+                where ca.tenant_id = j.tenant_id
+                  and ca.job_id = j.id
+                  and ca.app_user_id = $3
+              )
+            )
+
+          order by
+            stage_entry.created_at asc nulls first,
+            j.id asc
+        `,
+        [
+          tenantId,
+          String(user.role),
+          Number(user.id),
+        ]
+      )
+
+      return { ok: true, jobs: result.rows }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || "Load production planner failed",
+      }
+    }
+  })
+
+  app.post(
+    "/admin/:tenantSlug/jobs/:jobId/production-planner-explanation",
+    async (request: any, reply) => {
+      const client = await pool.connect()
+
+      try {
+        const { tenantSlug, jobId } = request.params
+        const tenantId = await getTenantIdBySlug(tenantSlug)
+        const actor = await requireJobReadUser(request, reply, tenantId)
+
+        if (!actor) {
+          client.release()
+          return { ok: false, error: "Not authorized" }
+        }
+
+        const numericJobId = Number(jobId)
+
+        if (!Number.isFinite(numericJobId)) {
+          client.release()
+          reply.code(400)
+          return { ok: false, error: "Invalid job id" }
+        }
+
+        const rawExplanation =
+          typeof request.body?.explanation === "string"
+            ? request.body.explanation.trim()
+            : ""
+
+        const nextExplanation = rawExplanation || null
+
+        await client.query("begin")
+
+        const current = await client.query(
+          `
+            select
+              id,
+              stage,
+              production_planner_explanation
+            from jobs
+            where tenant_id = $1
+              and id = $2
+            for update
+          `,
+          [tenantId, numericJobId]
+        )
+
+        if (!current.rows.length) {
+          await client.query("rollback")
+          client.release()
+          reply.code(404)
+          return { ok: false, error: "Job not found" }
+        }
+
+        const currentStage = String(current.rows[0].stage || "")
+
+        const plannerStages = new Set([
+          "inspection",
+          "estimate_needed",
+          "contract_signed",
+          "pre_production",
+          "tarp",
+          "in_production",
+        ])
+
+        if (!plannerStages.has(currentStage)) {
+          await client.query("rollback")
+          client.release()
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Job is not in a Production Planner stage",
+          }
+        }
+
+        const previousExplanation =
+          typeof current.rows[0].production_planner_explanation === "string"
+            ? current.rows[0].production_planner_explanation.trim() || null
+            : null
+
+        if (previousExplanation === nextExplanation) {
+          await client.query("commit")
+          client.release()
+
+          return {
+            ok: true,
+            changed: false,
+            production_planner_explanation: nextExplanation,
+          }
+        }
+
+        await client.query(
+          `
+            update jobs
+            set production_planner_explanation = $3
+            where tenant_id = $1
+              and id = $2
+          `,
+          [tenantId, numericJobId, nextExplanation]
+        )
+
+        const previousDisplay =
+          previousExplanation || "No production explanation"
+
+        const nextDisplay =
+          nextExplanation || "No production explanation"
+
+        await client.query(
+          `
+            insert into timeline_events
+              (
+                tenant_id,
+                job_id,
+                kind,
+                message,
+                meta,
+                created_at
+              )
+            values
+              (
+                $1,
+                $2,
+                'production_planner_explanation_updated',
+                $3,
+                $4::jsonb,
+                now()
+              )
+          `,
+          [
+            tenantId,
+            numericJobId,
+            `Production update: ${previousDisplay} → ${nextDisplay}`,
+            JSON.stringify({
+              previous_explanation: previousExplanation,
+              explanation: nextExplanation,
+              stage: currentStage,
+              actor_user_id: actor.id,
+              actor_email: actor.email || null,
+              actor_name: actor.full_name || actor.email || null,
+              source: "staff_ui",
+            }),
+          ]
+        )
+
+        await client.query("commit")
+        client.release()
+
+        return {
+          ok: true,
+          changed: true,
+          production_planner_explanation: nextExplanation,
+        }
+      } catch (err: any) {
+        try {
+          await client.query("rollback")
+        } catch {}
+
+        client.release()
+
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            err?.message || "Update production planner explanation failed",
+        }
+      }
+    }
+  )
+
   // 📄 GET SINGLE JOB
   app.get("/admin/:tenantSlug/jobs/:jobId", async (request: any, reply) => {
     try {

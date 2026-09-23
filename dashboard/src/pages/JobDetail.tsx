@@ -132,6 +132,7 @@ export default function JobDetail() {
         "voice_followup_sms_sent",
         "job_manually_updated",
         "manual_stage_updated",
+        "production_planner_explanation_updated",
         "ai_followup_workflow_started",
         "ai_followup_workflow_restarted",
         "ai_followup_workflow_ready_paused",
@@ -417,6 +418,7 @@ export default function JobDetail() {
     if (kind.includes("lead_created")) return "Lead Created"
     if (kind.includes("voice")) return "Voice Intake"
     if (kind.includes("job_manually_updated")) return "Manual Update"
+    if (kind.includes("production_planner_explanation_updated")) return "Production Planner"
     if (kind.includes("job_archived")) return "Archived"
     if (kind.includes("alert")) return "Owner Alert"
     if (kind.includes("sales_intent")) return "Sales Intent"
@@ -433,6 +435,7 @@ export default function JobDetail() {
     if (label.includes("customer")) return { ...badge, background: "#047857" }
     if (label.includes("team")) return { ...badge, background: "#6d28d9" }
     if (label.includes("estimate")) return { ...badge, background: "#b45309" }
+    if (label.includes("production planner")) return { ...badge, background: "#475569" }
     if (label.includes("alert")) return { ...badge, background: "#be123c" }
     return badge
   }
