@@ -18,12 +18,16 @@ function escapeHtml(value: any) {
 export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: string) {
   const displayMode = String(payload.document_display_mode || "")
   const isEmsWorkAuthorization =
-    displayMode === "ems_work_authorization"
+    displayMode === "ems_work_authorization" ||
+    displayMode === "heritage_ems_work_authorization"
 
   const termsAndConditions =
     isEmsWorkAuthorization
       ? String(payload.terms_and_conditions || "")
       : G2G_TERMS_AND_CONDITIONS
+
+  const isHeritageEmsWorkAuthorization =
+    displayMode === "heritage_ems_work_authorization"
 
   const rows: any[][] = [
     ["Document", doc.document_title],
@@ -122,9 +126,12 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
     ])
   }
 
-  if (displayMode === "ems_work_authorization") {
+  if (isEmsWorkAuthorization) {
+    if (!isHeritageEmsWorkAuthorization) {
+      rows.push(["TPA", payload.tpa])
+    }
+
     rows.push(
-      ["TPA", payload.tpa],
       ["Carrier", payload.carrier],
       ["Claim Number", payload.claim_number],
       ["Date of Loss", payload.date_of_loss]
@@ -195,9 +202,15 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
   <section>
     <h2>Project Details</h2>
     <p><strong>Property:</strong> ${escapeHtml(payload.job_address || "Address to be confirmed")}</p>
+    ${isHeritageEmsWorkAuthorization ? `
+    <p>Good2Go Roofing and Construction LLC was assigned by your insurance carrier, Heritage, to provide emergency services at my property.</p>
+    <p>By signing below, I authorize Good2Go Roofing and Construction LLC and their affiliates to provide a roof inspection and upon their assessment of damages, install a tarp in affected areas as deemed necessary.</p>
+    <p>I understand that all photos, invoices, and estimates for repairs and/or replacement will be processed through Heritage/my carrier's authorization and payment.</p>
+    ` : `
     <p>Good2Go Roofing and Construction LLC was assigned by ${escapeHtml(payload.carrier || payload.tpa || "your insurance carrier")} to provide emergency services at this property.</p>
     <p>By signing below, I authorize Good2Go Roofing and Construction LLC and their affiliates to provide a roof inspection and, upon their assessment of damages, install a tarp in affected areas as deemed necessary.</p>
     <p>I understand that all photos, invoices, and estimates for repairs and/or replacement will be processed through the appropriate insurance assignment process for authorization and payment.</p>
+    `}
   </section>
   ` : ""}
 
@@ -226,10 +239,12 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
       : ""
   }
 
+  ${!isHeritageEmsWorkAuthorization ? `
   <section>
     <h2>Terms and Conditions</h2>
     <div class="terms">${escapeHtml(termsAndConditions)}</div>
   </section>
+  ` : ""}
 </body>
 </html>`
 }

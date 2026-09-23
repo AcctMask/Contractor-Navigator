@@ -1087,6 +1087,9 @@ export async function createDocumentPackageByTenantSlug(
       ready_for_signature: true,
     }
   } else if (packageType === "ems_tarp") {
+    const isHeritage =
+      String(job.carrier || "").trim().toLowerCase() === "heritage"
+
     documentTitle = `EMS Tarp Work Authorization - ${customerName}`
     templateSource = "EMS Work Auth_ Bruno,J-Claim#_.pdf"
     payload = {
@@ -1094,7 +1097,7 @@ export async function createDocumentPackageByTenantSlug(
       customer_email: job.customer_email || null,
       customer_phone: job.customer_phone || null,
       job_address: address,
-      tpa: details?.tpa || null,
+      tpa: isHeritage ? null : details?.tpa || null,
       carrier: job.carrier || null,
       claim_number: details?.claim_number || job.job_claim_number || null,
       date_of_loss: job.date_of_loss || null,
@@ -1103,8 +1106,10 @@ export async function createDocumentPackageByTenantSlug(
       mobilization_fee: 250,
       tarp_rate_per_sqft: 2.5,
       estimator_remarks: details?.estimator_remarks || null,
-      terms_and_conditions: G2G_STANDARD_WA_TERMS,
-      document_display_mode: "ems_work_authorization",
+      terms_and_conditions: isHeritage ? null : G2G_STANDARD_WA_TERMS,
+      document_display_mode: isHeritage
+        ? "heritage_ems_work_authorization"
+        : "ems_work_authorization",
       ready_for_signature: !!details?.emergency_tarp_needed,
     }
   } else {
