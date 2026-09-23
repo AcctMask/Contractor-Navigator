@@ -397,7 +397,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       add column if not exists lead_source text,
       add column if not exists lead_source_detail text,
       add column if not exists marketing_campaign text,
-      add column if not exists production_planner_explanation text;
+      add column if not exists production_planner_explanation text,
+      add column if not exists current_stage_entered_at timestamptz;
     `);
 
     await pool.query(`
@@ -425,7 +426,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             return new;
           end if;
 
+          new.current_stage_entered_at :=
+            coalesce(new.current_stage_entered_at, now());
+
         elsif new.stage is not distinct from old.stage then
+          new.current_stage_entered_at :=
+            old.current_stage_entered_at;
+
           new.active_followup_workflow :=
             old.active_followup_workflow;
 
@@ -433,6 +440,9 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             old.followup_workflow_started_at;
 
           return new;
+
+        else
+          new.current_stage_entered_at := now();
         end if;
 
         if stage_key is null then

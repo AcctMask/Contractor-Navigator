@@ -77,6 +77,13 @@ async function ensureProductionPlannerExplanationColumn() {
   `)
 }
 
+async function ensureCurrentStageEnteredAtColumn() {
+  await pool.query(`
+    alter table jobs
+    add column if not exists current_stage_entered_at timestamptz
+  `)
+}
+
 export async function registerJobSearchRoutes(app: FastifyInstance) {
 
   // 🔍 SEARCH
@@ -230,6 +237,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
 
       await ensureCrewAssignmentUserColumn()
       await ensureProductionPlannerExplanationColumn()
+      await ensureCurrentStageEnteredAtColumn()
 
       const result = await pool.query(
         `
@@ -245,7 +253,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             c.phone as customer_phone,
             c.email as customer_email,
 
-            stage_entry.created_at as stage_since,
+            j.current_stage_entered_at as stage_since,
 
             crew.crew_name,
             crew.app_user_id as crew_app_user_id,
@@ -257,16 +265,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             on c.id = j.customer_id
            and c.tenant_id = j.tenant_id
 
-          left join lateral (
-            select te.created_at
-            from timeline_events te
-            where te.tenant_id = j.tenant_id
-              and te.job_id = j.id
-              and te.kind = 'manual_stage_updated'
-              and coalesce(te.meta->>'stage', '') = coalesce(j.stage, '')
-            order by te.created_at desc
-            limit 1
-          ) stage_entry on true
+
 
           left join lateral (
             select
