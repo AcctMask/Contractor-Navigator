@@ -304,6 +304,14 @@ export default function DashboardPage() {
       return "#2563eb"
     }
 
+    if (
+      kind === "document_package_signed" ||
+      kind === "contract_signed" ||
+      kind.includes("document_package_signed")
+    ) {
+      return "#16a34a"
+    }
+
     return null
   }
 
