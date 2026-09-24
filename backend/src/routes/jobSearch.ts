@@ -371,6 +371,95 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
     }
   )
 
+
+  // 🔎 NAVI 2.0 — READ-ONLY CALENDAR AUTHORITY / HISTORY INSPECTION
+  app.get(
+    "/admin/:tenantSlug/production-planner/calendar-authority-inspection",
+    async (request: any, reply) => {
+      try {
+        const { tenantSlug } = request.params
+        const tenantId = await getTenantIdBySlug(tenantSlug)
+        const user = await requireJobReadUser(request, reply, tenantId)
+
+        if (!user) {
+          return { ok: false, error: "Not authorized" }
+        }
+
+        const policies = await pool.query(
+          `
+            select
+              stage_key,
+              event_type,
+              event_label,
+              duration_value,
+              duration_unit,
+              enabled,
+              created_at,
+              updated_at
+            from calendar_stage_automations
+            where tenant_id = $1
+            order by stage_key
+          `,
+          [tenantId]
+        )
+
+        const events = await pool.query(
+          `
+            select
+              ce.id as calendar_event_id,
+              ce.job_id,
+              c.full_name as customer_name,
+              j.stage as current_stage,
+              ce.title,
+              ce.start_time,
+              ce.end_time,
+              ce.event_type,
+              ce.automation_managed,
+              ce.automation_stage_key,
+              ce.created_at,
+              ce.updated_at
+            from calendar_events ce
+            left join jobs j
+              on j.id = ce.job_id
+             and j.tenant_id = ce.tenant_id
+            left join customers c
+              on c.id = j.customer_id
+             and c.tenant_id = j.tenant_id
+            where ce.tenant_id = $1
+              and ce.job_id in (
+                472,
+                569,
+                627,
+                508,
+                628,
+                643,
+                447,
+                499
+              )
+            order by ce.job_id, ce.created_at
+          `,
+          [tenantId]
+        )
+
+        return {
+          ok: true,
+          tenant_slug: tenantSlug,
+          read_only: true,
+          calendar_stage_automations: policies.rows,
+          historical_calendar_evidence: events.rows,
+        }
+      } catch (err: any) {
+        reply.code(400)
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            "Calendar authority inspection failed",
+        }
+      }
+    }
+  )
+
   // 🏗️ PRODUCTION PLANNER — READ-ONLY FIELD PRODUCTION PROJECTION
   app.get("/admin/:tenantSlug/production-planner", async (request: any, reply) => {
     try {
