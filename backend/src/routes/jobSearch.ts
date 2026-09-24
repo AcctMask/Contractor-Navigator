@@ -441,12 +441,30 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           [tenantId]
         )
 
+        const linderTimeline = await pool.query(
+          `
+            select
+              id,
+              job_id,
+              kind,
+              message,
+              meta,
+              created_at
+            from timeline_events
+            where tenant_id = $1
+              and job_id = 508
+            order by created_at
+          `,
+          [tenantId]
+        )
+
         return {
           ok: true,
           tenant_slug: tenantSlug,
           read_only: true,
           calendar_stage_automations: policies.rows,
           historical_calendar_evidence: events.rows,
+          linder_508_timeline: linderTimeline.rows,
         }
       } catch (err: any) {
         reply.code(400)
