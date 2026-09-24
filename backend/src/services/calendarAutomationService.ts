@@ -116,6 +116,40 @@ export async function ensureCalendarAutomationFoundation() {
     on conflict (tenant_id, stage_key) do nothing
   `)
 
+  /*
+   * Good2Go tenant calendar policy:
+   * tarp -> Tarp -> 2 days
+   *
+   * Uses the existing universal stage-calendar automation.
+   * ON CONFLICT preserves later human/configuration changes.
+   */
+  await pool.query(`
+    insert into calendar_stage_automations (
+      tenant_id,
+      stage_key,
+      event_type,
+      event_label,
+      duration_value,
+      duration_unit,
+      enabled,
+      created_at,
+      updated_at
+    )
+    select
+      t.id,
+      'tarp',
+      'tarp',
+      'Tarp',
+      2,
+      'days',
+      true,
+      now(),
+      now()
+    from tenants t
+    where t.slug = 'g2g-roofing'
+    on conflict (tenant_id, stage_key) do nothing
+  `)
+
   await pool.query(`
     create unique index if not exists
       idx_calendar_events_stage_automation_unique
