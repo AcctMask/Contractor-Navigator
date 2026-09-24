@@ -224,7 +224,32 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
   })
 
 
-  // 🔎 STAGE SINCE — READ-ONLY HISTORICAL RECOVERY PREVIEW
+  // 🔎 STAGE SINCE — READ-ONLY SIX-STAGE HISTORICAL RECOVERY PREVIEW
+  //
+  // Recovery authority is intentionally stage-specific:
+  //
+  // inspection:
+  //   manual_stage_updated
+  //
+  // estimate_needed:
+  //   manual_stage_updated
+  //
+  // contract_signed:
+  //   signed original contract package
+  //
+  // pre_production:
+  //   manual_stage_updated
+  //
+  // tarp:
+  //   EMS WA signed_at
+  //
+  // in_production:
+  //   automated calendar event start_time,
+  //   with manual stage evidence retained as a fallback
+  //
+  // This endpoint is PREVIEW ONLY.
+  // It does not update jobs.current_stage_entered_at.
+
   app.get(
     "/admin/:tenantSlug/production-planner/stage-since-preview",
     async (request: any, reply) => {
@@ -244,6 +269,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
                 j.id,
                 j.stage,
                 j.current_stage_entered_at,
+                j.wa_signed_at,
                 c.full_name as customer_name
               from jobs j
               left join customers c
@@ -261,54 +287,161 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             ),
 
             manual_stage_evidence as (
-              select distinct on (te.job_id)
+              select distinct on (te.job_id, te.meta->>'stage')
                 te.job_id,
-                te.created_at as candidate_stage_since,
+                te.meta->>'stage' as stage_key,
+                te.created_at as evidence_at,
                 'manual_stage_updated'::text as evidence_source
               from timeline_events te
               join planner_jobs pj
                 on pj.id = te.job_id
               where te.tenant_id = $1
                 and te.kind = 'manual_stage_updated'
-                and te.meta->>'stage' = pj.stage
-              order by te.job_id, te.created_at desc
-            ),
-
-            calendar_stage_evidence as (
-              select distinct on (te.job_id)
-                te.job_id,
-                coalesce(
-                  nullif(te.meta->>'start_time', '')::timestamptz,
-                  te.created_at
-                ) as candidate_stage_since,
-                te.kind::text as evidence_source
-              from timeline_events te
-              join planner_jobs pj
-                on pj.id = te.job_id
-              where te.tenant_id = $1
-                and te.kind in (
-                  'calendar_stage_event_created',
-                  'calendar_stage_event_rescheduled'
+                and te.meta->>'stage' in (
+                  'inspection',
+                  'estimate_needed',
+                  'pre_production',
+                  'in_production'
                 )
-                and te.meta->>'stage' = pj.stage
-              order by te.job_id, te.created_at desc
+              order by
+                te.job_id,
+                te.meta->>'stage',
+                te.created_at desc
             ),
 
-            candidates as (
+            contract_signed_evidence as (
+              select distinct on (p.job_id)
+                p.job_id,
+                'contract_signed'::text as stage_key,
+                p.signed_at as evidence_at,
+                'original_contract_signed_at'::text as evidence_source
+              from job_document_packages p
+              join planner_jobs pj
+                on pj.id = p.job_id
+              where p.tenant_id = $1
+                and p.package_type in (
+                  'retail_estimate',
+                  'insurance_contract'
+                )
+                and p.status = 'signed'
+                and p.signed_at is not null
+              order by
+                p.job_id,
+                p.signed_at desc
+            ),
+
+            tarp_signed_evidence as (
+              select
+                pj.id as job_id,
+                'tarp'::text as stage_key,
+                pj.wa_signed_at as evidence_at,
+                'wa_signed_at'::text as evidence_source
+              from planner_jobs pj
+              where pj.wa_signed_at is not null
+            ),
+
+            tarp_document_evidence as (
+              select distinct on (p.job_id)
+                p.job_id,
+                'tarp'::text as stage_key,
+                p.signed_at as evidence_at,
+                'ems_tarp_document_signed_at'::text as evidence_source
+              from job_document_packages p
+              join planner_jobs pj
+                on pj.id = p.job_id
+              where p.tenant_id = $1
+                and p.package_type = 'ems_tarp'
+                and p.status = 'signed'
+                and p.signed_at is not null
+              order by
+                p.job_id,
+                p.signed_at desc
+            ),
+
+            production_calendar_evidence as (
+              select distinct on (ce.job_id)
+                ce.job_id,
+                'in_production'::text as stage_key,
+                ce.start_time as evidence_at,
+                'production_calendar_start'::text as evidence_source
+              from calendar_events ce
+              join planner_jobs pj
+                on pj.id = ce.job_id
+              where ce.tenant_id = $1
+                and ce.job_id is not null
+                and ce.start_time is not null
+                and (
+                  ce.automation_stage_key = 'in_production'
+                  or (
+                    ce.event_type = 'production'
+                    and coalesce(ce.automation_managed, false) = true
+                  )
+                )
+              order by
+                ce.job_id,
+                ce.created_at desc,
+                ce.id desc
+            ),
+
+            all_candidates as (
               select * from manual_stage_evidence
+
               union all
-              select * from calendar_stage_evidence
+
+              select * from contract_signed_evidence
+
+              union all
+
+              select * from tarp_signed_evidence
+
+              union all
+
+              select * from tarp_document_evidence
+
+              union all
+
+              select * from production_calendar_evidence
+            ),
+
+            ranked_candidates as (
+              select
+                ac.*,
+                row_number() over (
+                  partition by ac.job_id, ac.stage_key
+                  order by
+                    case
+                      when ac.stage_key = 'tarp'
+                           and ac.evidence_source = 'wa_signed_at'
+                        then 1
+
+                      when ac.stage_key = 'tarp'
+                           and ac.evidence_source = 'ems_tarp_document_signed_at'
+                        then 2
+
+                      when ac.stage_key = 'in_production'
+                           and ac.evidence_source = 'production_calendar_start'
+                        then 1
+
+                      when ac.stage_key = 'in_production'
+                           and ac.evidence_source = 'manual_stage_updated'
+                        then 2
+
+                      else 1
+                    end,
+                    ac.evidence_at desc
+                ) as authority_rank
+              from all_candidates ac
+              where ac.evidence_at is not null
             ),
 
             best_candidate as (
-              select distinct on (job_id)
+              select
                 job_id,
-                candidate_stage_since,
+                stage_key,
+                evidence_at,
                 evidence_source
-              from candidates
-              order by
-                job_id,
-                candidate_stage_since desc
+              from ranked_candidates
+              where authority_rank = 1
             )
 
             select
@@ -316,18 +449,25 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               pj.customer_name,
               pj.stage as current_stage,
               pj.current_stage_entered_at as current_stage_since,
-              bc.candidate_stage_since as recoverable_stage_since,
+              bc.evidence_at as recoverable_stage_since,
               bc.evidence_source,
+
               case
                 when pj.current_stage_entered_at is not null
                   then 'ALREADY_PRESENT'
-                when bc.candidate_stage_since is not null
+
+                when bc.evidence_at is not null
                   then 'RECOVERABLE'
+
                 else 'UNKNOWN'
               end as recovery_status
+
             from planner_jobs pj
+
             left join best_candidate bc
               on bc.job_id = pj.id
+             and bc.stage_key = pj.stage
+
             order by
               case pj.stage
                 when 'inspection' then 1
@@ -338,7 +478,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
                 when 'in_production' then 6
                 else 99
               end,
-              bc.candidate_stage_since nulls first,
+              bc.evidence_at nulls first,
               pj.id
           `,
           [tenantId]
@@ -353,19 +493,39 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
           {}
         )
 
+        const byStage = result.rows.reduce(
+          (acc: Record<string, Record<string, number>>, row: any) => {
+            const stage = String(row.current_stage || "UNKNOWN")
+            const status = String(row.recovery_status || "UNKNOWN")
+
+            if (!acc[stage]) {
+              acc[stage] = {}
+            }
+
+            acc[stage][status] = (acc[stage][status] || 0) + 1
+            return acc
+          },
+          {}
+        )
+
         return {
           ok: true,
           tenant_slug: tenantSlug,
           read_only: true,
+          recovery_model: "stage_specific_authority",
           total_jobs: result.rowCount || 0,
           summary,
+          by_stage: byStage,
           jobs: result.rows,
         }
       } catch (err: any) {
         reply.code(400)
+
         return {
           ok: false,
-          error: err?.message || "Stage Since preview failed",
+          error:
+            err?.message ||
+            "Six-stage Stage Since recovery preview failed",
         }
       }
     }
