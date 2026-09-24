@@ -260,6 +260,104 @@ export default function DashboardPage() {
 
   const recentActivityItems = recentActivity.slice(0, 10)
 
+  function humanizeActivityValue(value: unknown) {
+    return String(value || "")
+      .replaceAll("_", " ")
+      .trim()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  }
+
+  function activityMeta(event: RecentActivitySummary): any {
+    return event.meta || event.metadata || {}
+  }
+
+  function activityActor(event: RecentActivitySummary) {
+    const meta = activityMeta(event)
+
+    return (
+      meta.actor_name ||
+      meta.actor_email ||
+      meta.staff_name ||
+      meta.user_name ||
+      meta.author ||
+      meta.sent_by ||
+      null
+    )
+  }
+
+  function activityDotColor(event: RecentActivitySummary) {
+    const kind = String(event.kind || "").toLowerCase()
+
+    if (
+      kind === "calendar_stage_event_created" ||
+      kind === "calendar_stage_event_rescheduled" ||
+      kind === "calendar_event_rescheduled"
+    ) {
+      return "#dc2626"
+    }
+
+    if (
+      kind.includes("ai_followup") ||
+      kind.includes("ai_follow_up") ||
+      kind.includes("ai_message")
+    ) {
+      return "#2563eb"
+    }
+
+    return null
+  }
+
+  function activityDisplayTitle(event: RecentActivitySummary) {
+    const kind = String(event.kind || "").toLowerCase()
+    const meta = activityMeta(event)
+
+    if (kind === "ai_followup_workflow_started") {
+      const lifecycle =
+        meta.stage ||
+        meta.stage_key ||
+        meta.workflow_stage ||
+        meta.lifecycle_stage ||
+        meta.crm_substatus ||
+        ""
+
+      return lifecycle
+        ? `AI Follow-Up Started — ${humanizeActivityValue(lifecycle)}`
+        : "AI Follow-Up Started"
+    }
+
+    return activityTitle(event)
+  }
+
+  function activityDisplayDetail(event: RecentActivitySummary) {
+    const kind = String(event.kind || "").toLowerCase()
+
+    if (kind === "ai_followup_workflow_started") {
+      return null
+    }
+
+    return event.message || null
+  }
+
+  function activityAttribution(event: RecentActivitySummary) {
+    const kind = String(event.kind || "").toLowerCase()
+    const actor = activityActor(event)
+
+    if (!actor) return null
+
+    if (kind === "manual_stage_updated") {
+      return `Moved by ${actor}`
+    }
+
+    if (
+      kind === "calendar_stage_event_rescheduled" ||
+      kind === "calendar_event_rescheduled"
+    ) {
+      return `By ${actor}`
+    }
+
+    return null
+  }
+
   function activityTitle(event: RecentActivitySummary) {
     const customer =
       event.customer_name ||
@@ -668,23 +766,52 @@ export default function DashboardPage() {
                       const activityCard = (
                         <div style={systemEventCard}>
                           <div style={systemEventTopRow}>
-                            <span style={systemEventType}>
-                              {activityTitle(event)}
+                            <span
+                              style={{
+                                ...systemEventType,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: 7,
+                              }}
+                            >
+                              {activityDotColor(event) ? (
+                                <span
+                                  aria-hidden="true"
+                                  style={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: "50%",
+                                    background: activityDotColor(event) || undefined,
+                                    flex: "0 0 auto",
+                                  }}
+                                />
+                              ) : null}
+                              {activityDisplayTitle(event)}
                             </span>
                             <span style={systemEventTime}>
                               {fmtDate(event.created_at)}
                             </span>
                           </div>
 
-                          {event.message ? (
+                          {activityDisplayDetail(event) ? (
                             <div style={systemEventDetail}>
-                              {event.message}
+                              {activityDisplayDetail(event)}
+                            </div>
+                          ) : null}
+
+                          {activityAttribution(event) ? (
+                            <div style={systemEventMeta}>
+                              {activityAttribution(event)}
                             </div>
                           ) : null}
 
                           {event.job_id ? (
                             <div style={systemEventMeta}>
-                              Job #{event.job_id} — Open Job
+                              Job #{event.job_id}
+                              {(event.customer_name || event.meta?.customer_name)
+                                ? ` — ${event.customer_name || event.meta?.customer_name}`
+                                : ""}
+                              {" — Open Job"}
                             </div>
                           ) : null}
                         </div>

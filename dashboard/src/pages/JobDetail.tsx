@@ -481,6 +481,43 @@ export default function JobDetail() {
     return kind.replaceAll("_", " ").toUpperCase()
   }
 
+  function getActivityAttribution(item: any) {
+    const kind = String(item?.kind || "").toLowerCase()
+    const meta = item?.meta || item?.metadata || {}
+
+    const actor =
+      meta.actor_name ||
+      meta.actor_email ||
+      meta.staff_name ||
+      meta.user_name ||
+      meta.author ||
+      null
+
+    if (kind === "manual_stage_updated" && actor) {
+      return `Moved by ${actor}`
+    }
+
+    if (
+      (
+        kind === "calendar_stage_event_rescheduled" ||
+        kind === "calendar_event_rescheduled"
+      ) &&
+      actor
+    ) {
+      return `By ${actor}`
+    }
+
+    if (
+      kind === "calendar_stage_event_created" &&
+      !actor &&
+      meta.source === "stage_calendar_automation"
+    ) {
+      return "Created automatically from production stage"
+    }
+
+    return null
+  }
+
   function getActivityBadgeStyle(item: any): CSSProperties {
     const label = getActivityLabel(item).toLowerCase()
 
@@ -2152,6 +2189,19 @@ export default function JobDetail() {
                       }}
                     >
                       {new Date(item.created_at).toLocaleString()}
+                    </div>
+                  ) : null}
+
+                  {getActivityAttribution(item) ? (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#4b5563",
+                      }}
+                    >
+                      {getActivityAttribution(item)}
                     </div>
                   ) : null}
 
