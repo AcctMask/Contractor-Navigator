@@ -233,6 +233,35 @@ export default function CalendarPage() {
         }
       )
 
+      const stageSincePreviewRes = await fetch(
+        `${API_BASE}/admin/${getTenantSlug()}/production-planner/stage-since-preview`,
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const stageSincePreview = await stageSincePreviewRes.json()
+
+      console.log(
+        "========== NAVI 2.0 — SIX-STAGE STAGE-SINCE PREVIEW =========="
+      )
+      console.log(stageSincePreview)
+
+      if (Array.isArray(stageSincePreview?.jobs)) {
+        console.table(
+          stageSincePreview.jobs.map((job: any) => ({
+            job_id: job.job_id,
+            customer_name: job.customer_name,
+            current_stage: job.current_stage,
+            current_stage_since: job.current_stage_since,
+            recoverable_stage_since: job.recoverable_stage_since,
+            recovery_source: job.recovery_source,
+          }))
+        )
+      }
+
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
