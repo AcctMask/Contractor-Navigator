@@ -28,6 +28,7 @@ import { registerOpsIntelBridgeRoutes } from "./routes/opsIntelBridge"
 import { registerFinancialOperationsHandoffRoutes } from "./routes/financialOperationsHandoff"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { ensureFollowupLifecycleAuthority } from "./services/followupLifecycleService"
+import { ensureStageSinceAuthority } from "./services/stageSinceService"
 import {
   schedulerTick,
   schedulerTickEms,
@@ -95,6 +96,7 @@ app.listen({ port, host: "0.0.0.0" })
      * Navigator corporate authority must be durable before any
      * CRM / AI follow-up scheduler is allowed to operate.
      */
+    await ensureStageSinceAuthority()
     await ensureFollowupLifecycleAuthority()
 
     startFollowupScheduler()
