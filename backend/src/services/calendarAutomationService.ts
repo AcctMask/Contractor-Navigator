@@ -150,18 +150,17 @@ export async function ensureCalendarAutomationFoundation() {
     on conflict (tenant_id, stage_key) do nothing
   `)
 
+  /*
+   * Production occurrence model:
+   *
+   * Every genuine entry into a calendar-managed stage is a distinct
+   * production occurrence. Historical occurrences remain preserved.
+   *
+   * The Production Planner selects the most recent occurrence for the
+   * job's current stage.
+   */
   await pool.query(`
-    create unique index if not exists
-      idx_calendar_events_stage_automation_unique
-    on calendar_events (
-      tenant_id,
-      job_id,
-      automation_stage_key
-    )
-    where
-      automation_managed = true
-      and job_id is not null
-      and automation_stage_key is not null
+    drop index if exists idx_calendar_events_stage_automation_unique
   `)
 
   /*
@@ -189,9 +188,6 @@ export async function ensureCalendarAutomationFoundation() {
       event_end_value timestamptz;
       duration_value interval;
 
-      existing_event_id bigint;
-      existing_start timestamptz;
-      existing_end timestamptz;
     begin
       if new.stage is null then
         return new;
@@ -256,139 +252,71 @@ export async function ensureCalendarAutomationFoundation() {
       event_start_value := now();
       event_end_value := event_start_value + duration_value;
 
-      select
-        ce.id,
-        ce.start_time,
-        ce.end_time
-      into
-        existing_event_id,
-        existing_start,
-        existing_end
-      from calendar_events ce
-      where ce.tenant_id = new.tenant_id
-        and ce.job_id = new.id
-        and ce.automation_managed = true
-        and ce.automation_stage_key = cfg.stage_key
-      order by ce.id desc
-      limit 1;
+      insert into calendar_events (
+        tenant_id,
+        job_id,
+        title,
+        start_time,
+        end_time,
+        location,
+        notes,
+        event_type,
+        automation_managed,
+        automation_stage_key,
+        created_at,
+        updated_at
+      )
+      values (
+        new.tenant_id,
+        new.id,
+        event_title_value,
+        event_start_value,
+        event_end_value,
+        nullif(event_location_value, ''),
+        'Automatically scheduled when job entered stage: ' || cfg.stage_key,
+        cfg.event_type,
+        true,
+        cfg.stage_key,
+        now(),
+        now()
+      );
 
-      if existing_event_id is null then
-        insert into calendar_events (
-          tenant_id,
-          job_id,
-          title,
-          start_time,
-          end_time,
-          location,
-          notes,
-          event_type,
-          automation_managed,
-          automation_stage_key,
-          created_at,
-          updated_at
-        )
-        values (
-          new.tenant_id,
-          new.id,
-          event_title_value,
-          event_start_value,
-          event_end_value,
-          nullif(event_location_value, ''),
-          'Automatically scheduled when job entered stage: ' || cfg.stage_key,
-          cfg.event_type,
-          true,
-          cfg.stage_key,
-          now(),
-          now()
-        );
-
-        insert into timeline_events (
-          tenant_id,
-          job_id,
-          kind,
-          message,
-          meta,
-          created_at
-        )
-        values (
-          new.tenant_id,
-          new.id,
-          'calendar_stage_event_created',
-          event_title_value
-            || ' scheduled from '
-            || to_char(
-                 event_start_value at time zone 'America/New_York',
-                 'Mon DD, YYYY FMHH12:MI AM'
-               )
-            || ' through '
-            || to_char(
-                 event_end_value at time zone 'America/New_York',
-                 'Mon DD, YYYY FMHH12:MI AM'
-               ),
-          jsonb_build_object(
-            'stage', cfg.stage_key,
-            'event_type', cfg.event_type,
-            'event_label', cfg.event_label,
-            'start_time', event_start_value,
-            'end_time', event_end_value,
-            'duration_value', cfg.duration_value,
-            'duration_unit', cfg.duration_unit,
-            'customer_name', customer_name_value,
-            'source', 'stage_calendar_automation'
-          ),
-          now()
-        );
-      else
-        update calendar_events
-        set
-          title = event_title_value,
-          start_time = event_start_value,
-          end_time = event_end_value,
-          location = nullif(event_location_value, ''),
-          event_type = cfg.event_type,
-          updated_at = now()
-        where tenant_id = new.tenant_id
-          and id = existing_event_id;
-
-        insert into timeline_events (
-          tenant_id,
-          job_id,
-          kind,
-          message,
-          meta,
-          created_at
-        )
-        values (
-          new.tenant_id,
-          new.id,
-          'calendar_stage_event_rescheduled',
-          event_title_value
-            || ' rescheduled after re-entering '
-            || cfg.stage_key
-            || ' from '
-            || to_char(
-                 existing_start at time zone 'America/New_York',
-                 'Mon DD, YYYY FMHH12:MI AM'
-               )
-            || ' to '
-            || to_char(
-                 event_start_value at time zone 'America/New_York',
-                 'Mon DD, YYYY FMHH12:MI AM'
-               ),
-          jsonb_build_object(
-            'stage', cfg.stage_key,
-            'event_type', cfg.event_type,
-            'event_label', cfg.event_label,
-            'old_start_time', existing_start,
-            'old_end_time', existing_end,
-            'new_start_time', event_start_value,
-            'new_end_time', event_end_value,
-            'customer_name', customer_name_value,
-            'source', 'stage_calendar_automation_reentry'
-          ),
-          now()
-        );
-      end if;
+      insert into timeline_events (
+        tenant_id,
+        job_id,
+        kind,
+        message,
+        meta,
+        created_at
+      )
+      values (
+        new.tenant_id,
+        new.id,
+        'calendar_stage_event_created',
+        event_title_value
+          || ' scheduled from '
+          || to_char(
+               event_start_value at time zone 'America/New_York',
+               'Mon DD, YYYY FMHH12:MI AM'
+             )
+          || ' through '
+          || to_char(
+               event_end_value at time zone 'America/New_York',
+               'Mon DD, YYYY FMHH12:MI AM'
+             ),
+        jsonb_build_object(
+          'stage', cfg.stage_key,
+          'event_type', cfg.event_type,
+          'event_label', cfg.event_label,
+          'start_time', event_start_value,
+          'end_time', event_end_value,
+          'duration_value', cfg.duration_value,
+          'duration_unit', cfg.duration_unit,
+          'customer_name', customer_name_value,
+          'source', 'stage_calendar_automation'
+        ),
+        now()
+      );
 
       return new;
 
