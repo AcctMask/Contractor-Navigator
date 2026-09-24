@@ -84,6 +84,9 @@ export default function JobDetail() {
   const [form, setForm] = useState<any>({})
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [calendarEvents, setCalendarEvents] = useState<any[]>([])
+
+  const [dirtyCalendarEventIds, setDirtyCalendarEventIds] =
+    useState<Set<string>>(new Set())
   const [subcontractors, setSubcontractors] = useState<any[]>([])
   const [crewAssignments, setCrewAssignments] = useState<any[]>([])
   const [selectedSubcontractorId, setSelectedSubcontractorId] = useState("")
@@ -342,7 +345,13 @@ export default function JobDetail() {
         return updated
       })
     )
-  }
+
+    setDirtyCalendarEventIds((current) => {
+      const next = new Set(current)
+      next.add(String(eventId))
+      return next
+    })
+}
 
   function toDateTimeLocal(value: string | null | undefined) {
     if (!value) return ""
@@ -369,6 +378,28 @@ export default function JobDetail() {
         start_time: toDateTimeLocal(event.start_time),
         end_time: toDateTimeLocal(event.end_time),
       }))
+
+    linked.sort((a: any, b: any) => {
+      const aCurrentStage =
+        a.automation_managed === true &&
+        a.automation_stage_key === job?.stage
+      const bCurrentStage =
+        b.automation_managed === true &&
+        b.automation_stage_key === job?.stage
+
+      if (aCurrentStage !== bCurrentStage) {
+        return aCurrentStage ? -1 : 1
+      }
+
+      const aCreated = new Date(a.created_at || a.start_time || 0).getTime()
+      const bCreated = new Date(b.created_at || b.start_time || 0).getTime()
+
+      if (aCreated !== bCreated) {
+        return bCreated - aCreated
+      }
+
+      return Number(b.id || 0) - Number(a.id || 0)
+    })
 
     setCalendarEvents(linked)
   }
@@ -400,11 +431,33 @@ export default function JobDetail() {
 
     successToast("Calendar event saved")
     await loadCalendarEvents()
+
+    setDirtyCalendarEventIds((current) => {
+      const next = new Set(current)
+      next.delete(String(event.id))
+      return next
+    })
+  }
+
+  function isProductionCalendarActivity(item: any) {
+    const kind = String(item?.kind || "").toLowerCase()
+
+    return (
+      kind === "calendar_stage_event_created" ||
+      kind === "calendar_stage_event_rescheduled" ||
+      kind === "calendar_event_rescheduled"
+    )
   }
 
   function getActivityLabel(item: any) {
     const kind = String(item?.kind || "").toLowerCase()
     const meta = item?.meta || {}
+
+    if (
+      kind === "calendar_stage_event_created" ||
+      kind === "calendar_stage_event_rescheduled" ||
+      kind === "calendar_event_rescheduled"
+    ) return "Production Calendar Change"
 
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
     if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
@@ -436,6 +489,7 @@ export default function JobDetail() {
     if (label.includes("team")) return { ...badge, background: "#6d28d9" }
     if (label.includes("estimate")) return { ...badge, background: "#b45309" }
     if (label.includes("production planner")) return { ...badge, background: "#475569" }
+    if (label.includes("production calendar change")) return { ...badge, background: "#dc2626" }
     if (label.includes("alert")) return { ...badge, background: "#be123c" }
     return badge
   }
@@ -2023,7 +2077,122 @@ export default function JobDetail() {
         </div>
       </section>
 
-      <section style={card}>
+            <div
+        style={{
+          marginTop: 16,
+          marginBottom: 16,
+          border: "1px solid #e5e7eb",
+          borderRadius: 8,
+          padding: 12,
+        }}
+      >
+        <details>
+          <summary
+            style={{
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Production History
+          </summary>
+
+          <div
+            style={{
+              marginTop: 12,
+              display: "grid",
+              gap: 10,
+            }}
+          >
+            {notes
+              .filter((item: any) => {
+                const kind = String(item?.kind || "").toLowerCase()
+
+                return (
+                  kind === "manual_stage_updated" ||
+                  kind === "calendar_stage_event_created" ||
+                  kind === "calendar_stage_event_rescheduled" ||
+                  kind === "calendar_event_rescheduled" ||
+                  kind === "production_planner_explanation_updated"
+                )
+              })
+              .slice()
+              .sort(
+                (a: any, b: any) =>
+                  new Date(b?.created_at || 0).getTime() -
+                  new Date(a?.created_at || 0).getTime()
+              )
+              .map((item: any) => (
+                <div
+                  key={`production-history-${item.id}`}
+                  style={{
+                    borderLeft: isProductionCalendarActivity(item)
+                      ? "3px solid #dc2626"
+                      : "3px solid #d1d5db",
+                    paddingLeft: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: isProductionCalendarActivity(item)
+                        ? "#dc2626"
+                        : "#374151",
+                    }}
+                  >
+                    {getActivityLabel(item)}
+                  </div>
+
+                  {item.created_at ? (
+                    <div
+                      style={{
+                        marginTop: 2,
+                        fontSize: 12,
+                        color: "#6b7280",
+                      }}
+                    >
+                      {new Date(item.created_at).toLocaleString()}
+                    </div>
+                  ) : null}
+
+                  {item.message ? (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 13,
+                      }}
+                    >
+                      {item.message}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+
+            {!notes.some((item: any) => {
+              const kind = String(item?.kind || "").toLowerCase()
+
+              return (
+                kind === "manual_stage_updated" ||
+                kind === "calendar_stage_event_created" ||
+                kind === "calendar_stage_event_rescheduled" ||
+                kind === "calendar_event_rescheduled" ||
+                kind === "production_planner_explanation_updated"
+              )
+            }) ? (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#6b7280",
+                }}
+              >
+                No production history recorded yet.
+              </div>
+            ) : null}
+          </div>
+        </details>
+      </div>
+
+<section style={card}>
         <h2>Linked Calendar Events</h2>
 
         {calendarEvents.length === 0 ? (
@@ -2092,9 +2261,22 @@ export default function JobDetail() {
                   style={textarea}
                 />
 
-                <button onClick={() => saveCalendarEvent(event)} style={button}>
+                {dirtyCalendarEventIds.has(String(event.id)) ? (
+<button onClick={() => saveCalendarEvent(event)} style={button}>
                   Save Calendar Event
                 </button>
+) : (
+  <div
+    style={{
+      marginTop: 8,
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+    }}
+  >
+    Saved calendar event
+  </div>
+)}
               </div>
             </div>
           ))
