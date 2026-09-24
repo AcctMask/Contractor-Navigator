@@ -224,6 +224,153 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
   })
 
 
+  // 🔎 STAGE SINCE — READ-ONLY HISTORICAL RECOVERY PREVIEW
+  app.get(
+    "/admin/:tenantSlug/production-planner/stage-since-preview",
+    async (request: any, reply) => {
+      try {
+        const { tenantSlug } = request.params
+        const tenantId = await getTenantIdBySlug(tenantSlug)
+        const user = await requireJobReadUser(request, reply, tenantId)
+
+        if (!user) {
+          return { ok: false, error: "Not authorized" }
+        }
+
+        const result = await pool.query(
+          `
+            with planner_jobs as (
+              select
+                j.id,
+                j.stage,
+                j.current_stage_entered_at,
+                c.full_name as customer_name
+              from jobs j
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+              where j.tenant_id = $1
+                and j.stage in (
+                  'inspection',
+                  'estimate_needed',
+                  'contract_signed',
+                  'pre_production',
+                  'tarp',
+                  'in_production'
+                )
+            ),
+
+            manual_stage_evidence as (
+              select distinct on (te.job_id)
+                te.job_id,
+                te.created_at as candidate_stage_since,
+                'manual_stage_updated'::text as evidence_source
+              from timeline_events te
+              join planner_jobs pj
+                on pj.id = te.job_id
+              where te.tenant_id = $1
+                and te.kind = 'manual_stage_updated'
+                and te.meta->>'stage' = pj.stage
+              order by te.job_id, te.created_at desc
+            ),
+
+            calendar_stage_evidence as (
+              select distinct on (te.job_id)
+                te.job_id,
+                coalesce(
+                  nullif(te.meta->>'start_time', '')::timestamptz,
+                  te.created_at
+                ) as candidate_stage_since,
+                te.kind::text as evidence_source
+              from timeline_events te
+              join planner_jobs pj
+                on pj.id = te.job_id
+              where te.tenant_id = $1
+                and te.kind in (
+                  'calendar_stage_event_created',
+                  'calendar_stage_event_rescheduled'
+                )
+                and te.meta->>'stage' = pj.stage
+              order by te.job_id, te.created_at desc
+            ),
+
+            candidates as (
+              select * from manual_stage_evidence
+              union all
+              select * from calendar_stage_evidence
+            ),
+
+            best_candidate as (
+              select distinct on (job_id)
+                job_id,
+                candidate_stage_since,
+                evidence_source
+              from candidates
+              order by
+                job_id,
+                candidate_stage_since desc
+            )
+
+            select
+              pj.id as job_id,
+              pj.customer_name,
+              pj.stage as current_stage,
+              pj.current_stage_entered_at as current_stage_since,
+              bc.candidate_stage_since as recoverable_stage_since,
+              bc.evidence_source,
+              case
+                when pj.current_stage_entered_at is not null
+                  then 'ALREADY_PRESENT'
+                when bc.candidate_stage_since is not null
+                  then 'RECOVERABLE'
+                else 'UNKNOWN'
+              end as recovery_status
+            from planner_jobs pj
+            left join best_candidate bc
+              on bc.job_id = pj.id
+            order by
+              case pj.stage
+                when 'inspection' then 1
+                when 'estimate_needed' then 2
+                when 'contract_signed' then 3
+                when 'pre_production' then 4
+                when 'tarp' then 5
+                when 'in_production' then 6
+                else 99
+              end,
+              bc.candidate_stage_since nulls first,
+              pj.id
+          `,
+          [tenantId]
+        )
+
+        const summary = result.rows.reduce(
+          (acc: Record<string, number>, row: any) => {
+            const key = String(row.recovery_status || "UNKNOWN")
+            acc[key] = (acc[key] || 0) + 1
+            return acc
+          },
+          {}
+        )
+
+        return {
+          ok: true,
+          tenant_slug: tenantSlug,
+          read_only: true,
+          total_jobs: result.rowCount || 0,
+          summary,
+          jobs: result.rows,
+        }
+      } catch (err: any) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: err?.message || "Stage Since preview failed",
+        }
+      }
+    }
+  )
+
   // 🏗️ PRODUCTION PLANNER — READ-ONLY FIELD PRODUCTION PROJECTION
   app.get("/admin/:tenantSlug/production-planner", async (request: any, reply) => {
     try {
