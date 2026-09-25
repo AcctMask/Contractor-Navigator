@@ -8,6 +8,7 @@ type AppUser = {
   tenant_id: number
   email: string
   full_name: string
+  mobile_phone?: string | null
   role: string
   is_active: boolean
   financials_authorized: boolean
@@ -22,6 +23,7 @@ async function ensureAuthTables() {
       tenant_id bigint not null references tenants(id) on delete cascade,
       email text not null,
       full_name text not null,
+      mobile_phone text null,
       password_hash text not null,
       role text not null default 'staff',
       is_active boolean not null default true,
@@ -40,6 +42,11 @@ async function ensureAuthTables() {
 
   await pool.query(`
     alter table app_users
+      add column if not exists mobile_phone text null
+  `)
+
+  await pool.query(`
+    alter table app_users
       add column if not exists financials_authorized boolean not null default false
   `)
 
@@ -49,6 +56,7 @@ async function ensureAuthTables() {
       tenant_id bigint not null references tenants(id) on delete cascade,
       email text not null,
       full_name text not null,
+      mobile_phone text null,
       role text not null default 'staff',
       invite_token text not null unique,
       invited_by_user_id bigint null,
@@ -60,6 +68,11 @@ async function ensureAuthTables() {
       invitee_acceptance_notified_at timestamptz null,
       tenant_acceptance_notified_at timestamptz null
     )
+  `)
+
+  await pool.query(`
+    alter table user_invitations
+      add column if not exists mobile_phone text null
   `)
 
   await pool.query(`
@@ -121,6 +134,20 @@ function cleanEmail(value: unknown) {
 
 function cleanName(value: unknown) {
   return String(value || "").trim()
+}
+
+function cleanMobilePhone(value: unknown) {
+  const digits = String(value || "").replace(/\D/g, "")
+
+  if (digits.length == 10) {
+    return `+1${digits}`
+  }
+
+  if (digits.length == 11 && digits.startsWith("1")) {
+    return `+${digits}`
+  }
+
+  return ""
 }
 
 function cleanRole(value: unknown) {
@@ -245,6 +272,7 @@ export async function inviteUserByTenantSlug(
   input: {
     email: string
     full_name: string
+    mobile_phone: string
     role?: string
     invited_by_user_id?: number | null
   }
@@ -254,6 +282,7 @@ export async function inviteUserByTenantSlug(
 
   const email = cleanEmail(input.email)
   const fullName = cleanName(input.full_name)
+  const mobilePhone = cleanMobilePhone(input.mobile_phone)
   const role = cleanRole(input.role)
   const invitedByUserId = input.invited_by_user_id || null
 
@@ -267,6 +296,10 @@ export async function inviteUserByTenantSlug(
 
   if (!fullName) {
     throw new Error("Full name is required")
+  }
+
+  if (!mobilePhone) {
+    throw new Error("Valid mobile phone is required")
   }
 
   const existingUser = await pool.query(
@@ -306,9 +339,10 @@ export async function inviteUserByTenantSlug(
       update user_invitations
       set
         full_name = $3,
-        role = $4,
-        invite_token = $5,
-        invited_by_user_id = $6,
+        mobile_phone = $4,
+        role = $5,
+        invite_token = $6,
+        invited_by_user_id = $7,
         expires_at = now() + interval '30 days',
         invite_email_sent_at = null,
         tenant_send_notified_at = null,
@@ -316,12 +350,13 @@ export async function inviteUserByTenantSlug(
         tenant_acceptance_notified_at = null
       where id = $1
         and tenant_id = $2
-      returning id, email, full_name, role, invite_token, accepted_at, expires_at, created_at
+      returning id, email, full_name, mobile_phone, role, invite_token, accepted_at, expires_at, created_at
       `,
       [
         Number(existingPendingInvite.rows[0].id),
         tenantId,
         fullName,
+        mobilePhone,
         role,
         inviteToken,
         invitedByUserId,
@@ -341,15 +376,16 @@ export async function inviteUserByTenantSlug(
   const result = await pool.query(
     `
     insert into user_invitations
-      (tenant_id, email, full_name, role, invite_token, invited_by_user_id, expires_at)
+      (tenant_id, email, full_name, mobile_phone, role, invite_token, invited_by_user_id, expires_at)
     values
-      ($1, $2, $3, $4, $5, $6, now() + interval '30 days')
-    returning id, email, full_name, role, invite_token, accepted_at, expires_at, created_at
+      ($1, $2, $3, $4, $5, $6, $7, now() + interval '30 days')
+    returning id, email, full_name, mobile_phone, role, invite_token, accepted_at, expires_at, created_at
     `,
     [
       tenantId,
       email,
       fullName,
+      mobilePhone,
       role,
       inviteToken,
       invitedByUserId,
@@ -380,6 +416,7 @@ export async function getAppUserById(
       tenant_id,
       email,
       full_name,
+      mobile_phone,
       role,
       is_active
     from app_users
@@ -571,23 +608,25 @@ export async function acceptInvitation(
   const userResult = await pool.query(
     `
     insert into app_users
-      (tenant_id, email, full_name, password_hash, role, is_active, created_at, updated_at)
+      (tenant_id, email, full_name, mobile_phone, password_hash, role, is_active, created_at, updated_at)
     values
-      ($1, lower($2), $3, $4, $5, true, now(), now())
+      ($1, lower($2), $3, $4, $5, $6, true, now(), now())
     on conflict (tenant_id, email)
     do update set
       full_name = excluded.full_name,
+      mobile_phone = excluded.mobile_phone,
       password_hash = excluded.password_hash,
       role = excluded.role,
       is_active = true,
       deactivated_at = null,
       updated_at = now()
-    returning id, tenant_id, email, full_name, role, is_active
+    returning id, tenant_id, email, full_name, mobile_phone, role, is_active
     `,
     [
       invite.tenant_id,
       invite.email,
       invite.full_name,
+      invite.mobile_phone,
       passwordHash,
       invite.role,
     ]
@@ -660,7 +699,7 @@ export async function loginUserByTenantSlug(
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, role, is_active, password_hash
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash
     from app_users
     where tenant_id = $1
       and lower(email) = $2
@@ -689,6 +728,7 @@ export async function loginUserByTenantSlug(
     tenant_id: Number(row.tenant_id),
     email: row.email,
     full_name: row.full_name,
+    mobile_phone: row.mobile_phone,
     role: row.role,
     is_active: row.is_active,
   }
@@ -706,7 +746,7 @@ export async function getCurrentUserFromToken(token: string) {
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, role, is_active
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active
     from app_users
     where id = $1
     limit 1
@@ -731,6 +771,7 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
       id,
       email,
       full_name,
+      mobile_phone,
       role,
       is_active,
       financials_authorized,

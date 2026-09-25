@@ -53,6 +53,7 @@ export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [invitations, setInvitations] = useState<InvitationRow[]>([])
   const [email, setEmail] = useState("")
+  const [mobilePhone, setMobilePhone] = useState("")
   const [fullName, setFullName] = useState("")
   const [role, setRole] = useState("admin")
   const [loading, setLoading] = useState(true)
@@ -213,8 +214,18 @@ export default function UsersPage() {
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault()
 
+    if (!fullName.trim()) {
+      setError("Full name is required")
+      return
+    }
+
     if (!email.trim()) {
       setError("Email is required")
+      return
+    }
+
+    if (!mobilePhone.trim()) {
+      setError("Mobile phone is required")
       return
     }
 
@@ -235,6 +246,7 @@ export default function UsersPage() {
         body: JSON.stringify({
           email: email.trim(),
           full_name: fullName.trim(),
+          mobile_phone: mobilePhone.trim(),
           role,
         }),
       })
@@ -247,6 +259,7 @@ export default function UsersPage() {
 
       setEmail("")
       setFullName("")
+      setMobilePhone("")
       setRole("admin")
 
       const finalStatus =
@@ -716,6 +729,7 @@ export default function UsersPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Michelle Green"
+                required
                 style={inputStyle}
               />
             </div>
@@ -725,9 +739,25 @@ export default function UsersPage() {
                 Email
               </label>
               <input
+                type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="michelle@g2groofing.com"
+                required
+                style={inputStyle}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: "block", marginBottom: "8px", fontWeight: 700 }}>
+                Mobile Phone
+              </label>
+              <input
+                type="tel"
+                value={mobilePhone}
+                onChange={(e) => setMobilePhone(e.target.value)}
+                placeholder="727-555-0123"
+                required
                 style={inputStyle}
               />
             </div>

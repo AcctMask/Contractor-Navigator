@@ -132,6 +132,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const {
         email,
         full_name,
+        mobile_phone,
         role,
       } = request.body || {}
 
@@ -141,6 +142,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
           {
             email,
             full_name,
+            mobile_phone,
             role,
             invited_by_user_id:
               Number(actor.id),
