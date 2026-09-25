@@ -1223,7 +1223,13 @@ export async function sendDocumentPackage(
   tenantSlug: string,
   jobId: number,
   packageId: number,
-  assetIds: number[] = []
+  assetIds: number[] = [],
+  actor?: {
+    id?: number | null
+    full_name?: string | null
+    email?: string | null
+    role?: string | null
+  }
 ) {
   await ensureDocumentTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -1475,6 +1481,10 @@ If you have any questions or believe something should be changed, please contact
             : `Proposal/Contract sent for electronic signature: ${documentPackage.document_title}`,
       JSON.stringify({
         author: "ECO Document Pipeline",
+        actor_user_id: actor?.id ?? null,
+        actor_name: actor?.full_name || null,
+        actor_email: actor?.email || null,
+        actor_role: actor?.role || null,
         package_id: packageId,
         package_type: documentPackage.package_type,
         document_title: documentPackage.document_title,

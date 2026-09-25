@@ -132,6 +132,27 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
       const numericJobId = Number(jobId)
       const { package_id, asset_ids } = request.body || {}
 
+      const auth = String(request.headers.authorization || "")
+      const token = auth.startsWith("Bearer ")
+        ? auth.slice(7)
+        : ""
+
+      if (!token) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
+      const actor = await getCurrentUserFromToken(token)
+
+      if (!actor?.is_active) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
       const normalizedAssetIds = Array.isArray(asset_ids)
 
         ? asset_ids
@@ -151,7 +172,14 @@ export async function registerDocumentPipelineRoutes(app: FastifyInstance) {
 
         Number(package_id),
 
-        normalizedAssetIds
+        normalizedAssetIds,
+
+        {
+          id: Number(actor.id),
+          full_name: actor.full_name || null,
+          email: actor.email || null,
+          role: actor.role || null,
+        }
 
       )
 

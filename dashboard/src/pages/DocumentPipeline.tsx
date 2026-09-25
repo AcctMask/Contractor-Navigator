@@ -467,6 +467,7 @@ export default function DocumentPipelinePage() {
         {
           method: "POST",
           headers: {
+            Authorization: `Bearer ${getToken()}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
