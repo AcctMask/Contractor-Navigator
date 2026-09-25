@@ -115,8 +115,6 @@ type TaskItem = {
   stage_classification?: string | null
   customer_name?: string
   job_address?: string
-  automation_managed?: boolean
-  automation_stage_key?: string | null
   job_stage?: string | null
 }
 
@@ -136,22 +134,11 @@ function plannerRelevantEvent(
       return false
     }
 
-    const automationStage = normalizedPlannerStage(
-      event.automation_stage_key
+    const classifiedStage = normalizedPlannerStage(
+      event.stage_classification || event.event_type
     )
 
-    const eventType = normalizedPlannerStage(
-      event.event_type
-    )
-
-    if (
-      event.automation_managed &&
-      automationStage
-    ) {
-      return automationStage === currentStage
-    }
-
-    return eventType === currentStage
+    return classifiedStage === currentStage
   })
 
   if (!candidates.length) {
@@ -357,8 +344,6 @@ export default function TasksPage() {
         stage_classification: e.stage_classification || e.event_type || null,
         customer_name: e.customer_name || "",
         job_address: e.job_address || "",
-        automation_managed: Boolean(e.automation_managed),
-        automation_stage_key: e.automation_stage_key || null,
         job_stage: e.job_stage || null,
       }))
 
@@ -971,8 +956,7 @@ export default function TasksPage() {
           eventPropGetter={(event: TaskItem) => {
             const heat = stagePresentation(
               event.stage_classification ||
-              event.event_type ||
-              event.automation_stage_key
+              event.event_type
             )
 
             return {

@@ -126,8 +126,6 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           ce.notes,
           ce.event_type,
           ce.stage_classification,
-          ce.automation_managed,
-          ce.automation_stage_key,
           ce.created_at,
           ce.updated_at,
           c.full_name as customer_name,
@@ -298,8 +296,6 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
-          automation_managed,
-          automation_stage_key,
           created_at,
           updated_at
         from task_items
@@ -349,8 +345,6 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
-          automation_managed,
-          automation_stage_key,
           created_at,
           updated_at
         `,
