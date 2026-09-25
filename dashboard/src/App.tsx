@@ -16,6 +16,7 @@ import LoginPage from "./pages/Login"
 import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
+import TasksPage from "./pages/Tasks"
 import ReportsPage from "./pages/Reports"
 import TermsPage from "./pages/Terms"
 import CommercialPipelinePage from "./pages/CommercialPipeline"
@@ -417,7 +418,8 @@ export default function App() {
         }
       />
       <Route path="/calendar" element={<ProtectedPage><CalendarPage /></ProtectedPage>} />
-      <Route path="/developer-settings" element={<ProtectedPage><DeveloperSettingsPage /></ProtectedPage>} />
+            <Route path="/tasks" element={<ProtectedPage><TasksPage /></ProtectedPage>} />
+<Route path="/developer-settings" element={<ProtectedPage><DeveloperSettingsPage /></ProtectedPage>} />
       <Route path="/document-pipeline" element={<ProtectedPage><DocumentPipelinePage /></ProtectedPage>} />
       <Route path="/storm" element={<ProtectedPage><StormPage /></ProtectedPage>} />
       <Route path="/roof-intelligence" element={<ProtectedPage><RoofIntelligencePage /></ProtectedPage>} />

@@ -17,6 +17,7 @@ import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
 import { registerCalendarRoutes } from "./routes/calendar"
+import { registerTaskRoutes } from "./routes/tasks"
 import { registerClaimsEmailIntakeRoutes } from "./routes/claimsEmailIntake"
 import { registerSalesEmailIntakeRoutes } from "./routes/salesEmailIntake"
 import { registerBusinessDevelopmentIntakeRoutes } from "./routes/businessDevelopmentIntake"
@@ -75,6 +76,7 @@ await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)
 await registerCalendarRoutes(app)
+await registerTaskRoutes(app)
 await registerReportingRoutes(app)
 await registerSalesPerformanceReportingRoutes(app)
 await registerPlatformProvisioningRoutes(app)
