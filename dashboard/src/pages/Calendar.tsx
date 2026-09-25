@@ -965,7 +965,7 @@ export default function CalendarPage() {
           tooltipAccessor={tooltip}
           eventPropGetter={(event: CalendarEvent) => {
             const heat = stagePresentation(
-              event.automation_stage_key || event.job_stage
+              event.job_stage || event.automation_stage_key
             )
 
             return {
