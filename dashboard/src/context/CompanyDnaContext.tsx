@@ -155,6 +155,11 @@ const defaultWorkspace: WorkspaceDefinition = {
       route: "/calendar",
     },
     {
+      id: "tasks",
+      label: "Tasks",
+      route: "/tasks",
+    },
+    {
       id: "developer-settings",
       label: "Developer Settings",
       route: "/developer-settings",
