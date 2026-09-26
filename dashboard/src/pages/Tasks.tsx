@@ -105,18 +105,53 @@ function taskDisplayTitle(
   return `${customer} — ${storedTitle}`
 }
 
+type NavigatorTaskJob = {
+  id: number
+  customer_name?: string | null
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+}
+
 export default function TasksPage() {
   const navigate = useNavigate()
 
   const [events, setEvents] = useState<TaskItem[]>([])
   const [title, setTitle] = useState("")
   const [jobId, setJobId] = useState("")
+  const [jobs, setJobs] = useState<NavigatorTaskJob[]>([])
   const [startTime, setStartTime] = useState("")
   const [notes, setNotes] = useState("")
   const [eventType, setEventType] = useState("inspection")
   const [message, setMessage] = useState("")
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
 
+
+  async function loadJobs() {
+    const token = getToken()
+
+    const res = await fetch(
+      `${API_BASE}/admin/${getTenantSlug()}/jobs-all`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    )
+
+    const data = await res.json()
+
+    if (!res.ok) {
+      throw new Error(data?.error || "Failed to load Navigator jobs")
+    }
+
+    setJobs(
+      Array.isArray(data.jobs)
+        ? data.jobs
+        : []
+    )
+  }
 
   async function loadTasks() {
     try {
@@ -357,6 +392,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     loadTasks()
+void loadJobs()
   }, [])
 
   return (
@@ -378,19 +414,58 @@ export default function TasksPage() {
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ color: "white" }}>Create Task</h2>
 
-        <input
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          style={inputStyle}
-        />
-
-        <input
-          placeholder="Job ID optional, required for click-through"
+        <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
           style={inputStyle}
-        />
+        >
+          <option value="">No linked job</option>
+          {jobs.map((job) => {
+            const address = [
+              job.address1,
+              job.city,
+              job.state,
+            ]
+              .filter(Boolean)
+              .join(", ")
+
+            const customer =
+              String(job.customer_name || "").trim() ||
+              `Job ${job.id}`
+
+            return (
+              <option key={job.id} value={String(job.id)}>
+                {customer} — Job {job.id}
+                {address ? ` — ${address}` : ""}
+              </option>
+            )
+          })}
+        </select>
+
+        {jobId && (() => {
+          const linkedJob = jobs.find(
+            (job) => String(job.id) === jobId
+          )
+
+          if (!linkedJob) return null
+
+          const customer =
+            String(linkedJob.customer_name || "").trim() ||
+            `Job ${linkedJob.id}`
+
+          return (
+            <div
+              style={{
+                color: "white",
+                fontSize: 13,
+                marginTop: -6,
+                marginBottom: 10,
+              }}
+            >
+              Linked job: {customer} — Job {linkedJob.id}
+            </div>
+          )
+        })()}
 
         <label style={{ display: "block", color: "white", marginBottom: 4 }}>
           <strong>Due date</strong>
