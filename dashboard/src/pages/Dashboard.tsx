@@ -289,10 +289,26 @@ export default function DashboardPage() {
     const kind = String(event.kind || "").toLowerCase()
 
     if (
-      kind === "calendar_stage_event_created" ||
       kind === "task_created" ||
       kind === "task_rescheduled" ||
-      kind === "task_deleted" ||
+      kind === "task_deleted"
+    ) {
+      const meta = activityMeta(event)
+      const presentation = stagePresentation(
+        meta.stage_classification ||
+        meta.event_type ||
+        ""
+      )
+
+      return (
+        presentation?.color ||
+        presentation?.backgroundColor ||
+        "#64748b"
+      )
+    }
+
+    if (
+      kind === "calendar_stage_event_created" ||
       kind === "calendar_stage_event_rescheduled" ||
       kind === "calendar_event_rescheduled"
     ) {

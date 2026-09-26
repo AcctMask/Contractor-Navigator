@@ -15,8 +15,10 @@ const STAGES = [
   function taskActivityPresentation(event: any) {
     return stagePresentation(
       event?.stage_classification ||
+      event?.meta?.stage_classification ||
       event?.metadata?.stage_classification ||
       event?.event_type ||
+      event?.meta?.event_type ||
       event?.metadata?.event_type ||
       ""
     )

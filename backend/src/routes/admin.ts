@@ -873,7 +873,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           'ai_followup_workflow_restarted',
           'calendar_stage_event_created',
           'calendar_stage_event_rescheduled',
-          'calendar_event_rescheduled'
+          'calendar_event_rescheduled',
+          'task_created',
+          'task_rescheduled',
+          'task_deleted'
         )
       and lower(coalesce(te.kind, '')) not in (
           'voice_call_received',
