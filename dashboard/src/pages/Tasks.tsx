@@ -772,6 +772,14 @@ export default function TasksPage() {
 
 
 
+        <input
+          type="text"
+          placeholder="Task title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          style={inputStyle}
+        />
+
         <textarea
           placeholder="Notes"
           value={notes}
