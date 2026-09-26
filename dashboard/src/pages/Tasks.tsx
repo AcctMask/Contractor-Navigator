@@ -248,9 +248,18 @@ export default function TasksPage() {
         job_stage: e.job_stage || null,
       }))
 
-      setEvents(mapped)
+      const newestScheduledFirst = [...mapped].sort(
+        (a: TaskItem, b: TaskItem) =>
+          b.start.getTime() - a.start.getTime()
+      )
+
+      setEvents(newestScheduledFirst)
       setSelectedTask(current =>
-        current ? mapped.find((event: TaskItem) => event.id === current.id) || null : null
+        current
+          ? newestScheduledFirst.find(
+              (event: TaskItem) => event.id === current.id
+            ) || null
+          : null
       )
       setMessage("")
     } catch (err: any) {

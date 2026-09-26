@@ -645,7 +645,6 @@ export default function JobDetail() {
       return {
         ...badge,
         background:
-          presentation?.color ||
           presentation?.backgroundColor ||
           "#64748b",
       }
@@ -2444,7 +2443,7 @@ export default function JobDetail() {
               key={task.id}
               style={{
                 ...row,
-                borderLeft: `4px solid ${taskPresentation?.color || taskPresentation?.backgroundColor || "#64748b"}`,
+                borderLeft: `4px solid ${taskPresentation?.backgroundColor || "#64748b"}`,
                 paddingLeft: 12,
               }}
             >

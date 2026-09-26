@@ -301,7 +301,6 @@ export default function DashboardPage() {
       )
 
       return (
-        presentation?.color ||
         presentation?.backgroundColor ||
         "#64748b"
       )
