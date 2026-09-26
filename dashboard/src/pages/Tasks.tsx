@@ -120,6 +120,9 @@ export default function TasksPage() {
   const [events, setEvents] = useState<TaskItem[]>([])
   const [title, setTitle] = useState("")
   const [jobId, setJobId] = useState("")
+  const [jobSearch, setJobSearch] = useState("")
+  const [jobSearchResults, setJobSearchResults] = useState<any[]>([])
+  const [jobSearchMessage, setJobSearchMessage] = useState("")
   const [jobs, setJobs] = useState<NavigatorTaskJob[]>([])
   const [startTime, setStartTime] = useState("")
   const [notes, setNotes] = useState("")
@@ -128,7 +131,19 @@ export default function TasksPage() {
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
 
 
-  async function loadJobs() {
+  async function searchJobs() {
+    const query = jobSearch.trim().toLowerCase()
+
+    if (!query) {
+      setJobSearchResults([])
+      setJobSearchMessage(
+        "Enter a customer name, phone, address, or job number."
+      )
+      return
+    }
+
+    setJobSearchMessage("Searching jobs...")
+
     const token = getToken()
 
     const res = await fetch(
@@ -143,13 +158,66 @@ export default function TasksPage() {
     const data = await res.json()
 
     if (!res.ok) {
-      throw new Error(data?.error || "Failed to load Navigator jobs")
+      setJobSearchResults([])
+      setJobSearchMessage(
+        data?.error || "Failed to search Navigator jobs"
+      )
+      return
     }
 
-    setJobs(
-      Array.isArray(data.jobs)
-        ? data.jobs
-        : []
+    const allJobs = Array.isArray(data.jobs) ? data.jobs : []
+    const digits = query.replace(/\D/g, "")
+
+    const matches = allJobs
+      .filter((job: any) => {
+        const values = [
+          job.id,
+          job.customer_name,
+          job.customer_phone,
+          job.phone,
+          job.address1,
+          job.address,
+          job.city,
+          job.state,
+          job.zip,
+        ]
+          .filter(
+            (value) =>
+              value !== null &&
+              value !== undefined
+          )
+          .map((value) =>
+            String(value).toLowerCase()
+          )
+
+        if (
+          values.some((value) =>
+            value.includes(query)
+          )
+        ) {
+          return true
+        }
+
+        if (digits) {
+          return values.some((value) =>
+            value
+              .replace(/\D/g, "")
+              .includes(digits)
+          )
+        }
+
+        return false
+      })
+      .slice(0, 25)
+
+    setJobSearchResults(matches)
+
+    setJobSearchMessage(
+      matches.length
+        ? `${matches.length} matching job${
+            matches.length === 1 ? "" : "s"
+          }`
+        : "No matching jobs found."
     )
   }
 
@@ -392,7 +460,6 @@ export default function TasksPage() {
 
   useEffect(() => {
     loadTasks()
-void loadJobs()
   }, [])
 
   return (
@@ -414,58 +481,223 @@ void loadJobs()
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ color: "white" }}>Create Task</h2>
 
-        <select
-          value={jobId}
-          onChange={(e) => setJobId(e.target.value)}
-          style={inputStyle}
+        <label
+          style={{
+            display: "block",
+            color: "white",
+            marginBottom: 4,
+          }}
         >
-          <option value="">No linked job</option>
-          {jobs.map((job) => {
-            const address = [
-              job.address1,
-              job.city,
-              job.state,
-            ]
-              .filter(Boolean)
-              .join(", ")
+          <strong>Linked job</strong>
+        </label>
 
-            const customer =
-              String(job.customer_name || "").trim() ||
-              `Job ${job.id}`
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          <input
+            value={jobSearch}
+            onChange={(e) =>
+              setJobSearch(e.target.value)
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                void searchJobs()
+              }
+            }}
+            placeholder="Search by name, phone, address, or job number"
+            style={{
+              ...inputStyle,
+              flex: 1,
+              marginBottom: 0,
+            }}
+          />
 
-            return (
-              <option key={job.id} value={String(job.id)}>
-                {customer} — Job {job.id}
-                {address ? ` — ${address}` : ""}
-              </option>
-            )
-          })}
-        </select>
+          <button
+            type="button"
+            onClick={() => void searchJobs()}
+          >
+            Search
+          </button>
+        </div>
 
-        {jobId && (() => {
+        {jobSearchMessage ? (
+          <div
+            style={{
+              color: "white",
+              fontSize: 13,
+              marginBottom: 8,
+              opacity: 0.85,
+            }}
+          >
+            {jobSearchMessage}
+          </div>
+        ) : null}
+
+        {jobSearchResults.length > 0 ? (
+          <div
+            style={{
+              background: "#0f172a",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              maxHeight: 260,
+              overflowY: "auto",
+              marginBottom: 12,
+            }}
+          >
+            {jobSearchResults.map((job: any) => {
+              const customer =
+                String(
+                  job.customer_name || ""
+                ).trim() ||
+                `Job ${job.id}`
+
+              const address = [
+                job.address1 || job.address,
+                job.city,
+                job.state,
+                job.zip,
+              ]
+                .filter(Boolean)
+                .join(", ")
+
+              return (
+                <button
+                  key={job.id}
+                  type="button"
+                  onClick={() => {
+                    setJobId(String(job.id))
+                    setJobs([job])
+                    setJobSearch("")
+                    setJobSearchResults([])
+                    setJobSearchMessage("")
+                  }}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    background: "transparent",
+                    color: "white",
+                    border: 0,
+                    borderBottom:
+                      "1px solid #1e293b",
+                    cursor: "pointer",
+                  }}
+                >
+                  <strong>{customer}</strong>
+                  {" — "}Job {job.id}
+
+                  {address ? (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        opacity: 0.8,
+                        marginTop: 3,
+                      }}
+                    >
+                      {address}
+                    </div>
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
+
+        {jobId ? (() => {
           const linkedJob = jobs.find(
-            (job) => String(job.id) === jobId
+            (job: any) =>
+              String(job.id) === jobId
           )
 
-          if (!linkedJob) return null
-
           const customer =
-            String(linkedJob.customer_name || "").trim() ||
-            `Job ${linkedJob.id}`
+            String(
+              linkedJob?.customer_name || ""
+            ).trim() ||
+            `Navigator Job ${jobId}`
+
+          const address = linkedJob
+            ? [
+                linkedJob.address1,
+                linkedJob.city,
+                linkedJob.state,
+                linkedJob.zip,
+              ]
+                .filter(Boolean)
+                .join(", ")
+            : ""
 
           return (
             <div
               style={{
+                background: "#172033",
+                border: "1px solid #475569",
+                borderRadius: 8,
+                padding: "10px 12px",
+                marginBottom: 12,
                 color: "white",
-                fontSize: 13,
-                marginTop: -6,
-                marginBottom: 10,
               }}
             >
-              Linked job: {customer} — Job {linkedJob.id}
+              <div
+                style={{
+                  fontSize: 12,
+                  opacity: 0.7,
+                  marginBottom: 3,
+                }}
+              >
+                Linked job
+              </div>
+
+              <strong>
+                {customer} — Job {jobId}
+              </strong>
+
+              {address ? (
+                <div
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.8,
+                    marginTop: 3,
+                  }}
+                >
+                  {address}
+                </div>
+              ) : null}
+
+              <div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setJobId("")
+                    setJobs([])
+                    setJobSearch("")
+                    setJobSearchResults([])
+                    setJobSearchMessage("")
+                  }}
+                  style={{ marginTop: 8 }}
+                >
+                  Change Job
+                </button>
+              </div>
             </div>
           )
-        })()}
+        })() : (
+          <div
+            style={{
+              color: "white",
+              fontSize: 13,
+              opacity: 0.7,
+              marginBottom: 12,
+            }}
+          >
+            No linked job selected.
+          </div>
+        )}
 
         <label style={{ display: "block", color: "white", marginBottom: 4 }}>
           <strong>Due date</strong>
