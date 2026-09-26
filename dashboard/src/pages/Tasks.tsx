@@ -31,6 +31,29 @@ const localizer = dateFnsLocalizer({
 
 const DraggableCalendar = withDragAndDrop(Calendar as any) as any
 
+
+const TASK_STAGE_OPTIONS = [
+  ["intake_pending", "Intake Pending"],
+  ["lead", "Lead"],
+  ["estimate_needed", "Estimate Needed"],
+  ["inspection", "Inspection"],
+  ["estimate_sent", "Estimate Sent"],
+  ["contract_sent", "Contract Sent"],
+  ["contract_signed", "Contract Signed"],
+  ["pre_production", "Pre Production"],
+  ["in_production", "In Production"],
+  ["roof_repair", "Roof Repair"],
+  ["roof_replacement", "Roof Replacement"],
+  ["wa_sent", "WA Sent"],
+  ["tarp", "Tarp"],
+  ["tarp_complete", "Tarp Complete"],
+  ["invoiced", "Invoiced"],
+  ["completed", "Completed"],
+  ["paid", "Paid"],
+  ["disqualified", "Disqualified"],
+  ["dnc", "DNC"],
+] as const
+
 function dateTimeLocalValue(value: Date) {
   if (!value || Number.isNaN(value.getTime())) return ""
 
@@ -375,6 +398,17 @@ export default function TasksPage() {
         <input
           type="date"
           value={startTime ? startTime.slice(0, 10) : ""}
+          onClick={(e) => {
+            const input = e.currentTarget as HTMLInputElement & {
+              showPicker?: () => void
+            }
+
+            try {
+              input.showPicker?.()
+            } catch {
+              // Browser-native date entry remains available.
+            }
+          }}
           onChange={(e) => {
             const date = e.target.value
             const existingTime =
@@ -422,12 +456,11 @@ export default function TasksPage() {
           onChange={(e) => setEventType(e.target.value)}
           style={inputStyle}
         >
-          <option value="inspection">inspection</option>
-          <option value="callback">callback</option>
-          <option value="roof_repair">roof_repair</option>
-          <option value="roof_replacement">roof_replacement</option>
-          <option value="tarp">tarp</option>
-          <option value="production">production</option>
+          {TASK_STAGE_OPTIONS.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
         </select>
 
 
