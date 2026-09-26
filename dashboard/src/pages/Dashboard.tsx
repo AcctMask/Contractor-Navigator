@@ -290,6 +290,9 @@ export default function DashboardPage() {
 
     if (
       kind === "calendar_stage_event_created" ||
+      kind === "task_created" ||
+      kind === "task_rescheduled" ||
+      kind === "task_deleted" ||
       kind === "calendar_stage_event_rescheduled" ||
       kind === "calendar_event_rescheduled"
     ) {

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
 import { openFinancialOperations } from "../lib/financialOperations"
+import { stagePresentation } from "../lib/stagePresentation"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
@@ -10,6 +11,18 @@ const STAGES = [
   "estimate_sent", "contract_sent", "contract_signed", "pre_production", "in_production",
   "completed", "tarp_complete", "invoiced", "paid", "disqualified", "dnc",
 ]
+
+  function taskActivityPresentation(event: any) {
+    return stagePresentation(
+      event?.stage_classification ||
+      event?.metadata?.stage_classification ||
+      event?.event_type ||
+      event?.metadata?.event_type ||
+      ""
+    )
+  }
+
+
 
 function stageDisplayLabel(stage: string) {
   return stage === "callback"
@@ -624,13 +637,24 @@ export default function JobDetail() {
   function getActivityBadgeStyle(item: any): CSSProperties {
     const label = getActivityLabel(item).toLowerCase()
 
+    if (label.includes("task activity")) {
+      const presentation = taskActivityPresentation(item)
+
+      return {
+        ...badge,
+        background:
+          presentation?.color ||
+          presentation?.backgroundColor ||
+          "#64748b",
+      }
+    }
+
     if (label.includes("ai")) return { ...badge, background: "#1d4ed8" }
     if (label.includes("customer")) return { ...badge, background: "#047857" }
     if (label.includes("team")) return { ...badge, background: "#6d28d9" }
     if (label.includes("estimate")) return { ...badge, background: "#b45309" }
     if (label.includes("production planner")) return { ...badge, background: "#475569" }
     if (label.includes("production calendar change")) return { ...badge, background: "#dc2626" }
-    if (label.includes("task activity")) return { ...badge, background: "#7c3aed" }
     if (label.includes("alert")) return { ...badge, background: "#be123c" }
     return badge
   }
@@ -2368,6 +2392,12 @@ export default function JobDetail() {
             type="date"
             value={taskDate}
             onChange={(e) => setTaskDate(e.target.value)}
+            onClick={(e) => {
+              const input = e.currentTarget as HTMLInputElement & {
+                showPicker?: () => void
+              }
+              input.showPicker?.()
+            }}
             style={input}
           />
 
@@ -2401,12 +2431,18 @@ export default function JobDetail() {
         {tasks.length === 0 ? (
           <p>No tasks linked to this job yet.</p>
         ) : (
-          tasks.map((task: any) => (
+          tasks.map((task: any) => {
+          const taskPresentation = stagePresentation(
+            task.stage_classification || task.event_type || ""
+          )
+
+          return (
+
             <div
               key={task.id}
               style={{
                 ...row,
-                borderLeft: "4px solid #7c3aed",
+                borderLeft: `4px solid ${taskPresentation?.color || taskPresentation?.backgroundColor || "#64748b"}`,
                 paddingLeft: 12,
               }}
             >
@@ -2437,7 +2473,8 @@ export default function JobDetail() {
                 ) : null}
               </div>
             </div>
-          ))
+          )
+        })
         )}
       </section>
 
