@@ -91,8 +91,6 @@ export default function TasksPage() {
   const [title, setTitle] = useState("")
   const [jobId, setJobId] = useState("")
   const [startTime, setStartTime] = useState("")
-  const [endTime, setEndTime] = useState("")
-  const [location, setLocation] = useState("")
   const [notes, setNotes] = useState("")
   const [eventType, setEventType] = useState("inspection")
   const [message, setMessage] = useState("")
@@ -152,8 +150,12 @@ export default function TasksPage() {
           title,
           job_id: jobId ? Number(jobId) : null,
           start_time: localDateTimeToIso(startTime),
-          end_time: endTime ? localDateTimeToIso(endTime) : null,
-          location,
+          end_time: startTime
+            ? new Date(
+                new Date(localDateTimeToIso(startTime)).getTime() +
+                  60 * 60 * 1000
+              ).toISOString()
+            : null,
           notes,
           event_type: eventType,
           stage_classification: eventType,
@@ -169,8 +171,6 @@ export default function TasksPage() {
       setTitle("")
       setJobId("")
       setStartTime("")
-      setEndTime("")
-      setLocation("")
       setNotes("")
       setEventType("inspection")
       setMessage("Task created.")
@@ -230,7 +230,6 @@ export default function TasksPage() {
     return [
       event.title,
       `Time: ${event.start.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })} - ${event.end.toLocaleString("en-US", { timeZone: EASTERN_TIME_ZONE })}`,
-      `Location: ${event.location || "Not provided"}`,
       `Job ID: ${event.job_id || "Not linked"}`,
       `Notes: ${event.notes || "None"}`,
     ].join("\n")
@@ -257,7 +256,6 @@ export default function TasksPage() {
             title: event.stored_title,
             start_time: start.toISOString(),
             end_time: end.toISOString(),
-            location: event.location || "",
             notes: event.notes || "",
             event_type: event.event_type || "general",
             stage_classification:
@@ -371,17 +369,51 @@ export default function TasksPage() {
           style={inputStyle}
         />
 
+        <label style={{ display: "block", color: "white", marginBottom: 4 }}>
+          <strong>Due date</strong>
+        </label>
         <input
-          type="datetime-local"
-          value={startTime}
-          onChange={(e) => setStartTime(e.target.value)}
+          type="date"
+          value={startTime ? startTime.slice(0, 10) : ""}
+          onChange={(e) => {
+            const date = e.target.value
+            const existingTime =
+              startTime && startTime.includes("T")
+                ? startTime.slice(11, 16)
+                : ""
+
+            setStartTime(
+              date
+                ? `${date}T${existingTime || "12:00"}`
+                : ""
+            )
+          }}
           style={inputStyle}
         />
 
+        <label style={{ display: "block", color: "white", marginBottom: 4 }}>
+          <strong>Time (optional)</strong>
+        </label>
         <input
-          type="datetime-local"
-          value={endTime}
-          onChange={(e) => setEndTime(e.target.value)}
+          type="time"
+          value={
+            startTime && startTime.includes("T") &&
+            startTime.slice(11, 16) !== "12:00"
+              ? startTime.slice(11, 16)
+              : ""
+          }
+          onChange={(e) => {
+            const date =
+              startTime && startTime.includes("T")
+                ? startTime.slice(0, 10)
+                : ""
+
+            if (!date) return
+
+            setStartTime(
+              `${date}T${e.target.value || "12:00"}`
+            )
+          }}
           style={inputStyle}
         />
 
@@ -398,12 +430,7 @@ export default function TasksPage() {
           <option value="production">production</option>
         </select>
 
-        <input
-          placeholder="Location / full address"
-          value={location}
-          onChange={(e) => setLocation(e.target.value)}
-          style={inputStyle}
-        />
+
 
         <textarea
           placeholder="Notes"
@@ -429,7 +456,6 @@ export default function TasksPage() {
           <p><strong>Title:</strong> {selectedTask.title}</p>
           <p><strong>Customer:</strong> {selectedTask.customer_name || "Not linked"}</p>
           <p><strong>Job ID:</strong> {selectedTask.job_id || "Not linked"}</p>
-          <p><strong>Location:</strong> {selectedTask.location || "Not provided"}</p>
           <p><strong>Notes:</strong> {selectedTask.notes || "None"}</p>
 
           <label style={{ display: "block", marginTop: 12 }}>
@@ -587,17 +613,6 @@ export default function TasksPage() {
                       </div>
                     )}
 
-                    {task.location && (
-                      <div
-                        style={{
-                          fontSize: 12,
-                          marginTop: 3,
-                          opacity: 0.8,
-                        }}
-                      >
-                        {task.location}
-                      </div>
-                    )}
                   </div>
                 )
               })
