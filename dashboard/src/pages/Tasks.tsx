@@ -40,68 +40,6 @@ function dateTimeLocalValue(value: Date) {
   return adjusted.toISOString().slice(0, 16)
 }
 
-const PRODUCTION_PLANNER_STAGES = [
-  "inspection",
-  "estimate_needed",
-  "contract_signed",
-  "pre_production",
-  "tarp",
-  "in_production",
-] as const
-
-type ProductionPlannerJob = {
-  id: number
-  address1?: string | null
-  city?: string | null
-  state?: string | null
-  zip?: string | null
-  stage?: string | null
-  production_planner_explanation?: string | null
-  customer_name?: string | null
-  customer_phone?: string | null
-  customer_email?: string | null
-  stage_since?: string | null
-  crew_name?: string | null
-  crew_app_user_id?: number | null
-  crew_assigned_at?: string | null
-}
-
-function plannerStageLabel(stageValue?: string | null) {
-  const stage = String(stageValue || "").trim().toLowerCase()
-
-  switch (stage) {
-    case "inspection":
-      return "Inspection"
-    case "estimate_needed":
-      return "Estimate Needed"
-    case "contract_signed":
-      return "Contract Signed"
-    case "pre_production":
-      return "Pre-Production"
-    case "tarp":
-      return "Tarp"
-    case "in_production":
-      return "In Production"
-    default:
-      return stageValue || "Unknown"
-  }
-}
-
-function plannerStageSince(value?: string | null) {
-  if (!value) return "UNKNOWN"
-
-  const entered = new Date(value)
-
-  if (Number.isNaN(entered.getTime())) return "UNKNOWN"
-
-  const elapsedMs = Date.now() - entered.getTime()
-  const elapsedDays = Math.max(0, Math.floor(elapsedMs / 86400000))
-
-  return `${entered.toLocaleDateString("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
-  })} (${elapsedDays}d)`
-}
-
 type TaskItem = {
   id: number
   title: string
@@ -118,51 +56,6 @@ type TaskItem = {
   job_stage?: string | null
 }
 
-
-function normalizedPlannerStage(value?: string | null) {
-  return String(value || "").trim().toLowerCase()
-}
-
-function plannerRelevantEvent(
-  job: ProductionPlannerJob,
-  events: TaskItem[]
-) {
-  const currentStage = normalizedPlannerStage(job.stage)
-
-  const candidates = events.filter(event => {
-    if (Number(event.job_id) !== Number(job.id)) {
-      return false
-    }
-
-    const classifiedStage = normalizedPlannerStage(
-      event.stage_classification || event.event_type
-    )
-
-    return classifiedStage === currentStage
-  })
-
-  if (!candidates.length) {
-    return null
-  }
-
-  return [...candidates].sort(
-    (a, b) =>
-      b.start.getTime() - a.start.getTime()
-  )[0]
-}
-
-function plannerIsOverdue(
-  job: ProductionPlannerJob,
-  events: TaskItem[]
-) {
-  const obligation = plannerRelevantEvent(job, events)
-
-  if (!obligation) {
-    return false
-  }
-
-  return obligation.end.getTime() < Date.now()
-}
 
 
 function taskDisplayTitle(
@@ -204,121 +97,7 @@ export default function TasksPage() {
   const [eventType, setEventType] = useState("inspection")
   const [message, setMessage] = useState("")
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
-  const [plannerJobs, setPlannerJobs] = useState<ProductionPlannerJob[]>([])
-  const [plannerMessage, setPlannerMessage] = useState("")
-  const [plannerExplanationDrafts, setPlannerExplanationDrafts] = useState<Record<number, string>>({})
 
-  async function loadProductionPlanner() {
-    try {
-      setPlannerMessage("Loading Production Planner...")
-
-      const res = await fetch(
-        `${API_BASE}/admin/${getTenantSlug()}/production-planner`,
-        {
-          headers: {
-            Authorization: `Bearer ${getToken()}`,
-          },
-        }
-      )
-
-      const stageSincePreviewRes = await fetch(
-        `${API_BASE}/admin/${getTenantSlug()}/production-planner/stage-since-preview`,
-        {
-          headers: {
-            Authorization: `Bearer ${getToken()}`,
-          },
-        }
-      )
-
-      const stageSincePreview = await stageSincePreviewRes.json()
-
-      console.log(
-        "========== NAVI 2.0 — SIX-STAGE STAGE-SINCE PREVIEW =========="
-      )
-      console.log(stageSincePreview)
-
-      if (Array.isArray(stageSincePreview?.jobs)) {
-        console.table(
-          stageSincePreview.jobs.map((job: any) => ({
-            job_id: job.job_id,
-            customer_name: job.customer_name,
-            current_stage: job.current_stage,
-            current_stage_since: job.current_stage_since,
-            recoverable_stage_since: job.recoverable_stage_since,
-            recovery_source: job.recovery_source,
-          }))
-        )
-      }
-
-      const data = await res.json()
-
-      if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load Production Planner")
-      }
-
-      const jobs = data.jobs || []
-
-      setPlannerJobs(jobs)
-      setPlannerExplanationDrafts(
-        Object.fromEntries(
-          jobs.map((job: ProductionPlannerJob) => [
-            Number(job.id),
-            job.production_planner_explanation || "",
-          ])
-        )
-      )
-      setPlannerMessage("")
-    } catch (err: any) {
-      console.error("Production Planner load failed:", err)
-      setPlannerMessage(
-        err?.message || "Failed to load Production Planner"
-      )
-    }
-  }
-
-  async function savePlannerExplanation(job: ProductionPlannerJob) {
-    try {
-      setPlannerMessage(`Saving Production Planner update for Job ${job.id}...`)
-
-      const nextExplanation =
-        plannerExplanationDrafts[job.id] ?? ""
-
-      const res = await fetch(
-        `${API_BASE}/admin/${getTenantSlug()}/jobs/${job.id}/production-planner-explanation`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${getToken()}`,
-          },
-          body: JSON.stringify({
-            explanation: nextExplanation,
-          }),
-        }
-      )
-
-      const data = await res.json()
-
-      if (!res.ok || !data.ok) {
-        throw new Error(
-          data?.error || "Failed to save Production Planner explanation"
-        )
-      }
-
-      setPlannerMessage(
-        data.changed
-          ? `Production Planner updated for Job ${job.id}.`
-          : `No Production Planner change for Job ${job.id}.`
-      )
-
-      await loadProductionPlanner()
-    } catch (err: any) {
-      console.error("Production Planner explanation save failed:", err)
-      setPlannerMessage(
-        err?.message || "Failed to save Production Planner explanation"
-      )
-    }
-  }
 
   async function loadTasks() {
     try {
@@ -328,7 +107,7 @@ export default function TasksPage() {
       const data = await res.json()
 
       if (!res.ok || !data.ok) {
-        throw new Error(data?.error || "Failed to load events")
+        throw new Error(data?.error || "Failed to load tasks")
       }
 
       const mapped = (data.events || []).map((e: any) => ({
@@ -354,63 +133,14 @@ export default function TasksPage() {
       setMessage("")
     } catch (err: any) {
       console.error("Task load failed:", err)
-      setMessage(err?.message || "Failed to load events")
+      setMessage(err?.message || "Failed to load tasks")
     }
   }
 
-  function preparePlannerSchedule(job: ProductionPlannerJob) {
-    const stage = normalizedPlannerStage(job.stage)
-    const existing = plannerRelevantEvent(job, events)
-
-    setJobId(String(job.id))
-    setEventType(stage || "general")
-
-    setTitle(
-      `${plannerStageLabel(job.stage)} — Job ${job.id}`
-    )
-
-    setLocation(
-      [job.address1, job.city, job.state, job.zip]
-        .filter(Boolean)
-        .join(", ")
-    )
-
-    setNotes(
-      job.production_planner_explanation || ""
-    )
-
-    if (existing) {
-      setStartTime(
-        dateTimeLocalValue(existing.start)
-      )
-
-      setEndTime(
-        dateTimeLocalValue(existing.end)
-      )
-
-      setMessage(
-        `Job ${job.id} already has a matching ${plannerStageLabel(
-          job.stage
-        )} calendar obligation. Select the existing event to drag, resize, or edit it.`
-      )
-    } else {
-      setStartTime("")
-      setEndTime("")
-
-      setMessage(
-        `Job ${job.id} loaded into the existing Calendar form. Choose the date and time, then create the event.`
-      )
-    }
-
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    })
-  }
 
   async function createTask() {
     try {
-      setMessage("Creating event...")
+      setMessage("Creating task...")
 
       const res = await fetch(`${API_BASE}/tasks/${getTenantSlug()}/events`, {
         method: "POST",
@@ -458,7 +188,7 @@ export default function TasksPage() {
 
   function openSelectedJob() {
     if (!selectedTask?.job_id) {
-      alert("This task is not linked to a job yet. Add a Job ID when creating the event.")
+      alert("This task is not linked to a job yet. Add a Job ID when creating the task.")
       return
     }
 
@@ -606,7 +336,6 @@ export default function TasksPage() {
 
   useEffect(() => {
     loadTasks()
-    loadProductionPlanner()
   }, [])
 
   return (
@@ -626,7 +355,7 @@ export default function TasksPage() {
       <h1 style={{ color: "white" }}>Tasks</h1>
 
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ color: "white" }}>Create Calendar Event</h2>
+        <h2 style={{ color: "white" }}>Create Task</h2>
 
         <input
           placeholder="Title"
@@ -684,11 +413,11 @@ export default function TasksPage() {
         />
 
         <button onClick={createTask} style={buttonStyle}>
-          Create Calendar Event
+          Create Task
         </button>
 
         <button onClick={loadTasks} style={buttonStyle}>
-          Refresh Calendar
+          Refresh Tasks
         </button>
 
         {message && <p style={{ color: "white" }}>{message}</p>}
@@ -696,7 +425,7 @@ export default function TasksPage() {
 
       {selectedTask && (
         <div style={{ background: "#111827", color: "white", borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <h2 style={{ marginTop: 0 }}>Selected Event</h2>
+          <h2 style={{ marginTop: 0 }}>Selected Task</h2>
           <p><strong>Title:</strong> {selectedTask.title}</p>
           <p><strong>Customer:</strong> {selectedTask.customer_name || "Not linked"}</p>
           <p><strong>Job ID:</strong> {selectedTask.job_id || "Not linked"}</p>
@@ -742,7 +471,7 @@ export default function TasksPage() {
           </button>
 
           <button onClick={deleteSelectedTask} style={{ ...buttonStyle, background: "#991b1b", color: "white" }}>
-            Delete Event
+            Delete Task
           </button>
 
           <button onClick={() => setSelectedTask(null)} style={buttonStyle}>
@@ -769,181 +498,110 @@ export default function TasksPage() {
             overflowY: "auto",
           }}
         >
-          <h2 style={{ marginTop: 0 }}>Production Planner</h2>
+          <h2 style={{ marginTop: 0 }}>Tasks</h2>
 
-          {plannerMessage && (
-            <p style={{ opacity: 0.8 }}>{plannerMessage}</p>
-          )}
+          <div
+            style={{
+              fontSize: 13,
+              opacity: 0.75,
+              marginBottom: 12,
+            }}
+          >
+            {events.length} {events.length === 1 ? "task" : "tasks"}
+          </div>
 
-          {PRODUCTION_PLANNER_STAGES.map(stage => {
-            const presentation = stagePresentation(stage)
-            const jobs = plannerJobs.filter(
-              job =>
-                String(job.stage || "").trim().toLowerCase() === stage
-            )
+          {events.length === 0 ? (
+            <div
+              style={{
+                padding: "10px 8px",
+                opacity: 0.7,
+                fontSize: 13,
+              }}
+            >
+              No tasks yet.
+            </div>
+          ) : (
+            [...events]
+              .sort((a, b) => a.start.getTime() - b.start.getTime())
+              .map(task => {
+                const presentation = stagePresentation(
+                  task.stage_classification ||
+                  task.event_type
+                )
 
-            return (
-              <div key={stage} style={{ marginBottom: 16 }}>
-                <div
-                  style={{
-                    background: presentation.backgroundColor,
-                    border: `2px solid ${presentation.borderColor}`,
-                    color: presentation.color,
-                    borderRadius: 8,
-                    padding: "8px 10px",
-                    fontWeight: 800,
-                    marginBottom: 6,
-                  }}
-                >
-                  {plannerStageLabel(stage)} ({jobs.length})
-                </div>
+                const isSelected =
+                  selectedTask?.id === task.id
 
-                {jobs.length === 0 ? (
+                return (
                   <div
+                    key={task.id}
+                    onClick={() => handleSelectTask(task)}
                     style={{
-                      padding: "6px 8px",
-                      opacity: 0.65,
-                      fontSize: 13,
+                      background: presentation.backgroundColor,
+                      border: isSelected
+                        ? "3px solid #ffffff"
+                        : `2px solid ${presentation.borderColor}`,
+                      color: presentation.color,
+                      borderRadius: 8,
+                      padding: 10,
+                      marginBottom: 8,
+                      cursor: "pointer",
                     }}
                   >
-                    No jobs
-                  </div>
-                ) : (
-                  jobs.map(job => {
-                    const relevantEvent =
-                      plannerRelevantEvent(job, events)
+                    <div style={{ fontWeight: 800 }}>
+                      {task.title}
+                    </div>
 
-                    const overdue =
-                      plannerIsOverdue(job, events)
-
-                    return (
                     <div
-                      key={job.id}
-                      onClick={() => navigate(`/job/${job.id}`)}
                       style={{
-                        background: overdue
-                          ? "#6b21a8"
-                          : presentation.backgroundColor,
-                        border: overdue
-                          ? "2px solid #a855f7"
-                          : `2px solid ${presentation.borderColor}`,
-                        color: overdue
-                          ? "#ffffff"
-                          : presentation.color,
-                        borderRadius: 8,
-                        padding: 10,
-                        marginBottom: 6,
-                        cursor: "pointer",
+                        fontSize: 13,
+                        marginTop: 4,
+                        opacity: 0.9,
                       }}
                     >
-                      <div style={{ fontWeight: 800 }}>
-                        {job.customer_name || `Job ${job.id}`}
-                      </div>
+                      {task.start.toLocaleString("en-US", {
+                        timeZone: EASTERN_TIME_ZONE,
+                      })}
+                    </div>
 
-                      <div style={{ fontSize: 13, opacity: 0.9 }}>
-                        Job {job.id}
-                        {job.address1 ? ` — ${job.address1}` : ""}
-                      </div>
-
-                      <div style={{ fontSize: 13, marginTop: 5 }}>
-                        <strong>Stage Since:</strong>{" "}
-                        {plannerStageSince(job.stage_since)}
-                      </div>
-
-                      <div
-                        style={{ fontSize: 13, marginTop: 6 }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <strong>Why:</strong>
-
-                        <textarea
-                          value={
-                            plannerExplanationDrafts[job.id] ?? ""
-                          }
-                          onChange={e =>
-                            setPlannerExplanationDrafts(current => ({
-                              ...current,
-                              [job.id]: e.target.value,
-                            }))
-                          }
-                          placeholder="Current production explanation"
-                          style={{
-                            width: "100%",
-                            boxSizing: "border-box",
-                            marginTop: 4,
-                            minHeight: 54,
-                            resize: "vertical",
-                          }}
-                        />
-
-                        <button
-                          onClick={() => savePlannerExplanation(job)}
-                          style={{
-                            ...buttonStyle,
-                            marginTop: 4,
-                            padding: "6px 9px",
-                          }}
-                        >
-                          Save Why
-                        </button>
-                      </div>
-
-                      <div style={{ fontSize: 13, marginTop: 5 }}>
-                        <strong>Crew/Sub:</strong>{" "}
-                        {job.crew_name || "Unassigned"}
-                      </div>
-
+                    {task.customer_name && (
                       <div
                         style={{
                           fontSize: 13,
-                          marginTop: 6,
+                          marginTop: 4,
                         }}
-                        onClick={e => e.stopPropagation()}
                       >
-                        <strong>Schedule:</strong>{" "}
-                        {relevantEvent
-                          ? relevantEvent.start.toLocaleString(
-                              "en-US",
-                              {
-                                timeZone:
-                                  EASTERN_TIME_ZONE,
-                              }
-                            )
-                          : "Not scheduled"}
-
-                        {overdue && (
-                          <div
-                            style={{
-                              marginTop: 4,
-                              fontWeight: 800,
-                            }}
-                          >
-                            OVERDUE
-                          </div>
-                        )}
-
-                        <button
-                          onClick={() =>
-                            preparePlannerSchedule(job)
-                          }
-                          style={{
-                            ...buttonStyle,
-                            marginTop: 5,
-                            padding: "6px 9px",
-                          }}
-                        >
-                          {relevantEvent
-                            ? "View / Reschedule"
-                            : "Schedule"}
-                        </button>
+                        {task.customer_name}
                       </div>
-                    </div>
-                    )
-                  })
-                )}
-              </div>
-            )
-          })}
+                    )}
+
+                    {task.job_id && (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          marginTop: 3,
+                          opacity: 0.9,
+                        }}
+                      >
+                        Job {task.job_id}
+                      </div>
+                    )}
+
+                    {task.location && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          marginTop: 3,
+                          opacity: 0.8,
+                        }}
+                      >
+                        {task.location}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+          )}
         </div>
 
         <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
