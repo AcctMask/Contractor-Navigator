@@ -84,6 +84,11 @@ export default function JobDetail() {
   const [form, setForm] = useState<any>({})
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
   const [calendarEvents, setCalendarEvents] = useState<any[]>([])
+  const [tasks, setTasks] = useState<any[]>([])
+  const [taskTitle, setTaskTitle] = useState("")
+  const [taskDate, setTaskDate] = useState("")
+  const [taskNotes, setTaskNotes] = useState("")
+  const [taskStage, setTaskStage] = useState("")
 
   const [dirtyCalendarEventIds, setDirtyCalendarEventIds] =
     useState<Set<string>>(new Set())
@@ -144,6 +149,9 @@ export default function JobDetail() {
         "calendar_stage_event_created",
         "calendar_stage_event_rescheduled",
         "calendar_event_rescheduled",
+        "task_created",
+        "task_rescheduled",
+        "task_deleted",
         "job_archived",
         "document_package_sent",
         "document_package_signed",
@@ -360,6 +368,95 @@ export default function JobDetail() {
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   }
 
+  async function loadTasks() {
+    if (!id) return
+
+    const token = getToken()
+
+    const res = await fetch(
+      `${API_BASE}/tasks/${getTenantSlug()}/events`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    )
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      errorToast(data?.error || "Failed to load tasks")
+      return
+    }
+
+    const linked = (data.events || [])
+      .filter((task: any) => String(task.job_id || "") === String(id))
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.start_time || 0).getTime() -
+          new Date(b.start_time || 0).getTime()
+      )
+
+    setTasks(linked)
+  }
+
+  async function createJobTask() {
+    if (!id) return
+
+    if (!taskTitle.trim()) {
+      errorToast("Task title is required")
+      return
+    }
+
+    if (!taskDate) {
+      errorToast("Task date is required")
+      return
+    }
+
+    setError("")
+    setStatus("Creating task...")
+
+    const token = getToken()
+
+    const localNoon = new Date(`${taskDate}T12:00:00`)
+    const startTime = localNoon.toISOString()
+
+    const res = await fetch(`${API_BASE}/tasks/${getTenantSlug()}/events`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        title: taskTitle.trim(),
+        job_id: Number(id),
+        start_time: startTime,
+        end_time: null,
+        notes: taskNotes.trim(),
+        event_type: taskStage || null,
+        stage_classification: taskStage || null,
+        audit_source: "job_detail",
+      }),
+    })
+
+    const data = await res.json()
+
+    if (!res.ok || !data.ok) {
+      errorToast(data?.error || "Task create failed")
+      return
+    }
+
+    setTaskTitle("")
+    setTaskDate("")
+    setTaskNotes("")
+    setTaskStage("")
+
+    successToast("Task created")
+
+    await loadTasks()
+    await loadJob()
+  }
+
   async function loadCalendarEvents() {
     if (!id) return
 
@@ -459,6 +556,12 @@ export default function JobDetail() {
       kind === "calendar_event_rescheduled"
     ) return "Production Calendar Change"
 
+    if (
+      kind === "task_created" ||
+      kind === "task_rescheduled" ||
+      kind === "task_deleted"
+    ) return "Task Activity"
+
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
     if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
     if (kind.includes("manual_sms")) return "Staff SMS"
@@ -527,6 +630,7 @@ export default function JobDetail() {
     if (label.includes("estimate")) return { ...badge, background: "#b45309" }
     if (label.includes("production planner")) return { ...badge, background: "#475569" }
     if (label.includes("production calendar change")) return { ...badge, background: "#dc2626" }
+    if (label.includes("task activity")) return { ...badge, background: "#7c3aed" }
     if (label.includes("alert")) return { ...badge, background: "#be123c" }
     return badge
   }
@@ -1414,6 +1518,7 @@ export default function JobDetail() {
 
     if (currentUser.role !== "subcontractor") {
       loadCalendarEvents()
+      loadTasks()
     }
   }, [id, currentUser])
 
@@ -2243,6 +2348,100 @@ export default function JobDetail() {
       </div>
 
 <section style={card}>
+        <h2>Tasks</h2>
+
+        <div
+          style={{
+            display: "grid",
+            gap: 10,
+            marginBottom: 18,
+          }}
+        >
+          <input
+            value={taskTitle}
+            onChange={(e) => setTaskTitle(e.target.value)}
+            placeholder="Task title"
+            style={input}
+          />
+
+          <input
+            type="date"
+            value={taskDate}
+            onChange={(e) => setTaskDate(e.target.value)}
+            style={input}
+          />
+
+          <select
+            value={taskStage}
+            onChange={(e) => setTaskStage(e.target.value)}
+            style={input}
+          >
+            <option value="">No stage classification</option>
+            {STAGES.map((stageValue) => (
+              <option key={stageValue} value={stageValue}>
+                {stageDisplayLabel(stageValue)}
+              </option>
+            ))}
+          </select>
+
+          <textarea
+            value={taskNotes}
+            onChange={(e) => setTaskNotes(e.target.value)}
+            placeholder="Task notes"
+            style={{ ...input, minHeight: 80 }}
+          />
+
+          <div>
+            <button onClick={createJobTask} style={button}>
+              Add Task
+            </button>
+          </div>
+        </div>
+
+        {tasks.length === 0 ? (
+          <p>No tasks linked to this job yet.</p>
+        ) : (
+          tasks.map((task: any) => (
+            <div
+              key={task.id}
+              style={{
+                ...row,
+                borderLeft: "4px solid #7c3aed",
+                paddingLeft: 12,
+              }}
+            >
+              <div style={{ width: "100%" }}>
+                <strong>{task.title || "Task"}</strong>
+
+                {task.start_time ? (
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    {new Date(task.start_time).toLocaleDateString()}
+                  </div>
+                ) : null}
+
+                {task.stage_classification ? (
+                  <div style={{ marginTop: 4, fontSize: 12 }}>
+                    {stageDisplayLabel(task.stage_classification)}
+                  </div>
+                ) : null}
+
+                {task.notes ? (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {task.notes}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+
+      <section style={card}>
         <h2>Linked Calendar Events</h2>
 
         {calendarEvents.length === 0 ? (

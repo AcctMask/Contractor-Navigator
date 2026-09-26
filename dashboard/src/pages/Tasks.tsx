@@ -42,8 +42,6 @@ const TASK_STAGE_OPTIONS = [
   ["contract_signed", "Contract Signed"],
   ["pre_production", "Pre Production"],
   ["in_production", "In Production"],
-  ["roof_repair", "Roof Repair"],
-  ["roof_replacement", "Roof Replacement"],
   ["wa_sent", "WA Sent"],
   ["tarp", "Tarp"],
   ["tarp_complete", "Tarp Complete"],
@@ -173,12 +171,14 @@ export default function TasksPage() {
           title,
           job_id: jobId ? Number(jobId) : null,
           start_time: localDateTimeToIso(startTime),
-          end_time: startTime
-            ? new Date(
-                new Date(localDateTimeToIso(startTime)).getTime() +
-                  60 * 60 * 1000
-              ).toISOString()
-            : null,
+          end_time:
+            startTime && startTime.includes("T") &&
+            startTime.slice(11, 16) !== "12:00"
+              ? new Date(
+                  new Date(localDateTimeToIso(startTime)).getTime() +
+                    60 * 60 * 1000
+                ).toISOString()
+              : null,
           notes,
           event_type: eventType,
           stage_classification: eventType,
