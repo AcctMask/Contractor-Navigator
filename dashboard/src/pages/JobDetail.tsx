@@ -647,6 +647,9 @@ export default function JobDetail() {
         background:
           presentation?.backgroundColor ||
           "#64748b",
+        color:
+          presentation?.color ||
+          "#111827",
       }
     }
 
