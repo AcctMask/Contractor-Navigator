@@ -896,7 +896,7 @@ export default function TasksPage() {
             </div>
           ) : (
             [...events]
-              .sort((a, b) => a.start.getTime() - b.start.getTime())
+              .sort((a, b) => b.start.getTime() - a.start.getTime())
               .map(task => {
                 const presentation = stagePresentation(
                   task.stage_classification ||

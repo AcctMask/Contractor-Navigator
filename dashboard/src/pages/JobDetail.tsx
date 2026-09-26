@@ -406,8 +406,8 @@ export default function JobDetail() {
       .filter((task: any) => String(task.job_id || "") === String(id))
       .sort(
         (a: any, b: any) =>
-          new Date(a.start_time || 0).getTime() -
-          new Date(b.start_time || 0).getTime()
+          new Date(b.start_time || 0).getTime() -
+          new Date(a.start_time || 0).getTime()
       )
 
     setTasks(linked)
