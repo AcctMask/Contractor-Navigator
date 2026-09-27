@@ -75,6 +75,18 @@ type TaskItem = {
   customer_name?: string
   job_address?: string
   job_stage?: string | null
+  assigned_user_id?: number | null
+  assigned_user_name?: string | null
+  completed_at?: string | null
+  completed_by_user_id?: number | null
+  completed_by_user_name?: string | null
+}
+
+type AssignableUser = {
+  id: string | number
+  email: string
+  full_name?: string | null
+  is_active?: boolean
 }
 
 
@@ -127,6 +139,8 @@ export default function TasksPage() {
   const [startTime, setStartTime] = useState("")
   const [notes, setNotes] = useState("")
   const [eventType, setEventType] = useState("inspection")
+  const [assignedUserId, setAssignedUserId] = useState("")
+  const [assignableUsers, setAssignableUsers] = useState<AssignableUser[]>([])
   const [message, setMessage] = useState("")
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null)
 
@@ -221,6 +235,37 @@ export default function TasksPage() {
     )
   }
 
+  async function loadAssignableUsers() {
+    try {
+      const res = await fetch(
+        `${API_BASE}/auth/${getTenantSlug()}/users`,
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to load users")
+      }
+
+      setAssignableUsers(
+        (Array.isArray(data.users) ? data.users : [])
+          .filter((user: AssignableUser) => user.is_active !== false)
+          .filter(
+            (user: AssignableUser) =>
+              user.id !== null && user.id !== undefined
+          )
+      )
+    } catch (err: any) {
+      console.error("Assignable user load failed:", err)
+      setMessage(err?.message || "Failed to load users")
+    }
+  }
+
   async function loadTasks() {
     try {
       setMessage("Loading tasks...")
@@ -246,6 +291,15 @@ export default function TasksPage() {
         customer_name: e.customer_name || "",
         job_address: e.job_address || "",
         job_stage: e.job_stage || null,
+        assigned_user_id: e.assigned_user_id
+          ? Number(e.assigned_user_id)
+          : null,
+        assigned_user_name: e.assigned_user_name || null,
+        completed_at: e.completed_at || null,
+        completed_by_user_id: e.completed_by_user_id
+          ? Number(e.completed_by_user_id)
+          : null,
+        completed_by_user_name: e.completed_by_user_name || null,
       }))
 
       const newestScheduledFirst = [...mapped].sort(
@@ -294,6 +348,9 @@ export default function TasksPage() {
           notes,
           event_type: eventType,
           stage_classification: eventType,
+          assigned_user_id: assignedUserId
+            ? Number(assignedUserId)
+            : null,
         }),
       })
 
@@ -308,6 +365,7 @@ export default function TasksPage() {
       setStartTime("")
       setNotes("")
       setEventType("inspection")
+      setAssignedUserId("")
       setMessage("Task created.")
 
       await loadTasks()
@@ -328,6 +386,84 @@ export default function TasksPage() {
     }
 
     navigate(`/job/${selectedTask.job_id}`)
+  }
+
+  async function saveSelectedAssignment() {
+    if (!selectedTask) return
+
+    try {
+      setMessage("Saving task assignment...")
+
+      const res = await fetch(
+        `${API_BASE}/tasks/${getTenantSlug()}/events/${selectedTask.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            title: selectedTask.stored_title,
+            start_time: selectedTask.start.toISOString(),
+            end_time: selectedTask.end.toISOString(),
+            notes: selectedTask.notes || "",
+            event_type: selectedTask.event_type || "general",
+            stage_classification:
+              selectedTask.stage_classification ||
+              selectedTask.event_type ||
+              null,
+            assigned_user_id: selectedTask.assigned_user_id || null,
+            audit_source: "task_assignment_ui",
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Task assignment update failed")
+      }
+
+      setMessage("Task assignment updated.")
+      await loadTasks()
+    } catch (err: any) {
+      console.error("Task assignment update failed:", err)
+      setMessage(err?.message || "Task assignment update failed")
+    }
+  }
+
+  async function completeSelectedTask() {
+    if (!selectedTask || selectedTask.completed_at) return
+
+    if (!window.confirm(`Complete task: ${selectedTask.title}?`)) {
+      return
+    }
+
+    try {
+      setMessage("Completing task...")
+
+      const res = await fetch(
+        `${API_BASE}/tasks/${getTenantSlug()}/events/${selectedTask.id}/complete`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data?.error || "Task completion failed")
+      }
+
+      setMessage("Task completed.")
+      await loadTasks()
+    } catch (err: any) {
+      console.error("Task completion failed:", err)
+      setMessage(err?.message || "Task completion failed")
+    }
   }
 
   async function deleteSelectedTask() {
@@ -469,6 +605,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     loadTasks()
+    loadAssignableUsers()
   }, [])
 
   return (
@@ -789,6 +926,19 @@ export default function TasksPage() {
           style={inputStyle}
         />
 
+        <select
+          value={assignedUserId}
+          onChange={(e) => setAssignedUserId(e.target.value)}
+          style={inputStyle}
+        >
+          <option value="">Unassigned</option>
+          {assignableUsers.map((user) => (
+            <option key={String(user.id)} value={String(user.id)}>
+              {user.full_name || user.email}
+            </option>
+          ))}
+        </select>
+
         <textarea
           placeholder="Notes"
           value={notes}
@@ -814,6 +964,51 @@ export default function TasksPage() {
           <p><strong>Customer:</strong> {selectedTask.customer_name || "Not linked"}</p>
           <p><strong>Job ID:</strong> {selectedTask.job_id || "Not linked"}</p>
           <p><strong>Notes:</strong> {selectedTask.notes || "None"}</p>
+          <p>
+            <strong>Status:</strong>{" "}
+            {selectedTask.completed_at ? "Completed" : "Open"}
+          </p>
+
+          <label style={{ display: "block", marginTop: 12 }}>
+            <strong>Assigned To</strong>
+          </label>
+
+          <select
+            value={
+              selectedTask.assigned_user_id
+                ? String(selectedTask.assigned_user_id)
+                : ""
+            }
+            onChange={(e) => {
+              const user = assignableUsers.find(
+                (item) => String(item.id) === e.target.value
+              )
+
+              setSelectedTask({
+                ...selectedTask,
+                assigned_user_id: e.target.value
+                  ? Number(e.target.value)
+                  : null,
+                assigned_user_name:
+                  user?.full_name || user?.email || null,
+              })
+            }}
+            style={inputStyle}
+            disabled={Boolean(selectedTask.completed_at)}
+          >
+            <option value="">Unassigned</option>
+            {assignableUsers.map((user) => (
+              <option key={String(user.id)} value={String(user.id)}>
+                {user.full_name || user.email}
+              </option>
+            ))}
+          </select>
+
+          {!selectedTask.completed_at && (
+            <button onClick={saveSelectedAssignment} style={buttonStyle}>
+              Save Assignment
+            </button>
+          )}
 
           <label style={{ display: "block", marginTop: 12 }}>
             <strong>Start date / time</strong>
@@ -852,6 +1047,12 @@ export default function TasksPage() {
           <button onClick={openSelectedJob} style={buttonStyle}>
             Open Job
           </button>
+
+          {!selectedTask.completed_at && (
+            <button onClick={completeSelectedTask} style={buttonStyle}>
+              Complete Task
+            </button>
+          )}
 
           <button onClick={deleteSelectedTask} style={{ ...buttonStyle, background: "#991b1b", color: "white" }}>
             Delete Task
@@ -955,6 +1156,30 @@ export default function TasksPage() {
                         }}
                       >
                         {task.customer_name}
+                      </div>
+                    )}
+
+                    {task.assigned_user_name && (
+                      <div
+                        style={{
+                          fontSize: 13,
+                          marginTop: 3,
+                          opacity: 0.9,
+                        }}
+                      >
+                        Assigned to {task.assigned_user_name}
+                      </div>
+                    )}
+
+                    {task.completed_at && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          marginTop: 3,
+                          fontWeight: 700,
+                        }}
+                      >
+                        Completed
                       </div>
                     )}
 

@@ -104,6 +104,8 @@ export default function JobDetail() {
   const [taskDate, setTaskDate] = useState("")
   const [taskNotes, setTaskNotes] = useState("")
   const [taskStage, setTaskStage] = useState("")
+  const [taskAssignedUserId, setTaskAssignedUserId] = useState("")
+  const [taskAssignableUsers, setTaskAssignableUsers] = useState<any[]>([])
 
   const [dirtyCalendarEventIds, setDirtyCalendarEventIds] =
     useState<Set<string>>(new Set())
@@ -383,8 +385,42 @@ export default function JobDetail() {
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
   }
 
+  async function loadTaskAssignableUsers() {
+    try {
+      const res = await fetch(
+        `${API_BASE}/auth/${getTenantSlug()}/users`,
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Failed to load users")
+      }
+
+      setTaskAssignableUsers(
+        (Array.isArray(data.users) ? data.users : [])
+          .filter((user: any) => user.is_active !== false)
+          .filter(
+            (user: any) =>
+              user.id !== null && user.id !== undefined
+          )
+      )
+    } catch (err: any) {
+      console.error("Task assignee user load failed:", err)
+    }
+  }
+
   async function loadTasks() {
     if (!id) return
+
+    if (taskAssignableUsers.length === 0) {
+      await loadTaskAssignableUsers()
+    }
 
     const token = getToken()
 
@@ -413,6 +449,37 @@ export default function JobDetail() {
       )
 
     setTasks(linked)
+  }
+
+  async function completeJobTask(task: any) {
+    if (!task?.id || task?.completed_at) return
+
+    if (!window.confirm(`Complete task: ${task.title || "Task"}?`)) {
+      return
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/tasks/${getTenantSlug()}/events/${task.id}/complete`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || "Task completion failed")
+      }
+
+      successToast("Task completed")
+      await loadTasks()
+    } catch (err: any) {
+      errorToast(err?.message || "Task completion failed")
+    }
   }
 
   async function createJobTask() {
@@ -450,6 +517,9 @@ export default function JobDetail() {
         notes: taskNotes.trim(),
         event_type: taskStage || null,
         stage_classification: taskStage || null,
+        assigned_user_id: taskAssignedUserId
+          ? Number(taskAssignedUserId)
+          : null,
         audit_source: "job_detail",
       }),
     })
@@ -465,8 +535,10 @@ export default function JobDetail() {
     setTaskDate("")
     setTaskNotes("")
     setTaskStage("")
+    setTaskAssignedUserId("")
 
     successToast("Task created")
+    await loadTasks()
 
     await loadTasks()
     await loadJob()
@@ -2418,6 +2490,19 @@ export default function JobDetail() {
             ))}
           </select>
 
+          <select
+            value={taskAssignedUserId}
+            onChange={(e) => setTaskAssignedUserId(e.target.value)}
+            style={input}
+          >
+            <option value="">Unassigned</option>
+            {taskAssignableUsers.map((user: any) => (
+              <option key={String(user.id)} value={String(user.id)}>
+                {user.full_name || user.email}
+              </option>
+            ))}
+          </select>
+
           <textarea
             value={taskNotes}
             onChange={(e) => setTaskNotes(e.target.value)}
@@ -2464,6 +2549,25 @@ export default function JobDetail() {
                     {stageDisplayLabel(task.stage_classification)}
                   </div>
                 ) : null}
+
+                {task.assigned_user_name ? (
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    Assigned to {task.assigned_user_name}
+                  </div>
+                ) : null}
+
+                {task.completed_at ? (
+                  <div style={{ marginTop: 4, fontSize: 12, fontWeight: 700 }}>
+                    Completed
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => completeJobTask(task)}
+                    style={{ ...button, marginTop: 8 }}
+                  >
+                    Complete Task
+                  </button>
+                )}
 
                 {task.notes ? (
                   <div
