@@ -70,6 +70,9 @@ async function ensureTaskTable() {
       notes text null,
       event_type text not null default 'general',
       stage_classification text null,
+      assigned_user_id bigint null references app_users(id) on delete set null,
+      completed_at timestamptz null,
+      completed_by_user_id bigint null references app_users(id) on delete set null,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     )
@@ -86,6 +89,9 @@ async function ensureTaskTable() {
       add column if not exists notes text null,
       add column if not exists event_type text not null default 'general',
       add column if not exists stage_classification text null,
+      add column if not exists assigned_user_id bigint null,
+      add column if not exists completed_at timestamptz null,
+      add column if not exists completed_by_user_id bigint null,
       add column if not exists created_at timestamptz not null default now(),
       add column if not exists updated_at timestamptz not null default now()
   `)
@@ -126,6 +132,12 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           ce.notes,
           ce.event_type,
           ce.stage_classification,
+          ce.assigned_user_id,
+          au.full_name as assigned_user_name,
+          au.mobile_phone as assigned_user_mobile_phone,
+          ce.completed_at,
+          ce.completed_by_user_id,
+          cbu.full_name as completed_by_user_name,
           ce.created_at,
           ce.updated_at,
           c.full_name as customer_name,
@@ -144,6 +156,12 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         left join customers c
           on c.id = j.customer_id
          and c.tenant_id = j.tenant_id
+        left join app_users au
+          on au.id = ce.assigned_user_id
+         and au.tenant_id = ce.tenant_id
+        left join app_users cbu
+          on cbu.id = ce.completed_by_user_id
+         and cbu.tenant_id = ce.tenant_id
         where ce.tenant_id = $1
         order by ce.start_time asc, ce.id asc
         `,
@@ -184,6 +202,32 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         return { ok: false, error: "Start time is required" }
       }
 
+      let assignedUser: any = null
+
+      if (body.assigned_user_id) {
+        const assignedUserResult = await pool.query(
+          `
+          select id, full_name, email, mobile_phone
+          from app_users
+          where id = $1
+            and tenant_id = $2
+            and is_active = true
+          limit 1
+          `,
+          [Number(body.assigned_user_id), tenantId]
+        )
+
+        if (!assignedUserResult.rowCount) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Assigned user is not an active user for this tenant",
+          }
+        }
+
+        assignedUser = assignedUserResult.rows[0]
+      }
+
       const result = await pool.query(
         `
         insert into task_items (
@@ -196,11 +240,12 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
+          assigned_user_id,
           created_at,
           updated_at
         )
         values (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now()
         )
         returning
           id,
@@ -212,6 +257,9 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
+          assigned_user_id,
+          completed_at,
+          completed_by_user_id,
           created_at,
           updated_at
         `,
@@ -225,6 +273,7 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           body.notes || null,
           body.event_type || "general",
           body.stage_classification || body.event_type || null,
+          assignedUser ? Number(assignedUser.id) : null,
         ]
       )
 
@@ -247,12 +296,25 @@ export async function registerTaskRoutes(app: FastifyInstance) {
             "task_created",
             `Task created by ${
               actor.full_name || actor.email || "User"
-            }: ${result.rows[0].title}`,
+            }: ${result.rows[0].title}${
+              assignedUser
+                ? ` — Assigned to ${
+                    assignedUser.full_name ||
+                    assignedUser.email ||
+                    "User"
+                  }`
+                : ""
+            }`,
             JSON.stringify({
               ...taskActorMeta(actor),
               event_id: result.rows[0].id,
               event_type: result.rows[0].event_type,
               stage_classification: result.rows[0].stage_classification,
+              assigned_user_id: result.rows[0].assigned_user_id,
+              assigned_user_name:
+                assignedUser?.full_name ||
+                assignedUser?.email ||
+                null,
               start_time: result.rows[0].start_time,
               end_time: result.rows[0].end_time,
               source: "task_ui",
@@ -296,6 +358,9 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
+          assigned_user_id,
+          completed_at,
+          completed_by_user_id,
           created_at,
           updated_at
         from task_items
@@ -321,6 +386,39 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         return { ok: false, error: "Start time is required" }
       }
 
+      const requestedAssignedUserId =
+        body.assigned_user_id === undefined
+          ? previousResult.rows[0].assigned_user_id
+          : body.assigned_user_id
+            ? Number(body.assigned_user_id)
+            : null
+
+      let assignedUser: any = null
+
+      if (requestedAssignedUserId) {
+        const assignedUserResult = await pool.query(
+          `
+          select id, full_name, email, mobile_phone
+          from app_users
+          where id = $1
+            and tenant_id = $2
+            and is_active = true
+          limit 1
+          `,
+          [requestedAssignedUserId, tenantId]
+        )
+
+        if (!assignedUserResult.rowCount) {
+          reply.code(400)
+          return {
+            ok: false,
+            error: "Assigned user is not an active user for this tenant",
+          }
+        }
+
+        assignedUser = assignedUserResult.rows[0]
+      }
+
       const result = await pool.query(
         `
         update task_items
@@ -332,9 +430,10 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes = $5,
           event_type = $6,
           stage_classification = $7,
+          assigned_user_id = $8,
           updated_at = now()
-        where tenant_id = $8
-          and id = $9
+        where tenant_id = $9
+          and id = $10
         returning
           id,
           job_id,
@@ -345,6 +444,9 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           notes,
           event_type,
           stage_classification,
+          assigned_user_id,
+          completed_at,
+          completed_by_user_id,
           created_at,
           updated_at
         `,
@@ -355,7 +457,11 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           body.location || null,
           body.notes || null,
           body.event_type || "general",
-          body.stage_classification || body.event_type || previousResult.rows[0].stage_classification || null,
+          body.stage_classification ||
+            body.event_type ||
+            previousResult.rows[0].stage_classification ||
+            null,
+          requestedAssignedUserId,
           tenantId,
           Number(eventId),
         ]
@@ -415,6 +521,127 @@ export async function registerTaskRoutes(app: FastifyInstance) {
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }
+    }
+  })
+
+  app.post("/tasks/:tenantSlug/events/:eventId/complete", async (request: any, reply) => {
+    try {
+      await ensureTaskTable()
+
+      const { tenantSlug, eventId } = request.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const actor = await requireTaskUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
+
+      const existingResult = await pool.query(
+        `
+        select
+          id,
+          job_id,
+          title,
+          assigned_user_id,
+          completed_at,
+          completed_by_user_id
+        from task_items
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, Number(eventId)]
+      )
+
+      if (!existingResult.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Task not found" }
+      }
+
+      const existingTask = existingResult.rows[0]
+
+      if (existingTask.completed_at) {
+        return {
+          ok: true,
+          event: existingTask,
+          already_completed: true,
+        }
+      }
+
+      const result = await pool.query(
+        `
+        update task_items
+        set
+          completed_at = now(),
+          completed_by_user_id = $1,
+          updated_at = now()
+        where tenant_id = $2
+          and id = $3
+          and completed_at is null
+        returning
+          id,
+          job_id,
+          title,
+          assigned_user_id,
+          completed_at,
+          completed_by_user_id
+        `,
+        [Number(actor.id), tenantId, Number(eventId)]
+      )
+
+      if (!result.rowCount) {
+        reply.code(409)
+        return {
+          ok: false,
+          error: "Task completion state changed before this request completed",
+        }
+      }
+
+      const completedTask = result.rows[0]
+
+      if (completedTask.job_id) {
+        await pool.query(
+          `
+          insert into timeline_events (
+            tenant_id,
+            job_id,
+            kind,
+            message,
+            meta,
+            created_at
+          )
+          values ($1, $2, $3, $4, $5::jsonb, now())
+          `,
+          [
+            tenantId,
+            Number(completedTask.job_id),
+            "task_completed",
+            `Task completed by ${
+              actor.full_name || actor.email || "User"
+            }: ${completedTask.title}`,
+            JSON.stringify({
+              ...taskActorMeta(actor),
+              event_id: completedTask.id,
+              assigned_user_id: completedTask.assigned_user_id,
+              completed_at: completedTask.completed_at,
+              completed_by_user_id:
+                completedTask.completed_by_user_id,
+              source: "task_ui",
+            }),
+          ]
+        )
+      }
+
+      return {
+        ok: true,
+        event: completedTask,
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || String(err),
+      }
     }
   })
 
