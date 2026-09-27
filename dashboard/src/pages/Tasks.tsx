@@ -80,6 +80,7 @@ type TaskItem = {
   completed_at?: string | null
   completed_by_user_id?: number | null
   completed_by_user_name?: string | null
+  created_at?: string | null
 }
 
 type AssignableUser = {
@@ -279,7 +280,13 @@ export default function TasksPage() {
 
       const mapped = (data.events || []).map((e: any) => ({
         id: Number(e.id),
-        title: taskDisplayTitle(e.title, e.customer_name),
+        title: `${
+          taskDisplayTitle(e.title, e.customer_name)
+        }${
+          e.assigned_user_name
+            ? ` — Assigned: ${e.assigned_user_name}`
+            : ""
+        }`,
         stored_title: e.title || e.customer_name || "Untitled",
         start: new Date(e.start_time),
         end: new Date(e.end_time || e.start_time),
@@ -300,6 +307,7 @@ export default function TasksPage() {
           ? Number(e.completed_by_user_id)
           : null,
         completed_by_user_name: e.completed_by_user_name || null,
+        created_at: e.created_at || null,
       }))
 
       const newestScheduledFirst = [...mapped].sort(
@@ -1106,7 +1114,16 @@ export default function TasksPage() {
             </div>
           ) : (
             [...events]
-              .sort((a, b) => b.start.getTime() - a.start.getTime())
+              .sort((a, b) => {
+                const aCreated = new Date(
+                  a.created_at || 0
+                ).getTime()
+                const bCreated = new Date(
+                  b.created_at || 0
+                ).getTime()
+
+                return bCreated - aCreated
+              })
               .map(task => {
                 const presentation = stagePresentation(
                   task.stage_classification ||
