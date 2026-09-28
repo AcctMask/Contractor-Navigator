@@ -102,6 +102,17 @@ function plannerStageSince(value?: string | null) {
   })} (${elapsedDays}d)`
 }
 
+function plannerHereSince(value?: Date | null) {
+  if (!value || Number.isNaN(value.getTime())) return "UNSCHEDULED"
+
+  const elapsedMs = Date.now() - value.getTime()
+  const elapsedDays = Math.max(0, Math.floor(elapsedMs / 86400000))
+
+  return `${value.toLocaleDateString("en-US", {
+    timeZone: EASTERN_TIME_ZONE,
+  })} (${elapsedDays}d)`
+}
+
 type CalendarEvent = {
   id: number
   title: string
@@ -858,6 +869,11 @@ export default function CalendarPage() {
                       <div style={{ fontSize: 13, marginTop: 5 }}>
                         <strong>Stage Since:</strong>{" "}
                         {plannerStageSince(job.stage_since)}
+                      </div>
+
+                      <div style={{ fontSize: 13, marginTop: 5 }}>
+                        <strong>Here Since:</strong>{" "}
+                        {plannerHereSince(relevantEvent?.start)}
                       </div>
 
                       <div
