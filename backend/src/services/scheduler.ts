@@ -1088,8 +1088,22 @@ async function runTaskSmsReminder(action: ScheduledActionRow) {
       ti.end_time,
       ti.completed_at,
       ti.assigned_user_id,
-      au.mobile_phone
+      au.mobile_phone,
+      task_job.external_job_id,
+      task_job.address1 as job_address1,
+      task_job.city as job_city,
+      task_job.state as job_state,
+      task_job.zip as job_zip,
+      task_customer.full_name as customer_name,
+      task_customer.phone as customer_phone
+
     from task_items ti
+    left join jobs task_job
+      on task_job.id = ti.job_id
+     and task_job.tenant_id = ti.tenant_id
+    left join customers task_customer
+      on task_customer.id = task_job.customer_id
+     and task_customer.tenant_id = task_job.tenant_id
     left join app_users au
       on au.id = ti.assigned_user_id
      and au.tenant_id = ti.tenant_id
@@ -1154,9 +1168,89 @@ async function runTaskSmsReminder(action: ScheduledActionRow) {
       minute: "2-digit",
     })
 
-    await sendSMS(
+
+  const taskSmsHeading =
+    String(action.payload?.kind || action.payload?.type || "")
+      .toLowerCase()
+      .includes("overdue")
+      ? "Navigator Task OVERDUE"
+      : "Navigator Task Reminder"
+
+  const taskSmsLines: string[] = [taskSmsHeading]
+
+  const taskExternalJobId = String(
+    task?.external_job_id || ""
+  ).trim()
+
+  const taskCustomerName = String(
+    task?.customer_name || ""
+  ).trim()
+
+  const taskJobIdentity = [
+    taskExternalJobId ? `Job #${taskExternalJobId}` : "",
+    taskCustomerName,
+  ]
+    .filter(Boolean)
+    .join(" — ")
+
+  if (taskJobIdentity) {
+    taskSmsLines.push(taskJobIdentity)
+  }
+
+  const taskTitle = String(task?.title || "").trim()
+
+  if (taskTitle) {
+    taskSmsLines.push(`Task: ${taskTitle}`)
+  }
+
+  const taskDue = task?.end_time
+    ? new Date(task.end_time).toLocaleString("en-US", {
+        timeZone: "America/New_York",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : ""
+
+  if (taskDue) {
+    taskSmsLines.push(`Due: ${taskDue}`)
+  }
+
+  const taskAddress = [
+    task?.job_address1,
+    task?.job_city,
+    task?.job_state,
+    task?.job_zip,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ")
+
+  if (taskAddress) {
+    taskSmsLines.push(`Address: ${taskAddress}`)
+  }
+
+  const taskCustomerPhone = String(
+    task?.customer_phone || ""
+  ).trim()
+
+  if (taskCustomerPhone) {
+    taskSmsLines.push(`Phone: ${taskCustomerPhone}`)
+  }
+
+  const taskNotes = String(task?.notes || "").trim()
+
+  if (taskNotes) {
+    taskSmsLines.push(`Note: ${taskNotes}`)
+  }
+
+  const enrichedTaskSmsBody = taskSmsLines.join("\n")
+
+await sendSMS(
       String(task.mobile_phone),
-      `Navigator reminder: ${task.title || "Task"} is due ${due}.`
+      enrichedTaskSmsBody
     )
 
     return

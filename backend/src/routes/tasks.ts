@@ -358,7 +358,113 @@ function formatTaskDueTime(value: any) {
   })
 }
 
+
+async function getTaskSmsJobContext(
+  tenantId: number,
+  task: any
+) {
+  const jobId = Number(task?.job_id)
+
+  if (!Number.isFinite(jobId) || jobId <= 0) {
+    return null
+  }
+
+  const result = await pool.query(
+    `
+    select
+      j.id,
+      j.external_job_id,
+      j.address1,
+      j.city,
+      j.state,
+      j.zip,
+      c.full_name as customer_name,
+      c.phone as customer_phone
+    from jobs j
+    left join customers c
+      on c.id = j.customer_id
+     and c.tenant_id = j.tenant_id
+    where j.tenant_id = $1
+      and j.id = $2
+    limit 1
+    `,
+    [tenantId, jobId]
+  )
+
+  return result.rows[0] || null
+}
+
+function buildTaskSmsBody(
+  heading: string,
+  task: any,
+  jobContext: any
+) {
+  const lines: string[] = [heading]
+
+  const externalJobId = String(
+    jobContext?.external_job_id || ""
+  ).trim()
+
+  const customerName = String(
+    jobContext?.customer_name || ""
+  ).trim()
+
+  const jobIdentity = [
+    externalJobId ? `Job #${externalJobId}` : "",
+    customerName,
+  ]
+    .filter(Boolean)
+    .join(" — ")
+
+  if (jobIdentity) {
+    lines.push(jobIdentity)
+  }
+
+  const title = String(task?.title || "").trim()
+
+  if (title) {
+    lines.push(`Task: ${title}`)
+  }
+
+  const due = formatTaskDueTime(task?.end_time)
+
+  if (due) {
+    lines.push(`Due: ${due}`)
+  }
+
+  const address = [
+    jobContext?.address1,
+    jobContext?.city,
+    jobContext?.state,
+    jobContext?.zip,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ")
+
+  if (address) {
+    lines.push(`Address: ${address}`)
+  }
+
+  const phone = String(
+    jobContext?.customer_phone || ""
+  ).trim()
+
+  if (phone) {
+    lines.push(`Phone: ${phone}`)
+  }
+
+  const notes = String(task?.notes || "").trim()
+
+  if (notes) {
+    lines.push(`Note: ${notes}`)
+  }
+
+  return lines.join("\n")
+}
+
 async function sendInitialTaskAssignmentSms(
+  tenantId: number,
   task: any,
   assignedUser: any
 ) {
@@ -366,12 +472,16 @@ async function sendInitialTaskAssignmentSms(
 
   if (!phone) return
 
-  const title = String(task?.title || "Task").trim() || "Task"
-  const due = formatTaskDueTime(task?.end_time)
+  const jobContext = await getTaskSmsJobContext(
+    tenantId,
+    task
+  )
 
-  const body = due
-    ? `Navigator task assigned: ${title}. Due ${due}.`
-    : `Navigator task assigned: ${title}.`
+  const body = buildTaskSmsBody(
+    "Navigator Task Assigned",
+    task,
+    jobContext
+  )
 
   try {
     await sendSMS(phone, body)
@@ -610,6 +720,7 @@ export async function registerTaskRoutes(app: FastifyInstance) {
 
         if (assignedUser) {
           await sendInitialTaskAssignmentSms(
+            tenantId,
             createdTask,
             assignedUser
           )
