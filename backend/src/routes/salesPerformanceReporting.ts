@@ -48,7 +48,20 @@ export async function registerSalesPerformanceReportingRoutes(
       try {
         const query = req.query as {
           tenant?: string
+          range?: "7d" | "30d" | "all"
         }
+
+        const requestedRange =
+          String(query.range || "30d").trim()
+
+        const range:
+          | "7d"
+          | "30d"
+          | "all" =
+          requestedRange === "7d" ||
+          requestedRange === "all"
+            ? requestedRange
+            : "30d"
 
         const tenantSlug =
           String(query.tenant || "").trim()
@@ -280,6 +293,321 @@ export async function registerSalesPerformanceReportingRoutes(
           params
         )
 
+        const operationalParams = [...params]
+
+        let createdDuringPeriodClause = ""
+
+        if (range === "7d") {
+          createdDuringPeriodClause =
+            "and j.created_at >= now() - interval '7 days'"
+        } else if (range === "30d") {
+          createdDuringPeriodClause =
+            "and j.created_at >= now() - interval '30 days'"
+        }
+
+        const createdDuringPeriodResult =
+          await pool.query(
+            `
+              select count(*)::int as records_created
+              from jobs j
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+            `,
+            operationalParams
+          )
+
+        const currentPipelineResult =
+          await pool.query(
+            `
+              select
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                ) as stage,
+                count(*)::int as count
+              from jobs j
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              group by
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                )
+              order by
+                count desc,
+                stage asc
+            `,
+            operationalParams
+          )
+
+        const workMixResult =
+          await pool.query(
+            `
+              select
+                coalesce(
+                  nullif(trim(j.job_type), ''),
+                  'unknown'
+                ) as job_type,
+                count(*)::int as count
+              from jobs j
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+              group by
+                coalesce(
+                  nullif(trim(j.job_type), ''),
+                  'unknown'
+                )
+              order by
+                count desc,
+                job_type asc
+            `,
+            operationalParams
+          )
+
+        const attributionResult =
+          await pool.query(
+            `
+              select
+                coalesce(
+                  nullif(trim(j.lead_source), ''),
+                  'unknown'
+                ) as lead_source,
+
+                coalesce(
+                  nullif(trim(j.lead_source_detail), ''),
+                  'unknown'
+                ) as lead_source_detail,
+
+                coalesce(
+                  nullif(trim(j.marketing_campaign), ''),
+                  'unknown'
+                ) as marketing_campaign,
+
+                coalesce(
+                  nullif(trim(j.carrier), ''),
+                  'unknown'
+                ) as carrier,
+
+                count(*)::int as count
+
+              from jobs j
+
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+
+              group by
+                coalesce(
+                  nullif(trim(j.lead_source), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.lead_source_detail), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.marketing_campaign), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.carrier), ''),
+                  'unknown'
+                )
+
+              order by
+                count desc,
+                lead_source asc,
+                lead_source_detail asc,
+                marketing_campaign asc,
+                carrier asc
+            `,
+            operationalParams
+          )
+
+        const stageAgingResult =
+          await pool.query(
+            `
+              select
+                j.id as navigator_job_id,
+
+                coalesce(
+                  nullif(trim(c.full_name), ''),
+                  'Job ' || j.id::text
+                ) as job_label,
+
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                ) as current_stage,
+
+                j.current_stage_entered_at,
+
+                case
+                  when j.current_stage_entered_at is null
+                    then null
+                  else greatest(
+                    0,
+                    floor(
+                      extract(
+                        epoch from (
+                          now() -
+                          j.current_stage_entered_at
+                        )
+                      ) / 86400
+                    )
+                  )::int
+                end as days_in_current_stage,
+
+                nullif(
+                  trim(j.job_type),
+                  ''
+                ) as job_type,
+
+                nullif(
+                  trim(j.lead_source),
+                  ''
+                ) as lead_source,
+
+                nullif(
+                  trim(j.lead_source_detail),
+                  ''
+                ) as lead_source_detail,
+
+                nullif(
+                  trim(j.marketing_campaign),
+                  ''
+                ) as marketing_campaign,
+
+                nullif(
+                  trim(j.carrier),
+                  ''
+                ) as carrier
+
+              from jobs j
+
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+
+              and j.current_stage_entered_at is not null
+
+              and lower(
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                )
+              ) not in (
+                'archived',
+                'disqualified',
+                'paid'
+              )
+
+              order by
+                days_in_current_stage desc,
+                j.current_stage_entered_at asc,
+                j.id asc
+            `,
+            operationalParams
+          )
+
+        const createdDuringPeriod =
+          Number(
+            createdDuringPeriodResult
+              .rows[0]
+              ?.records_created || 0
+          )
+
+        const currentPipeline =
+          currentPipelineResult.rows.map(
+            (row) => ({
+              stage: row.stage,
+              count: Number(row.count || 0)
+            })
+          )
+
+        const workMix =
+          workMixResult.rows.map(
+            (row) => ({
+              job_type: row.job_type,
+              count: Number(row.count || 0)
+            })
+          )
+
+        const attribution =
+          attributionResult.rows.map(
+            (row) => ({
+              lead_source: row.lead_source,
+              lead_source_detail:
+                row.lead_source_detail,
+              marketing_campaign:
+                row.marketing_campaign,
+              carrier: row.carrier,
+              count: Number(row.count || 0)
+            })
+          )
+
+        const stageAging =
+          stageAgingResult.rows.map(
+            (row) => ({
+              navigator_job_id:
+                Number(row.navigator_job_id),
+
+              job_label:
+                row.job_label,
+
+              current_stage:
+                row.current_stage,
+
+              current_stage_entered_at:
+                row.current_stage_entered_at,
+
+              days_in_current_stage:
+                row.days_in_current_stage === null
+                  ? null
+                  : Number(
+                      row.days_in_current_stage
+                    ),
+
+              job_type:
+                row.job_type,
+
+              lead_source:
+                row.lead_source,
+
+              lead_source_detail:
+                row.lead_source_detail,
+
+              marketing_campaign:
+                row.marketing_campaign,
+
+              carrier:
+                row.carrier
+            })
+          )
+
         const summary =
           funnelResult.rows[0] || {
             opportunities: 0,
@@ -373,6 +701,64 @@ export async function registerSalesPerformanceReportingRoutes(
               "preserved",
             ems_tarp_signatures:
               "not_counted_as_sales"
+          },
+
+          operational_summary: {
+            semantics: {
+              selected_range: range,
+              selected_period_population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              current_pipeline:
+                "current_stage_snapshot_not_period_stage_transitions",
+              current_stage_aging:
+                "derived_only_from_current_stage_entered_at",
+              unknown_stage_since:
+                "preserved_as_unknown",
+              historical_cycle_time:
+                "not_claimed",
+              financial_interpretation:
+                "not_claimed"
+            },
+
+            created_during_period: {
+              count: createdDuringPeriod
+            },
+
+            current_pipeline: {
+              by_stage: currentPipeline
+            },
+
+            work_mix: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              by_job_type: workMix
+            },
+
+            attribution: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              dimensions_preserved_independently: [
+                "lead_source",
+                "lead_source_detail",
+                "marketing_campaign",
+                "carrier"
+              ],
+              combinations: attribution
+            },
+
+            current_stage_aging: {
+              authority:
+                "current_stage_entered_at",
+              interpretation:
+                "factual_age_not_automatic_bottleneck",
+              jobs: stageAging
+            }
           },
 
           funnel: {
