@@ -1143,6 +1143,16 @@ export default function TasksPage() {
                     }
                   : normalPresentation
 
+                const overdueDays = isOverdue
+                  ? Math.max(
+                      1,
+                      Math.floor(
+                        (Date.now() - task.end.getTime()) /
+                          86400000
+                      )
+                    )
+                  : null
+
                 const isSelected =
                   selectedTask?.id === task.id
 
@@ -1198,6 +1208,19 @@ export default function TasksPage() {
                         }}
                       >
                         Assigned to {task.assigned_user_name}
+                      </div>
+                    )}
+
+                    {overdueDays !== null && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          marginTop: 3,
+                          fontWeight: 800,
+                        }}
+                      >
+                        Overdue · {overdueDays}{" "}
+                        {overdueDays === 1 ? "day" : "days"}
                       </div>
                     )}
 

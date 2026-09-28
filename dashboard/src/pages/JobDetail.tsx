@@ -32,6 +32,25 @@ function stageDisplayLabel(stage: string) {
     : stage
 }
 
+function currentStageAgeDays(value: unknown) {
+  if (!value) return null
+
+  const enteredAt = new Date(String(value))
+  const enteredAtMs = enteredAt.getTime()
+
+  if (!Number.isFinite(enteredAtMs)) {
+    return null
+  }
+
+  return Math.max(
+    0,
+    Math.floor(
+      (Date.now() - enteredAtMs) /
+        86400000
+    )
+  )
+}
+
 const ACTUAL_ASSISTANT_STAGES = [
   { value: "demo_requested", label: "Demo Requested" },
   { value: "prospect", label: "Prospect" },
@@ -1925,6 +1944,20 @@ export default function JobDetail() {
                   <p><strong>Source Detail:</strong> {job.lead_source_detail || "—"}</p>
                   <p><strong>Job Type:</strong> {job.job_type || "—"}</p>
                   <p><strong>Current Stage:</strong> {job.stage || "lead"}</p>
+                  <p>
+                    <strong>Stage Since:</strong>{" "}
+                    {(() => {
+                      const days = currentStageAgeDays(
+                        job.current_stage_entered_at
+                      )
+
+                      if (days === null) {
+                        return "UNKNOWN"
+                      }
+
+                      return `${days} ${days === 1 ? "day" : "days"}`
+                    })()}
+                  </p>
                 </div>
 
                 <div>

@@ -26,6 +26,31 @@ type AttributionRow = CountRow & {
   carrier: string
 }
 
+type OutcomeRow = CountRow & {
+  current_stage: string
+}
+
+type InsurancePerformanceRow = CountRow & {
+  carrier: string
+  tpa_or_source_detail: string
+  job_type: string
+  current_stage: string
+}
+
+type SupportingJob = {
+  navigator_job_id: number
+  job_label: string
+  created_at: string
+  current_stage: string
+  job_type: string | null
+  lead_source: string | null
+  lead_source_detail: string | null
+  marketing_campaign: string | null
+  carrier: string | null
+  current_stage_entered_at: string | null
+  days_in_current_stage: number | null
+}
+
 type AgingJob = {
   navigator_job_id: number
   job_label: string
@@ -66,6 +91,22 @@ type SalesPerformanceResponse = {
       population?: string
       dimensions_preserved_independently?: string[]
       combinations?: AttributionRow[]
+    }
+    period_outcomes?: {
+      population?: string
+      interpretation?: string
+      by_current_stage?: OutcomeRow[]
+    }
+    insurance_performance?: {
+      population?: string
+      dimensions_preserved_independently?: string[]
+      tpa_semantics?: string
+      rows?: InsurancePerformanceRow[]
+    }
+    supporting_jobs?: {
+      population?: string
+      drill_down?: string
+      jobs?: SupportingJob[]
     }
     current_stage_aging?: {
       authority?: string
@@ -144,6 +185,15 @@ export default function ReportsPage() {
 
   const attribution =
     summary?.attribution?.combinations || []
+
+  const outcomes =
+    summary?.period_outcomes?.by_current_stage || []
+
+  const insurance =
+    summary?.insurance_performance?.rows || []
+
+  const supportingJobs =
+    summary?.supporting_jobs?.jobs || []
 
   const aging =
     summary?.current_stage_aging?.jobs || []
@@ -364,6 +414,67 @@ export default function ReportsPage() {
             )}
           </section>
 
+          <div style={twoColumnGrid}>
+            <section style={card}>
+              <SectionHeading
+                title="What Became Of The Work?"
+                subtitle="Current outcome snapshot for work in the selected population. This does not claim when a stage transition occurred."
+              />
+
+              <SimpleRows
+                rows={outcomes.map((row) => ({
+                  label: humanize(row.current_stage),
+                  value: Number(row.count || 0)
+                }))}
+                empty="No outcome data for this period."
+              />
+            </section>
+
+            <section style={card}>
+              <SectionHeading
+                title="Insurance / Assignment Performance"
+                subtitle="Carrier, TPA/source detail, job type, and current stage remain separate dimensions."
+              />
+
+              {insurance.length === 0 ? (
+                <p style={muted}>
+                  No insurance-attributed work recorded for this period.
+                </p>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <div style={insuranceTable}>
+                    <strong>Carrier</strong>
+                    <strong>TPA / Source</strong>
+                    <strong>Job Type</strong>
+                    <strong>Stage</strong>
+                    <strong style={number}>Count</strong>
+
+                    {insurance.map((row, index) => (
+                      <div
+                        key={[
+                          row.carrier,
+                          row.tpa_or_source_detail,
+                          row.job_type,
+                          row.current_stage,
+                          index
+                        ].join("|")}
+                        style={{ display: "contents" }}
+                      >
+                        <span>{humanize(row.carrier)}</span>
+                        <span>{humanize(row.tpa_or_source_detail)}</span>
+                        <span>{humanize(row.job_type)}</span>
+                        <span>{humanize(row.current_stage)}</span>
+                        <strong style={number}>
+                          {Number(row.count || 0)}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+
           <section style={card}>
             <SectionHeading
               title="Stage Age / Attention"
@@ -393,7 +504,12 @@ export default function ReportsPage() {
                     style={agingRow}
                   >
                     <div>
-                      <strong>{job.job_label}</strong>
+                      <a
+                        href={`/job/${job.navigator_job_id}`}
+                        style={jobLink}
+                      >
+                        {job.job_label}
+                      </a>
                       <div style={smallMuted}>
                         Job #{job.navigator_job_id}
                       </div>
@@ -420,6 +536,54 @@ export default function ReportsPage() {
                     </strong>
                   </div>
                 ))}
+              </div>
+            )}
+          </section>
+
+          <section style={card}>
+            <SectionHeading
+              title="Supporting Jobs"
+              subtitle="The underlying Navigator jobs for the selected period. Open any job for full operational detail."
+            />
+
+            {supportingJobs.length === 0 ? (
+              <p style={muted}>No supporting jobs for this period.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <div style={supportingJobsTable}>
+                  <strong>Job</strong>
+                  <strong>Type</strong>
+                  <strong>Source / TPA</strong>
+                  <strong>Carrier</strong>
+                  <strong>Stage</strong>
+                  <strong style={number}>Days</strong>
+
+                  {supportingJobs.map((job) => (
+                    <div
+                      key={job.navigator_job_id}
+                      style={{ display: "contents" }}
+                    >
+                      <a
+                        href={`/job/${job.navigator_job_id}`}
+                        style={jobLink}
+                      >
+                        {job.job_label}
+                      </a>
+                      <span>{humanizeNullable(job.job_type)}</span>
+                      <span>
+                        {humanizeNullable(
+                          job.lead_source_detail ||
+                            job.lead_source
+                        )}
+                      </span>
+                      <span>{humanizeNullable(job.carrier)}</span>
+                      <span>{humanize(job.current_stage)}</span>
+                      <strong style={number}>
+                        {job.days_in_current_stage ?? "Unknown"}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
@@ -620,6 +784,30 @@ const metricValue = {
   lineHeight: 1.1,
   fontWeight: 800,
   margin: "8px 0"
+} as const
+
+const insuranceTable = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(140px, 1.2fr) minmax(140px, 1.2fr) minmax(130px, 1fr) minmax(120px, 1fr) 70px",
+  gap: "10px 16px",
+  alignItems: "center",
+  minWidth: "760px"
+} as const
+
+const supportingJobsTable = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(120px, 1fr) 70px",
+  gap: "10px 16px",
+  alignItems: "center",
+  minWidth: "900px"
+} as const
+
+const jobLink = {
+  color: "#a9cbff",
+  fontWeight: 700,
+  textDecoration: "none"
 } as const
 
 const simpleRow = {

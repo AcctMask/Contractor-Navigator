@@ -443,6 +443,184 @@ export async function registerSalesPerformanceReportingRoutes(
             operationalParams
           )
 
+        const periodOutcomeResult =
+          await pool.query(
+            `
+              select
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                ) as current_stage,
+                count(*)::int as count
+              from jobs j
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+              group by
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                )
+              order by
+                count desc,
+                current_stage asc
+            `,
+            operationalParams
+          )
+
+        const insurancePerformanceResult =
+          await pool.query(
+            `
+              select
+                coalesce(
+                  nullif(trim(j.carrier), ''),
+                  'unknown'
+                ) as carrier,
+
+                coalesce(
+                  nullif(trim(j.lead_source_detail), ''),
+                  'unknown'
+                ) as tpa_or_source_detail,
+
+                coalesce(
+                  nullif(trim(j.job_type), ''),
+                  'unknown'
+                ) as job_type,
+
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                ) as current_stage,
+
+                count(*)::int as count
+
+              from jobs j
+
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+
+              and (
+                nullif(trim(j.carrier), '') is not null
+                or lower(
+                  coalesce(
+                    nullif(trim(j.lead_source), ''),
+                    ''
+                  )
+                ) in (
+                  'insurance',
+                  'insurance assignment',
+                  'insurance claim',
+                  'claims'
+                )
+              )
+
+              group by
+                coalesce(
+                  nullif(trim(j.carrier), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.lead_source_detail), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.job_type), ''),
+                  'unknown'
+                ),
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                )
+
+              order by
+                count desc,
+                carrier asc,
+                tpa_or_source_detail asc,
+                job_type asc,
+                current_stage asc
+            `,
+            operationalParams
+          )
+
+        const supportingJobsResult =
+          await pool.query(
+            `
+              select
+                j.id as navigator_job_id,
+
+                coalesce(
+                  nullif(trim(c.full_name), ''),
+                  'Job ' || j.id::text
+                ) as job_label,
+
+                j.created_at,
+
+                coalesce(
+                  nullif(trim(j.stage), ''),
+                  'unknown'
+                ) as current_stage,
+
+                nullif(trim(j.job_type), '')
+                  as job_type,
+
+                nullif(trim(j.lead_source), '')
+                  as lead_source,
+
+                nullif(trim(j.lead_source_detail), '')
+                  as lead_source_detail,
+
+                nullif(trim(j.marketing_campaign), '')
+                  as marketing_campaign,
+
+                nullif(trim(j.carrier), '')
+                  as carrier,
+
+                j.current_stage_entered_at,
+
+                case
+                  when j.current_stage_entered_at is null
+                    then null
+                  else greatest(
+                    0,
+                    floor(
+                      extract(
+                        epoch from (
+                          now() -
+                          j.current_stage_entered_at
+                        )
+                      ) / 86400
+                    )
+                  )::int
+                end as days_in_current_stage
+
+              from jobs j
+
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+
+              order by
+                j.created_at desc,
+                j.id desc
+            `,
+            operationalParams
+          )
+
         const stageAgingResult =
           await pool.query(
             `
@@ -566,6 +744,50 @@ export async function registerSalesPerformanceReportingRoutes(
                 row.marketing_campaign,
               carrier: row.carrier,
               count: Number(row.count || 0)
+            })
+          )
+
+        const periodOutcomes =
+          periodOutcomeResult.rows.map(
+            (row) => ({
+              current_stage: row.current_stage,
+              count: Number(row.count || 0)
+            })
+          )
+
+        const insurancePerformance =
+          insurancePerformanceResult.rows.map(
+            (row) => ({
+              carrier: row.carrier,
+              tpa_or_source_detail:
+                row.tpa_or_source_detail,
+              job_type: row.job_type,
+              current_stage: row.current_stage,
+              count: Number(row.count || 0)
+            })
+          )
+
+        const supportingJobs =
+          supportingJobsResult.rows.map(
+            (row) => ({
+              navigator_job_id:
+                Number(row.navigator_job_id),
+              job_label: row.job_label,
+              created_at: row.created_at,
+              current_stage: row.current_stage,
+              job_type: row.job_type,
+              lead_source: row.lead_source,
+              lead_source_detail:
+                row.lead_source_detail,
+              marketing_campaign:
+                row.marketing_campaign,
+              carrier: row.carrier,
+              current_stage_entered_at:
+                row.current_stage_entered_at,
+              days_in_current_stage:
+                row.days_in_current_stage === null
+                  ? null
+                  : Number(row.days_in_current_stage)
             })
           )
 
@@ -750,6 +972,42 @@ export async function registerSalesPerformanceReportingRoutes(
                 "carrier"
               ],
               combinations: attribution
+            },
+
+            period_outcomes: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              interpretation:
+                "current_stage_of_selected_population_not_historical_transition",
+              by_current_stage: periodOutcomes
+            },
+
+            insurance_performance: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              dimensions_preserved_independently: [
+                "carrier",
+                "tpa_or_source_detail",
+                "job_type",
+                "current_stage"
+              ],
+              tpa_semantics:
+                "lead_source_detail_when_present_not_carrier",
+              rows: insurancePerformance
+            },
+
+            supporting_jobs: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              drill_down:
+                "/job/:navigator_job_id",
+              jobs: supportingJobs
             },
 
             current_stage_aging: {
