@@ -321,6 +321,32 @@ export async function registerSalesPerformanceReportingRoutes(
             operationalParams
           )
 
+        const buyingSignalResult =
+          await pool.query(
+            `
+              select count(*)::int as jobs_with_buying_signal
+              from jobs j
+
+              left join customers c
+                on c.id = j.customer_id
+               and c.tenant_id = j.tenant_id
+
+              where 1 = 1
+              ${tenantClause}
+              ${businessPopulationClause}
+              ${createdDuringPeriodClause}
+
+              and exists (
+                select 1
+                from timeline_events te
+                where te.tenant_id = j.tenant_id
+                  and te.job_id = j.id
+                  and te.kind = 'buying_signal_detected'
+              )
+            `,
+            operationalParams
+          )
+
         const currentPipelineResult =
           await pool.query(
             `
@@ -982,6 +1008,21 @@ export async function registerSalesPerformanceReportingRoutes(
               interpretation:
                 "current_stage_of_selected_population_not_historical_transition",
               by_current_stage: periodOutcomes
+            },
+
+            buying_signals: {
+              authority:
+                "timeline_events.kind=buying_signal_detected",
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              interpretation:
+                "jobs_with_at_least_one_durable_navigator_buying_signal",
+              jobs_with_buying_signal: Number(
+                buyingSignalResult.rows[0]
+                  ?.jobs_with_buying_signal || 0
+              )
             },
 
             insurance_performance: {

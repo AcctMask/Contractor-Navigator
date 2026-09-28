@@ -88,6 +88,12 @@ type SalesPerformanceResponse = {
       dimensions_preserved_independently?: string[]
       combinations?: AttributionRow[]
     }
+    buying_signals?: {
+      authority?: string
+      population?: string
+      interpretation?: string
+      jobs_with_buying_signal?: number
+    }
     insurance_performance?: {
       population?: string
       dimensions_preserved_independently?: string[]
@@ -175,9 +181,6 @@ export default function ReportsPage() {
 
   const workMix =
     summary?.work_mix?.by_job_type || []
-
-  const attribution =
-    summary?.attribution?.combinations || []
 
   const insurance =
     summary?.insurance_performance?.rows || []
@@ -273,92 +276,6 @@ export default function ReportsPage() {
     })
   }, [pipeline])
 
-  const sourceWorkSummary = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        source: string
-        count: number
-        details: Set<string>
-        workTypes: Map<string, number>
-      }
-    >()
-
-    for (const row of attribution) {
-      const rawSource =
-        cleanValue(row.lead_source) || "Unknown"
-
-      const sourceKey = rawSource.toLowerCase()
-
-      const current =
-        grouped.get(sourceKey) || {
-          source: canonicalDisplayValue(rawSource),
-          count: 0,
-          details: new Set<string>(),
-          workTypes: new Map<string, number>()
-        }
-
-      current.count += Number(row.count || 0)
-
-      const detail =
-        cleanValue(row.lead_source_detail)
-
-      if (
-        detail &&
-        detail.toLowerCase() !== "unknown"
-      ) {
-        current.details.add(
-          canonicalDisplayValue(detail)
-        )
-      }
-
-      grouped.set(sourceKey, current)
-    }
-
-    for (const job of supportingJobs) {
-      const rawSource =
-        cleanValue(job.lead_source) || "Unknown"
-
-      const sourceKey = rawSource.toLowerCase()
-      const current = grouped.get(sourceKey)
-
-      if (!current) continue
-
-      const rawType =
-        cleanValue(job.job_type) || "Unknown"
-
-      const typeKey = rawType.toLowerCase()
-      current.workTypes.set(
-        typeKey,
-        (current.workTypes.get(typeKey) || 0) + 1
-      )
-    }
-
-    return Array.from(grouped.values())
-      .map((row) => ({
-        source: row.source,
-        count: row.count,
-        details: Array.from(row.details).sort(),
-        workTypes: Array.from(
-          row.workTypes.entries()
-        )
-          .map(([key, count]) => ({
-            label: canonicalDisplayValue(key),
-            count
-          }))
-          .sort(
-            (a, b) =>
-              b.count - a.count ||
-              a.label.localeCompare(b.label)
-          )
-      }))
-      .sort(
-        (a, b) =>
-          b.count - a.count ||
-          a.source.localeCompare(b.source)
-      )
-  }, [attribution, supportingJobs])
-
   const insuranceByCarrier = useMemo(() => {
     const grouped = new Map<
       string,
@@ -413,6 +330,12 @@ export default function ReportsPage() {
         a.carrier.localeCompare(b.carrier)
     )
   }, [insurance])
+
+  const buyingSignals =
+    Number(
+      summary?.buying_signals
+        ?.jobs_with_buying_signal || 0
+    )
 
   const actualAssistantJobs = useMemo(() => {
     return supportingJobs.filter((job) =>
@@ -600,53 +523,6 @@ export default function ReportsPage() {
             </section>
           </div>
 
-          <section style={card}>
-            <SectionHeading
-              title="Who Is Sending The Work — And What Are They Sending?"
-              subtitle="Lead source remains distinct from source detail. Work type is shown beneath each source where the selected-period job evidence supports it."
-            />
-
-            {sourceWorkSummary.length === 0 ? (
-              <p style={muted}>No attribution data yet.</p>
-            ) : (
-              <div>
-                {sourceWorkSummary.map((row) => (
-                  <div
-                    key={row.source.toLowerCase()}
-                    style={sourceDetailRow}
-                  >
-                    <div>
-                      <strong>{row.source}</strong>
-
-                      {row.details.length > 0 && (
-                        <div style={smallMuted}>
-                          Source detail:{" "}
-                          {row.details.join(" • ")}
-                        </div>
-                      )}
-
-                      {row.workTypes.length > 0 && (
-                        <div style={workTypeWrap}>
-                          {row.workTypes.map((type) => (
-                            <span
-                              key={type.label}
-                              style={workTypePill}
-                            >
-                              {type.label} · {type.count}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <strong style={number}>
-                      {row.count}
-                    </strong>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
 
           <section style={card}>
             <SectionHeading
@@ -695,43 +571,47 @@ export default function ReportsPage() {
           <section style={card}>
             <SectionHeading
               title="Actual Assistant Performance"
-              subtitle="Navigator operational records with explicit Actual Assistant evidence only. Ambiguous attribution is not inferred."
+              subtitle="Navigator-native operational evidence only. Job attribution requires explicit Actual Assistant evidence; Buying Signals use Navigator's durable buying_signal_detected authority."
             />
 
-            {actualAssistantJobs.length === 0 ? (
-              <p style={muted}>
-                No explicitly attributed Actual Assistant work is recorded in this selected period.
-              </p>
-            ) : (
-              <>
-                <div style={aaMetricRow}>
-                  <div style={compactMetric}>
-                    <span style={smallMuted}>
-                      Explicitly attributed work
-                    </span>
-                    <strong style={compactMetricValue}>
-                      {actualAssistantJobs.length}
-                    </strong>
-                  </div>
+            <div style={aaMetricRow}>
+              <div style={compactMetric}>
+                <span style={smallMuted}>
+                  Explicitly attributed work
+                </span>
+                <strong style={compactMetricValue}>
+                  {actualAssistantJobs.length}
+                </strong>
+              </div>
 
-                  <div style={compactBreakdown}>
-                    <strong>By Work Type</strong>
-                    <SimpleRows
-                      rows={actualAssistantByType}
-                      empty="No recorded work types."
-                    />
-                  </div>
+              <div style={compactMetric}>
+                <span style={smallMuted}>
+                  Buying Signals
+                </span>
+                <strong style={compactMetricValue}>
+                  {buyingSignals}
+                </strong>
+                <span style={smallMuted}>
+                  Jobs with at least one durable Navigator buying signal
+                </span>
+              </div>
 
-                  <div style={compactBreakdown}>
-                    <strong>Current Stage</strong>
-                    <SimpleRows
-                      rows={actualAssistantByStage}
-                      empty="No recorded stages."
-                    />
-                  </div>
-                </div>
-              </>
-            )}
+              <div style={compactBreakdown}>
+                <strong>By Work Type</strong>
+                <SimpleRows
+                  rows={actualAssistantByType}
+                  empty="No explicitly attributed AA work types."
+                />
+              </div>
+
+              <div style={compactBreakdown}>
+                <strong>Current Stage</strong>
+                <SimpleRows
+                  rows={actualAssistantByStage}
+                  empty="No explicitly attributed AA stages."
+                />
+              </div>
+            </div>
           </section>
 
           <section style={card}>
@@ -1193,37 +1073,6 @@ const simpleRow = {
   padding: "10px 0",
   borderBottom:
     "1px solid rgba(148, 163, 184, 0.16)"
-} as const
-
-const sourceRow = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "18px",
-  alignItems: "flex-start",
-  padding: "12px 0",
-  borderBottom:
-    "1px solid rgba(148, 163, 184, 0.16)"
-} as const
-
-const sourceDetailRow = {
-  ...sourceRow,
-  padding: "14px 0"
-} as const
-
-const workTypeWrap = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "7px",
-  marginTop: "8px"
-} as const
-
-const workTypePill = {
-  display: "inline-block",
-  padding: "4px 8px",
-  borderRadius: "999px",
-  background: "rgba(59, 130, 246, 0.14)",
-  border: "1px solid rgba(96, 165, 250, 0.24)",
-  fontSize: "12px"
 } as const
 
 const carrierGrid = {
