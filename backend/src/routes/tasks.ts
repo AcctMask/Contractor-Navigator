@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getCurrentUserFromToken } from "../services/authService"
+import { sendSMS } from "../services/twilioService"
 
 function getBearerToken(request: any) {
   const auth = String(request.headers.authorization || "")
@@ -108,6 +109,282 @@ async function getTenantIdBySlug(slug: string): Promise<number> {
   }
 
   return Number(result.rows[0].id)
+}
+
+
+const TASK_SMS_ACTION_KEY = "task_sms_reminder"
+
+async function cancelPendingTaskSmsActions(
+  tenantId: number,
+  taskId: number
+) {
+  await pool.query(
+    `
+    update scheduled_actions
+    set status = 'cancelled',
+        updated_at = now()
+    where tenant_id = $1
+      and action_key = $2
+      and status = 'pending'
+      and payload->>'task_id' = $3
+    `,
+    [tenantId, TASK_SMS_ACTION_KEY, String(taskId)]
+  )
+}
+
+async function scheduleTaskSmsAction(
+  tenantId: number,
+  taskId: number,
+  reminderType: "due_24h" | "overdue",
+  runAt: Date
+) {
+  await pool.query(
+    `
+    insert into scheduled_actions (
+      tenant_id,
+      job_id,
+      action_key,
+      run_at,
+      status,
+      payload,
+      created_at,
+      updated_at
+    )
+    values (
+      $1,
+      null,
+      $2,
+      $3,
+      'pending',
+      $4::jsonb,
+      now(),
+      now()
+    )
+    `,
+    [
+      tenantId,
+      TASK_SMS_ACTION_KEY,
+      runAt.toISOString(),
+      JSON.stringify({
+        task_id: taskId,
+        reminder_type: reminderType,
+      }),
+    ]
+  )
+}
+
+function easternLocalDateTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0
+) {
+  const desiredAsUtc = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute,
+    0,
+    0
+  )
+
+  let candidate = desiredAsUtc
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(candidate))
+
+    const get = (type: string) =>
+      Number(
+        parts.find((part) => part.type === type)?.value || 0
+      )
+
+    const representedAsUtc = Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day"),
+      get("hour"),
+      get("minute"),
+      0,
+      0
+    )
+
+    const adjustment = desiredAsUtc - representedAsUtc
+
+    if (adjustment === 0) {
+      return new Date(candidate)
+    }
+
+    candidate += adjustment
+  }
+
+  return new Date(candidate)
+}
+
+function nextApproxNineAmEastern(endTime: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(endTime)
+
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value || 0)
+
+  const localNoon = new Date(
+    Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day") + 1,
+      12,
+      0,
+      0,
+      0
+    )
+  )
+
+  const nextDayParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(localNoon)
+
+  const nextGet = (type: string) =>
+    Number(
+      nextDayParts.find((part) => part.type === type)?.value || 0
+    )
+
+  return easternLocalDateTimeToUtc(
+    nextGet("year"),
+    nextGet("month"),
+    nextGet("day"),
+    9
+  )
+}
+
+async function rebuildTaskSmsLifecycle(
+  tenantId: number,
+  taskId: number
+) {
+  await cancelPendingTaskSmsActions(tenantId, taskId)
+
+  const result = await pool.query(
+    `
+    select
+      id,
+      assigned_user_id,
+      completed_at,
+      end_time
+    from task_items
+    where tenant_id = $1
+      and id = $2
+    limit 1
+    `,
+    [tenantId, taskId]
+  )
+
+  if (!result.rowCount) return
+
+  const task = result.rows[0]
+
+  if (
+    task.completed_at ||
+    !task.assigned_user_id ||
+    !task.end_time
+  ) {
+    return
+  }
+
+  const endTime = new Date(task.end_time)
+
+  if (!Number.isFinite(endTime.getTime())) return
+
+  const now = Date.now()
+  const due24 = new Date(endTime.getTime() - 24 * 60 * 60 * 1000)
+
+  if (due24.getTime() > now) {
+    await scheduleTaskSmsAction(
+      tenantId,
+      taskId,
+      "due_24h",
+      due24
+    )
+  }
+
+  const overdueRunAt = nextApproxNineAmEastern(endTime)
+
+  if (overdueRunAt.getTime() > now) {
+    await scheduleTaskSmsAction(
+      tenantId,
+      taskId,
+      "overdue",
+      overdueRunAt
+    )
+  } else if (endTime.getTime() < now) {
+    await scheduleTaskSmsAction(
+      tenantId,
+      taskId,
+      "overdue",
+      new Date(now)
+    )
+  }
+}
+
+function formatTaskDueTime(value: any) {
+  if (!value) return ""
+
+  const date = new Date(value)
+
+  if (!Number.isFinite(date.getTime())) return ""
+
+  return date.toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  })
+}
+
+async function sendInitialTaskAssignmentSms(
+  task: any,
+  assignedUser: any
+) {
+  const phone = String(assignedUser?.mobile_phone || "").trim()
+
+  if (!phone) return
+
+  const title = String(task?.title || "Task").trim() || "Task"
+  const due = formatTaskDueTime(task?.end_time)
+
+  const body = due
+    ? `Navigator task assigned: ${title}. Due ${due}.`
+    : `Navigator task assigned: ${title}.`
+
+  try {
+    await sendSMS(phone, body)
+  } catch (error) {
+    console.error("[task-sms] assignment SMS failed", {
+      taskId: task?.id,
+      assignedUserId: assignedUser?.id,
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error),
+    })
+  }
 }
 
 export async function registerTaskRoutes(app: FastifyInstance) {
@@ -323,6 +600,22 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         )
       }
 
+      const createdTask = result.rows[0]
+
+      if (createdTask?.id) {
+        await rebuildTaskSmsLifecycle(
+          tenantId,
+          Number(createdTask.id)
+        )
+
+        if (assignedUser) {
+          await sendInitialTaskAssignmentSms(
+            createdTask,
+            assignedUser
+          )
+        }
+      }
+
       return {
         ok: true,
         event: result.rows[0],
@@ -517,6 +810,11 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         )
       }
 
+      await rebuildTaskSmsLifecycle(
+        tenantId,
+        Number(eventId)
+      )
+
       return { ok: true, event: result.rows[0] }
     } catch (err: any) {
       reply.code(400)
@@ -632,6 +930,11 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         )
       }
 
+      await cancelPendingTaskSmsActions(
+        tenantId,
+        Number(eventId)
+      )
+
       return {
         ok: true,
         event: completedTask,
@@ -711,6 +1014,11 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           ]
         )
       }
+
+      await cancelPendingTaskSmsActions(
+        tenantId,
+        Number(eventId)
+      )
 
       return { ok: true, deleted_event_id: Number(eventId) }
     } catch (err: any) {

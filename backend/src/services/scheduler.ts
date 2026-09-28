@@ -16,6 +16,7 @@ import {
   createDocumentPackageByTenantSlug,
   sendDocumentPackage,
 } from "./documentPipelineService";
+import { sendSMS } from "./twilioService"
 
 type ScheduledActionRow = {
   id: number;
@@ -920,7 +921,282 @@ async function runG2gEstimateNeededReminder(
   )
 }
 
+
+function easternLocalDateTimeToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0
+) {
+  const desiredAsUtc = Date.UTC(
+    year,
+    month - 1,
+    day,
+    hour,
+    minute,
+    0,
+    0
+  )
+
+  let candidate = desiredAsUtc
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(candidate))
+
+    const get = (type: string) =>
+      Number(
+        parts.find((part) => part.type === type)?.value || 0
+      )
+
+    const representedAsUtc = Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day"),
+      get("hour"),
+      get("minute"),
+      0,
+      0
+    )
+
+    const adjustment = desiredAsUtc - representedAsUtc
+
+    if (adjustment === 0) {
+      return new Date(candidate)
+    }
+
+    candidate += adjustment
+  }
+
+  return new Date(candidate)
+}
+
+function nextEasternNineAmAfter(reference: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(reference)
+
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value || 0)
+
+  const localNoon = new Date(
+    Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day") + 1,
+      12,
+      0,
+      0,
+      0
+    )
+  )
+
+  const nextDayParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(localNoon)
+
+  const nextGet = (type: string) =>
+    Number(
+      nextDayParts.find((part) => part.type === type)?.value || 0
+    )
+
+  return easternLocalDateTimeToUtc(
+    nextGet("year"),
+    nextGet("month"),
+    nextGet("day"),
+    9
+  )
+}
+
+async function scheduleNextTaskOverdueReminder(
+  tenantId: number,
+  taskId: number,
+  reference: Date
+) {
+  const nextRunAt = nextEasternNineAmAfter(reference)
+
+  await pool.query(
+    `
+    insert into scheduled_actions (
+      tenant_id,
+      job_id,
+      action_key,
+      run_at,
+      status,
+      payload,
+      created_at,
+      updated_at
+    )
+    values (
+      $1,
+      null,
+      'task_sms_reminder',
+      $2,
+      'pending',
+      $3::jsonb,
+      now(),
+      now()
+    )
+    `,
+    [
+      tenantId,
+      nextRunAt.toISOString(),
+      JSON.stringify({
+        task_id: taskId,
+        reminder_type: "overdue",
+      }),
+    ]
+  )
+}
+
+async function runTaskSmsReminder(action: ScheduledActionRow) {
+  const payload =
+    typeof action.payload === "string"
+      ? JSON.parse(action.payload || "{}")
+      : action.payload || {}
+
+  const taskId = Number(payload.task_id)
+  const reminderType = String(payload.reminder_type || "")
+
+  if (
+    !Number.isFinite(taskId) ||
+    taskId <= 0 ||
+    !["due_24h", "overdue"].includes(reminderType)
+  ) {
+    return
+  }
+
+  const result = await pool.query(
+    `
+    select
+      ti.id,
+      ti.title,
+      ti.end_time,
+      ti.completed_at,
+      ti.assigned_user_id,
+      au.mobile_phone
+    from task_items ti
+    left join app_users au
+      on au.id = ti.assigned_user_id
+     and au.tenant_id = ti.tenant_id
+     and au.is_active = true
+    where ti.tenant_id = $1
+      and ti.id = $2
+    limit 1
+    `,
+    [action.tenant_id, taskId]
+  )
+
+  if (!result.rowCount) {
+    return
+  }
+
+  const task = result.rows[0]
+
+  if (task.completed_at) {
+    return
+  }
+
+  if (
+    !task.assigned_user_id ||
+    !task.mobile_phone ||
+    !task.end_time
+  ) {
+    return
+  }
+
+  const endTime = new Date(task.end_time)
+
+  if (!Number.isFinite(endTime.getTime())) {
+    return
+  }
+
+  const now = new Date()
+
+  if (reminderType === "due_24h") {
+    const expectedRun =
+      endTime.getTime() - 24 * 60 * 60 * 1000
+
+    const actualRun =
+      new Date(action.run_at).getTime()
+
+    if (
+      !Number.isFinite(actualRun) ||
+      Math.abs(actualRun - expectedRun) > 5 * 60 * 1000
+    ) {
+      return
+    }
+
+    if (now.getTime() >= endTime.getTime()) {
+      return
+    }
+
+    const due = endTime.toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+
+    await sendSMS(
+      String(task.mobile_phone),
+      `Navigator reminder: ${task.title || "Task"} is due ${due}.`
+    )
+
+    return
+  }
+
+  if (now.getTime() <= endTime.getTime()) {
+    return
+  }
+
+  const overdueDays = Math.max(
+    1,
+    Math.floor(
+      (now.getTime() - endTime.getTime()) /
+        (24 * 60 * 60 * 1000)
+    ) + 1
+  )
+
+  await sendSMS(
+    String(task.mobile_phone),
+    `Navigator overdue task: ${
+      task.title || "Task"
+    } is ${overdueDays} day${
+      overdueDays === 1 ? "" : "s"
+    } overdue.`
+  )
+
+  await scheduleNextTaskOverdueReminder(
+    Number(action.tenant_id),
+    taskId,
+    now
+  )
+}
+
 async function runAction(action: ScheduledActionRow) {
+  if (action.action_key === "task_sms_reminder") {
+    await runTaskSmsReminder(action)
+    return
+  }
+
+
   const tenantId = action.tenant_id;
   const jobId = action.job_id;
 
