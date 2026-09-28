@@ -855,45 +855,6 @@ export default function UsersPage() {
             </div>
 
             <div>
-              <div style={{ marginBottom: 16 }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontWeight: 700,
-                    marginBottom: 6,
-                  }}
-                >
-                  Mobile Phone
-                </label>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <input
-                    type="tel"
-                    value={managedMobilePhone}
-                    onChange={(e) =>
-                      setManagedMobilePhone(
-                        e.target.value
-                      )
-                    }
-                    disabled={managing}
-                    placeholder="Mobile phone"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveManagedMobilePhone}
-                    disabled={managing}
-                  >
-                    Save Mobile Phone
-                  </button>
-                </div>
-              </div>
-
               <label style={{ display: "block", marginBottom: "8px", fontWeight: 700 }}>
                 Role
               </label>
@@ -1078,6 +1039,54 @@ export default function UsersPage() {
                 {formatDate(
                   selectedUser.created_at
                 )}
+              </div>
+
+              <div
+                style={{
+                  marginTop: "10px",
+                }}
+              >
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: 700,
+                    marginBottom: 6,
+                  }}
+                >
+                  Mobile Phone
+                </label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <input
+                    type="tel"
+                    value={managedMobilePhone}
+                    onChange={(e) =>
+                      setManagedMobilePhone(
+                        e.target.value
+                      )
+                    }
+                    disabled={managing}
+                    placeholder="Mobile phone"
+                    style={{
+                      ...inputStyle,
+                      maxWidth: "260px",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={saveManagedMobilePhone}
+                    disabled={managing}
+                    style={secondaryButtonStyle}
+                  >
+                    Save Mobile Phone
+                  </button>
+                </div>
               </div>
 
               {selectedUser.is_active ===
