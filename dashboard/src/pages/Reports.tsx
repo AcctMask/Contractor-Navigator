@@ -1,390 +1,697 @@
-import { useEffect, useState } from "react"
-import { useCompanyDna } from "../context/CompanyDnaContext"
+import { useEffect, useMemo, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-type ReportRow = {
-  label: string
+const API_BASE =
+  import.meta.env.VITE_API_BASE ||
+  "https://contractor-navigator.onrender.com"
+
+type Range = "7d" | "30d" | "all"
+
+type CountRow = {
   count: number
 }
 
-type SourceTypeRow = {
-  source: string
-  current_stage: string
+type StageRow = CountRow & {
+  stage: string
+}
+
+type JobTypeRow = CountRow & {
   job_type: string
-  count: number
 }
 
-type ReportData = {
-  ok: boolean
-  range: string
-  by_source: ReportRow[]
-  by_job_type: ReportRow[]
-  by_source_type: SourceTypeRow[]
-  by_stage: ReportRow[]
+type AttributionRow = CountRow & {
+  lead_source: string
+  lead_source_detail: string
+  marketing_campaign: string
+  carrier: string
+}
+
+type AgingJob = {
+  navigator_job_id: number
+  job_label: string
+  current_stage: string
+  current_stage_entered_at: string | null
+  days_in_current_stage: number | null
+  job_type: string | null
+  lead_source: string | null
+  lead_source_detail: string | null
+  marketing_campaign: string | null
+  carrier: string | null
+}
+
+type SalesPerformanceResponse = {
+  ok?: boolean
+  error?: string
+  operational_summary?: {
+    semantics?: {
+      selected_range?: string
+      selected_period_population?: string
+      current_pipeline?: string
+      current_stage_aging?: string
+      unknown_stage_since?: string
+      historical_cycle_time?: string
+      financial_interpretation?: string
+    }
+    created_during_period?: {
+      count?: number
+    }
+    current_pipeline?: {
+      by_stage?: StageRow[]
+    }
+    work_mix?: {
+      population?: string
+      by_job_type?: JobTypeRow[]
+    }
+    attribution?: {
+      population?: string
+      dimensions_preserved_independently?: string[]
+      combinations?: AttributionRow[]
+    }
+    current_stage_aging?: {
+      authority?: string
+      interpretation?: string
+      jobs?: AgingJob[]
+    }
+  }
 }
 
 export default function ReportsPage() {
-  const { workspace } = useCompanyDna()
-  const [range, setRange] = useState("30d")
-  const [data, setData] = useState<ReportData | null>(null)
+  const [range, setRange] = useState<Range>("30d")
+  const [data, setData] =
+    useState<SalesPerformanceResponse | null>(null)
   const [error, setError] = useState("")
-
-  async function loadReports(nextRange = range) {
-    setError("")
-    const res = await fetch(`${API_BASE}/admin/reports/${getTenantSlug()}?range=${nextRange}`)
-    const json = await res.json()
-
-    if (!res.ok || !json.ok) {
-      setError(json?.error || "Failed to load reports")
-      return
-    }
-
-    setData(json)
-  }
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadReports(range)
+    let cancelled = false
+
+    async function load() {
+      setLoading(true)
+      setError("")
+
+      try {
+        const url =
+          `${API_BASE}/reporting/sales-performance.json` +
+          `?tenant=${encodeURIComponent(getTenantSlug())}` +
+          `&range=${encodeURIComponent(range)}`
+
+        const response = await fetch(url)
+        const json =
+          (await response.json()) as SalesPerformanceResponse
+
+        if (!response.ok || json.ok === false) {
+          throw new Error(
+            json.error || "Failed to load business performance"
+          )
+        }
+
+        if (!cancelled) {
+          setData(json)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setData(null)
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load business performance"
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void load()
+
+    return () => {
+      cancelled = true
+    }
   }, [range])
 
-  const stageRows = buildStageRows(
-    data?.by_stage || [],
-    workspace.dashboard.pipeline_cards || []
+  const summary = data?.operational_summary
+
+  const created =
+    Number(summary?.created_during_period?.count || 0)
+
+  const pipeline =
+    summary?.current_pipeline?.by_stage || []
+
+  const workMix =
+    summary?.work_mix?.by_job_type || []
+
+  const attribution =
+    summary?.attribution?.combinations || []
+
+  const aging =
+    summary?.current_stage_aging?.jobs || []
+
+  const activePipelineTotal = useMemo(
+    () =>
+      pipeline.reduce(
+        (sum, row) => sum + Number(row.count || 0),
+        0
+      ),
+    [pipeline]
   )
 
-  const sourceTypeRows = buildSourceTypeRows(data?.by_source_type || [])
+  const sourceSummary = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        source: string
+        count: number
+        details: Set<string>
+      }
+    >()
+
+    for (const row of attribution) {
+      const source =
+        cleanValue(row.lead_source) || "Unknown"
+
+      const current =
+        grouped.get(source) || {
+          source,
+          count: 0,
+          details: new Set<string>()
+        }
+
+      current.count += Number(row.count || 0)
+
+      const detail =
+        cleanValue(row.lead_source_detail)
+
+      if (detail && detail.toLowerCase() !== "unknown") {
+        current.details.add(detail)
+      }
+
+      grouped.set(source, current)
+    }
+
+    return Array.from(grouped.values())
+      .map((row) => ({
+        source: row.source,
+        count: row.count,
+        details: Array.from(row.details)
+      }))
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          a.source.localeCompare(b.source)
+      )
+  }, [attribution])
 
   return (
     <div style={page}>
-      <h1>Reports</h1>
-      <p style={muted}>Track where opportunities come from, what they become, and where they currently sit in the pipeline.</p>
+      <div style={headingRow}>
+        <div>
+          <h1 style={{ marginBottom: 6 }}>
+            How&apos;s Business?
+          </h1>
+          <p style={muted}>
+            Navigator operational performance — work coming in,
+            what kind it is, where it came from, where it sits now,
+            and what may deserve attention.
+          </p>
+        </div>
+      </div>
 
       <div style={buttonRow}>
-        {["7d", "30d", "all"].map((r) => (
+        {(["7d", "30d", "all"] as Range[]).map((value) => (
           <button
-            key={r}
-            onClick={() => setRange(r)}
-            style={range === r ? activeButton : button}
+            key={value}
+            type="button"
+            onClick={() => setRange(value)}
+            style={
+              range === value
+                ? activeButton
+                : button
+            }
           >
-            {r === "7d" ? "Last 7 Days" : r === "30d" ? "Last 30 Days" : "All Time"}
+            {rangeLabel(value)}
           </button>
         ))}
       </div>
 
-      {error && <p style={danger}>{error}</p>}
+      {loading && (
+        <section style={card}>
+          <p style={muted}>
+            Loading business performance…
+          </p>
+        </section>
+      )}
 
-      <div style={reportsLayout}>
-        <SourceTypeCard rows={sourceTypeRows} />
-        <div style={stageSection}>
-          <ReportCard title="Jobs by Stage" rows={stageRows} />
-        </div>
-      </div>
+      {error && (
+        <section style={errorCard}>
+          <strong>Reports could not load.</strong>
+          <div style={{ marginTop: 8 }}>{error}</div>
+        </section>
+      )}
+
+      {!loading && !error && summary && (
+        <>
+          <div style={metricGrid}>
+            <MetricCard
+              label={
+                range === "all"
+                  ? "Recorded Business Work"
+                  : "New Work"
+              }
+              value={created}
+              detail={
+                range === "all"
+                  ? "All available legitimate business-population records"
+                  : `Created ${rangeLabel(range).toLowerCase()}`
+              }
+            />
+
+            <MetricCard
+              label="Current Pipeline"
+              value={activePipelineTotal}
+              detail="Current snapshot — not work that entered a stage during this period"
+            />
+
+            <MetricCard
+              label="Work Types"
+              value={
+                workMix.filter(
+                  (row) => Number(row.count || 0) > 0
+                ).length
+              }
+              detail="Distinct recorded job types in the selected population"
+            />
+
+            <MetricCard
+              label="Needs Attention"
+              value={aging.length}
+              detail="Jobs with authoritative Stage Since data; age alone does not mean a bottleneck"
+            />
+          </div>
+
+          <div style={twoColumnGrid}>
+            <section style={card}>
+              <SectionHeading
+                title="What Work Came In?"
+                subtitle={
+                  range === "all"
+                    ? "All available recorded business work by job type."
+                    : `Jobs created ${rangeLabel(range).toLowerCase()}, grouped by job type.`
+                }
+              />
+
+              <SimpleRows
+                rows={workMix.map((row) => ({
+                  label: humanize(row.job_type),
+                  value: Number(row.count || 0)
+                }))}
+                empty="No recorded work for this period."
+              />
+            </section>
+
+            <section style={card}>
+              <SectionHeading
+                title="Where Is The Work Now?"
+                subtitle="Current pipeline snapshot. These are current stages, not stage entries during the selected period."
+              />
+
+              <SimpleRows
+                rows={pipeline.map((row) => ({
+                  label: humanize(row.stage),
+                  value: Number(row.count || 0)
+                }))}
+                empty="No current pipeline data."
+              />
+            </section>
+          </div>
+
+          <section style={card}>
+            <SectionHeading
+              title="Who Is Sending The Work?"
+              subtitle="Lead source remains distinct from source detail, campaign, and carrier."
+            />
+
+            {sourceSummary.length === 0 ? (
+              <p style={muted}>No attribution data yet.</p>
+            ) : (
+              <div>
+                {sourceSummary.map((row) => (
+                  <div
+                    key={row.source}
+                    style={sourceRow}
+                  >
+                    <div>
+                      <strong>
+                        {humanize(row.source)}
+                      </strong>
+
+                      {row.details.length > 0 && (
+                        <div style={smallMuted}>
+                          {row.details
+                            .map(humanize)
+                            .join(" • ")}
+                        </div>
+                      )}
+                    </div>
+
+                    <strong style={number}>
+                      {row.count}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section style={card}>
+            <SectionHeading
+              title="Stage Age / Attention"
+              subtitle="Uses Navigator's authoritative current Stage Since timestamp. Longer age is a review signal, not automatically a bottleneck."
+            />
+
+            {aging.length === 0 ? (
+              <p style={muted}>
+                No jobs currently have authoritative Stage Since
+                data available for this view.
+              </p>
+            ) : (
+              <div style={agingTable}>
+                <div style={agingHeader}>
+                  <strong>Job</strong>
+                  <strong>Stage</strong>
+                  <strong>Type</strong>
+                  <strong>Source</strong>
+                  <strong style={number}>
+                    Days
+                  </strong>
+                </div>
+
+                {aging.map((job) => (
+                  <div
+                    key={job.navigator_job_id}
+                    style={agingRow}
+                  >
+                    <div>
+                      <strong>{job.job_label}</strong>
+                      <div style={smallMuted}>
+                        Job #{job.navigator_job_id}
+                      </div>
+                    </div>
+
+                    <span>
+                      {humanize(job.current_stage)}
+                    </span>
+
+                    <span>
+                      {humanizeNullable(job.job_type)}
+                    </span>
+
+                    <span>
+                      {humanizeNullable(
+                        job.lead_source_detail ||
+                          job.lead_source
+                      )}
+                    </span>
+
+                    <strong style={number}>
+                      {job.days_in_current_stage ??
+                        "Unknown"}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section style={noteCard}>
+            <strong>Reporting boundary</strong>
+            <p style={{ ...muted, marginBottom: 0 }}>
+              Navigator reports operational truth here.
+              Financial results and profitability remain Financial
+              Operations authority. Historical cycle time is not
+              claimed where authoritative transition history does
+              not exist.
+            </p>
+          </section>
+        </>
+      )}
     </div>
   )
 }
 
-type SourceTypeDisplayRow = {
-  source: string
-  outcomes: Array<{
-    stage: string
-    jobType: string
-    count: number
-  }>
-  count: number
-}
-
-function buildSourceTypeRows(rows: SourceTypeRow[]): SourceTypeDisplayRow[] {
-  const grouped = new Map<string, SourceTypeDisplayRow>()
-
-  for (const row of rows) {
-    const source = String(row.source || "unknown")
-    const currentStage = String(row.current_stage || "unknown")
-    const jobType = String(row.job_type || "unknown")
-    const count = Number(row.count || 0)
-
-    const current = grouped.get(source) || {
-      source,
-      outcomes: [],
-      count: 0,
-    }
-
-    current.outcomes.push({
-      stage: humanizeStage(currentStage),
-      jobType: humanizeReportJobType(jobType),
-      count,
-    })
-
-    current.count += count
-    grouped.set(source, current)
-  }
-
-  for (const row of grouped.values()) {
-    row.outcomes.sort(
-      (a, b) =>
-        b.count - a.count ||
-        a.stage.localeCompare(b.stage) ||
-        a.jobType.localeCompare(b.jobType)
-    )
-  }
-
-  return Array.from(grouped.values()).sort(
-    (a, b) => b.count - a.count || a.source.localeCompare(b.source)
-  )
-}
-
-function SourceTypeCard({ rows }: { rows: SourceTypeDisplayRow[] }) {
-  const total = rows.reduce((sum, row) => sum + row.count, 0)
-
+function MetricCard({
+  label,
+  value,
+  detail
+}: {
+  label: string
+  value: number
+  detail: string
+}) {
   return (
-    <section style={card}>
-      <h2>Source Performance</h2>
-      <p style={muted}>Total opportunities: {total}</p>
-
-      {rows.length === 0 ? (
-        <p style={muted}>No data yet.</p>
-      ) : (
-        <div>
-          <div style={sourceTypeHeader}>
-            <strong>Source</strong>
-            <strong>Current Stage</strong>
-            <strong>Current Job Type</strong>
-            <strong style={{ textAlign: "right" }}>Total</strong>
-          </div>
-
-          {rows.map((row) => (
-            <div key={row.source} style={sourceGroup}>
-              {row.outcomes.map((outcome, index) => (
-                <div
-                  key={`${row.source}-${outcome.stage}-${outcome.jobType}`}
-                  style={sourceTypeRow}
-                >
-                  <span>
-                    {index === 0 ? humanizeReportValue(row.source) : ""}
-                  </span>
-                  <span>{outcome.stage}</span>
-                  <span>{outcome.jobType}</span>
-                  <strong style={{ textAlign: "right" }}>
-                    {outcome.count}
-                  </strong>
-                </div>
-              ))}
-
-              <div style={sourceTotalRow}>
-                <span />
-                <span />
-                <strong>Source Total</strong>
-                <strong style={{ textAlign: "right" }}>{row.count}</strong>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+    <section style={metricCard}>
+      <div style={metricLabel}>{label}</div>
+      <div style={metricValue}>{value}</div>
+      <div style={smallMuted}>{detail}</div>
     </section>
   )
 }
 
-function humanizeReportJobType(value: string) {
-  const normalized = String(value || "unknown").trim()
-
-  if (normalized.toUpperCase() === "VOICE_INTAKE") {
-    return "Unclassified"
-  }
-
-  return humanizeReportValue(normalized)
+function SectionHeading({
+  title,
+  subtitle
+}: {
+  title: string
+  subtitle: string
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <h2 style={{ margin: 0 }}>{title}</h2>
+      <p style={{ ...muted, marginBottom: 0 }}>
+        {subtitle}
+      </p>
+    </div>
+  )
 }
 
-function humanizeReportValue(value: string) {
-  return String(value || "unknown")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function buildStageRows(
-  rows: ReportRow[],
-  pipelineCards: Array<{
+function SimpleRows({
+  rows,
+  empty
+}: {
+  rows: Array<{
     label: string
-    filter_type: "stage" | "stage_any" | "buying_signal"
-    filter_value?: string | null
-    filter_values?: string[]
+    value: number
   }>
-): ReportRow[] {
-  const counts = new Map(
-    rows.map((row) => [
-      String(row.label || "unknown"),
-      Number(row.count || 0),
-    ])
-  )
+  empty: string
+}) {
+  const visible = rows
+    .filter((row) => row.value > 0)
+    .sort(
+      (a, b) =>
+        b.value - a.value ||
+        a.label.localeCompare(b.label)
+    )
 
-  const consumedStages = new Set<string>()
-  const configuredRows: ReportRow[] = []
-
-  for (const card of pipelineCards) {
-    if (card.filter_type === "buying_signal") {
-      continue
-    }
-
-    if (card.filter_type === "stage") {
-      const stage = String(card.filter_value || "").trim()
-      if (!stage) continue
-
-      configuredRows.push({
-        label: card.label || humanizeStage(stage),
-        count: counts.get(stage) || 0,
-      })
-
-      consumedStages.add(stage)
-      continue
-    }
-
-    const stages = (card.filter_values || [])
-      .map((stage) => String(stage || "").trim())
-      .filter(Boolean)
-
-    if (!stages.length) continue
-
-    configuredRows.push({
-      label: card.label || stages.map(humanizeStage).join(" / "),
-      count: stages.reduce(
-        (sum, stage) => sum + (counts.get(stage) || 0),
-        0
-      ),
-    })
-
-    for (const stage of stages) {
-      consumedStages.add(stage)
-    }
+  if (visible.length === 0) {
+    return <p style={muted}>{empty}</p>
   }
 
-  const unexpectedRows = rows
-    .filter((row) => !consumedStages.has(String(row.label || "unknown")))
-    .map((row) => ({
-      label: humanizeStage(String(row.label || "unknown")),
-      count: Number(row.count || 0),
-    }))
-
-  return [...configuredRows, ...unexpectedRows]
-}
-
-function humanizeStage(value: string) {
-  return String(value || "unknown")
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function ReportCard({ title, rows }: { title: string; rows: ReportRow[] }) {
-  const total = rows.reduce((sum, row) => sum + Number(row.count || 0), 0)
-
   return (
-    <section style={card}>
-      <h2>{title}</h2>
-      <p style={muted}>Total: {total}</p>
-
-      {rows.length === 0 ? (
-        <p style={muted}>No data yet.</p>
-      ) : (
-        <div>
-          {rows.map((row) => (
-            <div key={row.label} style={rowStyle}>
-              <span>{row.label || "unknown"}</span>
-              <strong>{row.count}</strong>
-            </div>
-          ))}
+    <div>
+      {visible.map((row) => (
+        <div key={row.label} style={simpleRow}>
+          <span>{row.label}</span>
+          <strong style={number}>
+            {row.value}
+          </strong>
         </div>
-      )}
-    </section>
+      ))}
+    </div>
   )
+}
+
+function rangeLabel(range: Range) {
+  if (range === "7d") return "Last 7 Days"
+  if (range === "30d") return "Last 30 Days"
+  return "All Time"
+}
+
+function cleanValue(value: unknown) {
+  return String(value || "").trim()
+}
+
+function humanizeNullable(value: unknown) {
+  const cleaned = cleanValue(value)
+
+  if (!cleaned || cleaned.toLowerCase() === "unknown") {
+    return "Unknown"
+  }
+
+  return humanize(cleaned)
+}
+
+function humanize(value: unknown) {
+  const cleaned =
+    cleanValue(value) || "Unknown"
+
+  return cleaned
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    )
 }
 
 const page = {
-  maxWidth: "1200px",
+  maxWidth: "1280px",
   margin: "0 auto",
   color: "white",
-  padding: "24px",
+  padding: "24px"
 } as const
 
-const reportsLayout = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "18px",
-  marginTop: "20px",
-} as const
-
-const stageSection = {
-  width: "100%",
-} as const
-
-const card = {
-  background: "rgba(15, 23, 42, 0.92)",
-  border: "1px solid rgba(148, 163, 184, 0.18)",
-  borderRadius: "18px",
-  padding: "20px",
-} as const
-
-const sourceTypeHeader = {
-  display: "grid",
-  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
-  gap: "14px",
-  padding: "10px 0",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
-  opacity: 0.8,
-  fontSize: "13px",
-} as const
-
-const sourceTypeRow = {
-  display: "grid",
-  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
-  gap: "14px",
-  alignItems: "start",
-  padding: "10px 0",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
-} as const
-
-const sourceGroup = {
-  borderBottom: "1px solid rgba(148, 163, 184, 0.28)",
-} as const
-
-const sourceTotalRow = {
-  display: "grid",
-  gridTemplateColumns: "minmax(150px, 1.2fr) minmax(130px, 1fr) minmax(180px, 1.2fr) 70px",
-  gap: "14px",
-  padding: "8px 0 12px",
-  opacity: 0.82,
-  fontSize: "13px",
-} as const
-
-const rowStyle = {
+const headingRow = {
   display: "flex",
   justifyContent: "space-between",
-  gap: "12px",
-  padding: "10px 0",
-  borderBottom: "1px solid rgba(148, 163, 184, 0.16)",
-} as const
-
-const muted = {
-  opacity: 0.75,
+  gap: "20px",
+  alignItems: "flex-start"
 } as const
 
 const buttonRow = {
   display: "flex",
   gap: "10px",
   flexWrap: "wrap",
-  marginTop: "18px",
+  margin: "20px 0"
 } as const
 
 const button = {
   padding: "10px 14px",
   borderRadius: "12px",
-  border: "1px solid rgba(148, 163, 184, 0.25)",
+  border:
+    "1px solid rgba(148, 163, 184, 0.25)",
   background: "rgba(30, 41, 59, 0.9)",
   color: "white",
-  cursor: "pointer",
+  cursor: "pointer"
 } as const
 
 const activeButton = {
   ...button,
-  background: "#3b82f6",
+  background: "#3b82f6"
 } as const
 
-const danger = {
+const metricGrid = {
+  display: "grid",
+  gridTemplateColumns:
+    "repeat(auto-fit, minmax(210px, 1fr))",
+  gap: "14px",
+  marginBottom: "18px"
+} as const
+
+const twoColumnGrid = {
+  display: "grid",
+  gridTemplateColumns:
+    "repeat(auto-fit, minmax(360px, 1fr))",
+  gap: "18px",
+  marginBottom: "18px"
+} as const
+
+const card = {
+  background: "rgba(15, 23, 42, 0.92)",
+  border:
+    "1px solid rgba(148, 163, 184, 0.18)",
+  borderRadius: "18px",
+  padding: "20px",
+  marginBottom: "18px"
+} as const
+
+const metricCard = {
+  ...card,
+  marginBottom: 0,
+  minHeight: "120px"
+} as const
+
+const metricLabel = {
+  opacity: 0.76,
+  fontSize: "14px",
+  fontWeight: 700
+} as const
+
+const metricValue = {
+  fontSize: "36px",
+  lineHeight: 1.1,
+  fontWeight: 800,
+  margin: "8px 0"
+} as const
+
+const simpleRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "16px",
+  padding: "10px 0",
+  borderBottom:
+    "1px solid rgba(148, 163, 184, 0.16)"
+} as const
+
+const sourceRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "18px",
+  alignItems: "flex-start",
+  padding: "12px 0",
+  borderBottom:
+    "1px solid rgba(148, 163, 184, 0.16)"
+} as const
+
+const agingTable = {
+  overflowX: "auto"
+} as const
+
+const agingHeader = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 70px",
+  gap: "14px",
+  minWidth: "800px",
+  padding: "10px 0",
+  opacity: 0.72,
+  fontSize: "13px",
+  borderBottom:
+    "1px solid rgba(148, 163, 184, 0.28)"
+} as const
+
+const agingRow = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 70px",
+  gap: "14px",
+  minWidth: "800px",
+  padding: "12px 0",
+  alignItems: "start",
+  borderBottom:
+    "1px solid rgba(148, 163, 184, 0.16)"
+} as const
+
+const noteCard = {
+  ...card,
+  background: "rgba(30, 41, 59, 0.65)"
+} as const
+
+const errorCard = {
+  ...card,
   color: "#fecaca",
+  border:
+    "1px solid rgba(248, 113, 113, 0.4)"
+} as const
+
+const muted = {
+  opacity: 0.74
+} as const
+
+const smallMuted = {
+  opacity: 0.66,
+  fontSize: "13px",
+  marginTop: "4px"
+} as const
+
+const number = {
+  textAlign: "right"
 } as const
