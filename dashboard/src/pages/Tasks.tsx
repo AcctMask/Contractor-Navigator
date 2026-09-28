@@ -1132,8 +1132,8 @@ export default function TasksPage() {
 
                 const isOverdue =
                   !task.completed_at &&
-                  task.start instanceof Date &&
-                  task.start.getTime() < Date.now()
+                  task.end instanceof Date &&
+                  task.end.getTime() < Date.now()
 
                 const presentation = isOverdue
                   ? {
@@ -1246,8 +1246,8 @@ export default function TasksPage() {
 
             const isOverdue =
               !event.completed_at &&
-              event.start instanceof Date &&
-              event.start.getTime() < Date.now()
+              event.end instanceof Date &&
+              event.end.getTime() < Date.now()
 
             const heat = isOverdue
               ? {

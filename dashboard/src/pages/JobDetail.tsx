@@ -2526,7 +2526,7 @@ export default function JobDetail() {
           )
 
           const taskDueTime = new Date(
-            task.start_time || 0
+            task.end_time || task.start_time || 0
           ).getTime()
 
           const isOverdue =
