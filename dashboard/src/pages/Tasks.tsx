@@ -1125,10 +1125,23 @@ export default function TasksPage() {
                 return bCreated - aCreated
               })
               .map(task => {
-                const presentation = stagePresentation(
+                const normalPresentation = stagePresentation(
                   task.stage_classification ||
                   task.event_type
                 )
+
+                const isOverdue =
+                  !task.completed_at &&
+                  task.start instanceof Date &&
+                  task.start.getTime() < Date.now()
+
+                const presentation = isOverdue
+                  ? {
+                      backgroundColor: "#7e22ce",
+                      borderColor: "#6b21a8",
+                      color: "#ffffff",
+                    }
+                  : normalPresentation
 
                 const isSelected =
                   selectedTask?.id === task.id
@@ -1226,10 +1239,23 @@ export default function TasksPage() {
           endAccessor="end"
           tooltipAccessor={tooltip}
           eventPropGetter={(event: TaskItem) => {
-            const heat = stagePresentation(
+            const normalHeat = stagePresentation(
               event.stage_classification ||
               event.event_type
             )
+
+            const isOverdue =
+              !event.completed_at &&
+              event.start instanceof Date &&
+              event.start.getTime() < Date.now()
+
+            const heat = isOverdue
+              ? {
+                  backgroundColor: "#7e22ce",
+                  borderColor: "#6b21a8",
+                  color: "#ffffff",
+                }
+              : normalHeat
 
             return {
               style: {

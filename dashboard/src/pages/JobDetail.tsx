@@ -2521,9 +2521,27 @@ export default function JobDetail() {
           <p>No tasks linked to this job yet.</p>
         ) : (
           tasks.map((task: any) => {
-          const taskPresentation = stagePresentation(
+          const normalTaskPresentation = stagePresentation(
             task.stage_classification || task.event_type || ""
           )
+
+          const taskDueTime = new Date(
+            task.start_time || 0
+          ).getTime()
+
+          const isOverdue =
+            !task.completed_at &&
+            Number.isFinite(taskDueTime) &&
+            taskDueTime > 0 &&
+            taskDueTime < Date.now()
+
+          const taskPresentation = isOverdue
+            ? {
+                backgroundColor: "#7e22ce",
+                borderColor: "#6b21a8",
+                color: "#ffffff",
+              }
+            : normalTaskPresentation
 
           return (
 
