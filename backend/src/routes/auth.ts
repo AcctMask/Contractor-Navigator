@@ -11,6 +11,7 @@ import {
   getTenantIdBySlug,
   updateManagedUserRoleByTenantSlug,
   updateManagedUserFinancialsAuthorizationByTenantSlug,
+  updateManagedUserMobilePhoneByTenantSlug,
   resetManagedUserPasswordByTenantSlug,
   deactivateManagedUserByTenantSlug,
   recordUserInvitationEmailSent,
@@ -454,6 +455,68 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       }
     }
   })
+
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/mobile-phone",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const id =
+          Number(userId)
+
+        if (
+          !Number.isFinite(id)
+        ) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Invalid user ID",
+          }
+        }
+
+        const user =
+          await updateManagedUserMobilePhoneByTenantSlug(
+            tenantSlug,
+            id,
+            request.body?.mobile_phone,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
 
   app.patch(
     "/auth/:tenantSlug/users/:userId/financials-authorized",

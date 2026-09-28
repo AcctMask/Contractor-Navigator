@@ -826,7 +826,8 @@ async function logUserManagementActivity(
     | "user_role_changed"
     | "user_password_reset"
     | "user_deactivated"
-    | "user_financials_authorization_changed",
+    | "user_financials_authorization_changed"
+    | "user_mobile_phone_changed",
   message: string,
   meta: Record<string, unknown>
 ) {
@@ -1011,6 +1012,106 @@ export async function updateManagedUserRoleByTenantSlug(
         target.role,
       new_role:
         user.role,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
+export async function updateManagedUserMobilePhoneByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  mobilePhoneInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have their mobile phone changed"
+    )
+  }
+
+  const nextMobilePhone =
+    cleanMobilePhone(
+      mobilePhoneInput
+    )
+
+  if (!nextMobilePhone) {
+    throw new Error(
+      "Mobile phone is required"
+    )
+  }
+
+  if (
+    String(target.mobile_phone || "") ===
+    nextMobilePhone
+  ) {
+    return target
+  }
+
+  const result =
+    await pool.query(
+      `
+        update app_users
+        set
+          mobile_phone = $1,
+          updated_at = now()
+        where tenant_id = $2
+          and id = $3
+        returning
+          id,
+          tenant_id,
+          email,
+          full_name,
+          mobile_phone,
+          role,
+          is_active,
+          financials_authorized,
+          deactivated_at,
+          created_at,
+          updated_at
+      `,
+      [
+        nextMobilePhone,
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_mobile_phone_changed",
+    `Navigator user mobile phone changed for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      old_mobile_phone:
+        target.mobile_phone || null,
+      new_mobile_phone:
+        user.mobile_phone,
       actor_user_id:
         actor.id,
       actor_email:

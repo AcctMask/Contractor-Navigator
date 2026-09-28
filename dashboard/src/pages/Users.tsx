@@ -8,6 +8,7 @@ type UserRow = {
   id?: string | number | null
   email: string
   full_name?: string | null
+  mobile_phone?: string | null
   role: string
   is_active?: boolean
   financials_authorized?: boolean
@@ -73,6 +74,11 @@ export default function UsersPage() {
 
   const [managedRole, setManagedRole] =
     useState("staff")
+
+  const [
+    managedMobilePhone,
+    setManagedMobilePhone,
+  ] = useState("")
 
   const [newPassword, setNewPassword] =
     useState("")
@@ -323,6 +329,10 @@ export default function UsersPage() {
       user.role ||
         "staff"
     )
+    setManagedMobilePhone(
+      user.mobile_phone ||
+        ""
+    )
     setNewPassword("")
     setConfirmNewPassword("")
     setManageError("")
@@ -331,10 +341,92 @@ export default function UsersPage() {
 
   function closeManageUser() {
     setSelectedUser(null)
+    setManagedMobilePhone("")
     setNewPassword("")
     setConfirmNewPassword("")
     setManageError("")
     setManageStatus("")
+  }
+
+  async function saveManagedMobilePhone() {
+    if (
+      !selectedUser?.id
+    ) {
+      return
+    }
+
+    if (!managedMobilePhone.trim()) {
+      setManageError(
+        "Mobile phone is required"
+      )
+      setManageStatus("")
+      return
+    }
+
+    setManaging(true)
+    setManageError("")
+    setManageStatus(
+      "Saving mobile phone..."
+    )
+
+    try {
+      const res =
+        await fetch(
+          `${API_BASE}/auth/${getTenantSlug()}/users/${selectedUser.id}/mobile-phone`,
+          {
+            method:
+              "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${getToken()}`,
+            },
+            body:
+              JSON.stringify({
+                mobile_phone:
+                  managedMobilePhone.trim(),
+              }),
+          }
+        )
+
+      const json =
+        await res.json()
+          .catch(() => ({}))
+
+      if (
+        !res.ok ||
+        !json?.ok
+      ) {
+        throw new Error(
+          json?.error ||
+            "Mobile phone update failed"
+        )
+      }
+
+      setSelectedUser(
+        json.user
+      )
+
+      setManagedMobilePhone(
+        json.user?.mobile_phone ||
+          managedMobilePhone
+      )
+
+      setManageStatus(
+        "Mobile phone updated successfully"
+      )
+
+      await loadAll()
+    } catch (err: any) {
+      setManageError(
+        err?.message ||
+          "Mobile phone update failed"
+      )
+      setManageStatus("")
+    } finally {
+      setManaging(false)
+    }
   }
 
   async function saveManagedRole() {
@@ -763,6 +855,45 @@ export default function UsersPage() {
             </div>
 
             <div>
+              <div style={{ marginBottom: 16 }}>
+                <label
+                  style={{
+                    display: "block",
+                    fontWeight: 700,
+                    marginBottom: 6,
+                  }}
+                >
+                  Mobile Phone
+                </label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <input
+                    type="tel"
+                    value={managedMobilePhone}
+                    onChange={(e) =>
+                      setManagedMobilePhone(
+                        e.target.value
+                      )
+                    }
+                    disabled={managing}
+                    placeholder="Mobile phone"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveManagedMobilePhone}
+                    disabled={managing}
+                  >
+                    Save Mobile Phone
+                  </button>
+                </div>
+              </div>
+
               <label style={{ display: "block", marginBottom: "8px", fontWeight: 700 }}>
                 Role
               </label>
