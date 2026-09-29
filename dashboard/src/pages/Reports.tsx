@@ -177,14 +177,12 @@ export default function ReportsPage() {
 
   const summary = data?.operational_summary
 
-  const created =
-    Number(summary?.created_during_period?.count || 0)
 
   const pipeline =
     summary?.current_pipeline?.by_stage || []
 
-  const workMix =
-    summary?.work_mix?.by_job_type || []
+  const attribution =
+    summary?.attribution?.combinations || []
 
   const insurance =
     summary?.insurance_performance?.rows || []
@@ -192,103 +190,47 @@ export default function ReportsPage() {
   const supportingJobs =
     summary?.supporting_jobs?.jobs || []
 
-  const aging =
-    summary?.current_stage_aging?.jobs || []
+  const acquisitionSources = useMemo(() => {
+    const grouped = new Map<string, number>()
 
-  const normalizedWorkMix = useMemo(() => {
-    const grouped = new Map<
-      string,
-      { label: string; count: number }
-    >()
-
-    for (const row of workMix) {
-      const raw = cleanValue(row.job_type) || "Unknown"
-      const key = raw.toLowerCase()
-      const existing = grouped.get(key)
-
-      if (existing) {
-        existing.count += Number(row.count || 0)
-      } else {
-        grouped.set(key, {
-          label: canonicalDisplayValue(raw),
-          count: Number(row.count || 0)
-        })
-      }
+    for (const row of attribution) {
+      addGroupedCount(
+        grouped,
+        row.lead_source,
+        Number(row.count || 0)
+      )
     }
 
-    return Array.from(grouped.values()).sort(
-      (a, b) =>
-        b.count - a.count ||
-        a.label.localeCompare(b.label)
-    )
-  }, [workMix])
+    return groupedRows(grouped)
+  }, [attribution])
 
-  const orderedPipeline = useMemo(() => {
-    const excludedFromActivePipeline = new Set([
-      "intake_pending",
-      "disqualified",
-      "archived"
-    ])
+  const entryChannels = useMemo(() => {
+    const grouped = new Map<string, number>()
 
-    const operationalOrder = [
-      "lead",
-      "estimate_needed",
-      "inspection",
-      "estimate_sent",
-      "contract_sent",
-      "contract_signed",
-      "pre_production",
-      "in_production",
-      "roof_repair",
-      "roof_replacement",
-      "wa_sent",
-      "tarp",
-      "tarp_complete",
-      "invoiced",
-      "completed",
-      "paid",
-      "dnc"
-    ]
-
-    const rank = new Map(
-      operationalOrder.map((stage, index) => [
-        stage,
-        index
-      ])
-    )
-
-    return pipeline
-      .filter(
-        (row) =>
-          !excludedFromActivePipeline.has(
-            normalizeKey(row.stage)
-          )
+    for (const row of attribution) {
+      addGroupedCount(
+        grouped,
+        row.lead_source_detail,
+        Number(row.count || 0)
       )
-      .sort((a, b) => {
-        const aStage = normalizeKey(a.stage)
-        const bStage = normalizeKey(b.stage)
+    }
 
-        const aRank = rank.get(aStage) ?? 900
-        const bRank = rank.get(bStage) ?? 900
+    return groupedRows(grouped)
+  }, [attribution])
 
-        return (
-          aRank - bRank ||
-          humanize(a.stage).localeCompare(
-            humanize(b.stage)
-          )
-        )
-      })
-  }, [pipeline])
+  const acquisitionEvidence = useMemo(() => {
+    const grouped = new Map<string, number>()
 
-  const intakePending = useMemo(
-    () =>
-      pipeline.find(
-        (row) =>
-          normalizeKey(row.stage) ===
-          "intake_pending"
-      ) || null,
-    [pipeline]
-  )
+    for (const row of attribution) {
+      addGroupedCount(
+        grouped,
+        row.marketing_campaign,
+        Number(row.count || 0)
+      )
+    }
+
+    return groupedRows(grouped)
+  }, [attribution])
 
   const insuranceByCarrier = useMemo(() => {
     const grouped = new Map<
@@ -392,24 +334,7 @@ export default function ReportsPage() {
     return groupedRows(grouped)
   }, [actualAssistantJobs])
 
-  const managementAging = useMemo(
-    () =>
-      aging.filter(
-        (job) =>
-          normalizeKey(job.current_stage) !==
-          "intake_pending"
-      ),
-    [aging]
-  )
 
-  const activePipelineTotal = useMemo(
-    () =>
-      orderedPipeline.reduce(
-        (sum, row) => sum + Number(row.count || 0),
-        0
-      ),
-    [orderedPipeline]
-  )
 
 
 
@@ -421,9 +346,10 @@ export default function ReportsPage() {
             How&apos;s Business?
           </h1>
           <p style={muted}>
-            Navigator operational performance — work coming in,
-            what kind it is, where it came from, where it sits now,
-            and what may deserve attention.
+            Business acquisition and performance evidence from
+            Navigator — where business came from, documented engagement,
+            insurance assignment performance, and the supporting records
+            behind the report.
           </p>
         </div>
       </div>
@@ -462,114 +388,51 @@ export default function ReportsPage() {
 
       {!loading && !error && summary && (
         <>
-          <div style={metricGrid}>
-            <MetricCard
-              label={
+          <section style={card}>
+            <SectionHeading
+              title="Where Did Our Business Come From?"
+              subtitle={
                 range === "all"
-                  ? "Recorded Business Work"
-                  : "New Work"
-              }
-              value={created}
-              detail={
-                range === "all"
-                  ? "All available legitimate business-population records"
-                  : `Created ${rangeLabel(range).toLowerCase()}`
+                  ? "All available Navigator business attribution. Acquisition source, entry channel, and acquisition evidence remain separate dimensions."
+                  : `Navigator business attribution for work created ${rangeLabel(range).toLowerCase()}.`
               }
             />
 
-            <MetricCard
-              label="Current Pipeline"
-              value={activePipelineTotal}
-              detail="Current snapshot — not work that entered a stage during this period"
-            />
+            <div style={threeColumnGrid}>
+              <div style={compactBreakdown}>
+                <strong>Acquisition Source</strong>
+                <p style={smallMuted}>
+                  Who or what originated the business relationship.
+                </p>
+                <SimpleRows
+                  rows={acquisitionSources}
+                  empty="No acquisition-source evidence recorded for this period."
+                />
+              </div>
 
-            <MetricCard
-              label="Work Types"
-              value={
-                workMix.filter(
-                  (row) => Number(row.count || 0) > 0
-                ).length
-              }
-              detail="Distinct recorded job types in the selected population"
-            />
+              <div style={compactBreakdown}>
+                <strong>Entry Channel</strong>
+                <p style={smallMuted}>
+                  How the opportunity entered Navigator.
+                </p>
+                <SimpleRows
+                  rows={entryChannels}
+                  empty="No entry-channel evidence recorded for this period."
+                />
+              </div>
 
-            <MetricCard
-              label="Needs Attention"
-              value={managementAging.length}
-              detail="Jobs with authoritative Stage Since data; age alone does not mean a bottleneck"
-            />
-          </div>
-
-          <div style={twoColumnGrid}>
-            <section style={card}>
-              <SectionHeading
-                title="What Work Came In?"
-                subtitle={
-                  range === "all"
-                    ? "All available recorded business work by job type."
-                    : `Jobs created ${rangeLabel(range).toLowerCase()}, grouped by job type.`
-                }
-              />
-
-              <SimpleRows
-                rows={normalizedWorkMix.map((row) => ({
-                  label: row.label,
-                  value: row.count
-                }))}
-                empty="No recorded work for this period."
-              />
-            </section>
-
-            <section style={card}>
-              <SectionHeading
-                title="Where Is The Work Now?"
-                subtitle="Current pipeline snapshot. These are current stages, not stage entries during the selected period."
-              />
-
-              <SimpleRows
-                rows={orderedPipeline.map((row) => ({
-                  label: humanize(row.stage),
-                  value: Number(row.count || 0),
-                  onClick: () => {
-                    setSelectedPipelineStage(row)
-                    setShowSupportingJobs(true)
-                  }
-                }))}
-                empty="No active pipeline data."
-                preserveOrder
-              />
-
-              {intakePending &&
-                Number(intakePending.count || 0) > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    <p style={muted}>
-                      Intake Pending is unqualified intake and is
-                      not included in Active Pipeline.
-                    </p>
-
-                    <SimpleRows
-                      rows={[
-                        {
-                          label: "Intake Pending",
-                          value: Number(
-                            intakePending.count || 0
-                          ),
-                          onClick: () => {
-                            setSelectedPipelineStage(
-                              intakePending
-                            )
-                            setShowSupportingJobs(true)
-                          }
-                        }
-                      ]}
-                      empty=""
-                      preserveOrder
-                    />
-                  </div>
-                )}
-            </section>
-          </div>
-
+              <div style={compactBreakdown}>
+                <strong>Acquisition Evidence</strong>
+                <p style={smallMuted}>
+                  Recorded campaign or other acquisition detail where available.
+                </p>
+                <SimpleRows
+                  rows={acquisitionEvidence}
+                  empty="No additional acquisition evidence recorded for this period."
+                />
+              </div>
+            </div>
+          </section>
 
           <section style={card}>
             <SectionHeading
@@ -618,7 +481,7 @@ export default function ReportsPage() {
           <section style={card}>
             <SectionHeading
               title="Actual Assistant Performance"
-              subtitle="Navigator-native operational evidence only. Job attribution requires explicit Actual Assistant evidence; Buying Signals use Navigator's durable buying_signal_detected authority."
+              subtitle="Navigator-native evidence only. This view does not infer causation, conversion, or financial performance."
             />
 
             <div style={aaMetricRow}>
@@ -629,6 +492,9 @@ export default function ReportsPage() {
                 <strong style={compactMetricValue}>
                   {actualAssistantJobs.length}
                 </strong>
+                <span style={smallMuted}>
+                  Jobs containing explicit Actual Assistant attribution evidence
+                </span>
               </div>
 
               <div style={compactMetric}>
@@ -644,7 +510,7 @@ export default function ReportsPage() {
               </div>
 
               <div style={compactBreakdown}>
-                <strong>By Work Type</strong>
+                <strong>Attributed Work Type</strong>
                 <SimpleRows
                   rows={actualAssistantByType}
                   empty="No explicitly attributed AA work types."
@@ -652,78 +518,24 @@ export default function ReportsPage() {
               </div>
 
               <div style={compactBreakdown}>
-                <strong>Current Stage</strong>
+                <strong>Current Stage of Attributed Work</strong>
                 <SimpleRows
                   rows={actualAssistantByStage}
                   empty="No explicitly attributed AA stages."
                 />
               </div>
             </div>
-          </section>
 
-          <section style={card}>
-            <SectionHeading
-              title="Stage Age / Attention"
-              subtitle="Uses Navigator's authoritative current Stage Since timestamp. Longer age is a review signal, not automatically a bottleneck."
-            />
-
-            {managementAging.length === 0 ? (
-              <p style={muted}>
-                No jobs currently have authoritative Stage Since
-                data available for this view.
+            <div style={evidenceNote}>
+              <strong>Conversion evidence boundary</strong>
+              <p style={{ ...muted, marginBottom: 0 }}>
+                Estimates, contracts, and signed contracts occurring after
+                documented Actual Assistant engagement are not displayed here
+                unless Navigator provides authoritative event evidence tying
+                those events to the documented engagement. Current stage alone
+                is not treated as proof of that sequence.
               </p>
-            ) : (
-              <div style={agingTable}>
-                <div style={agingHeader}>
-                  <strong>Job</strong>
-                  <strong>Stage</strong>
-                  <strong>Type</strong>
-                  <strong>Source</strong>
-                  <strong style={number}>
-                    Days
-                  </strong>
-                </div>
-
-                {managementAging.map((job) => (
-                  <div
-                    key={job.navigator_job_id}
-                    style={agingRow}
-                  >
-                    <div>
-                      <a
-                        href={`/job/${job.navigator_job_id}`}
-                        style={jobLink}
-                      >
-                        {job.job_label}
-                      </a>
-                      <div style={smallMuted}>
-                        Job #{job.navigator_job_id}
-                      </div>
-                    </div>
-
-                    <span>
-                      {humanize(job.current_stage)}
-                    </span>
-
-                    <span>
-                      {humanizeNullable(job.job_type)}
-                    </span>
-
-                    <span>
-                      {humanizeNullable(
-                        job.lead_source_detail ||
-                          job.lead_source
-                      )}
-                    </span>
-
-                    <strong style={number}>
-                      {job.days_in_current_stage ??
-                        "Unknown"}
-                    </strong>
-                  </div>
-                ))}
-              </div>
-            )}
+            </div>
           </section>
 
           <section style={card}>
@@ -860,24 +672,6 @@ export default function ReportsPage() {
         </>
       )}
     </div>
-  )
-}
-
-function MetricCard({
-  label,
-  value,
-  detail
-}: {
-  label: string
-  value: number
-  detail: string
-}) {
-  return (
-    <section style={metricCard}>
-      <div style={metricLabel}>{label}</div>
-      <div style={metricValue}>{value}</div>
-      <div style={smallMuted}>{detail}</div>
-    </section>
   )
 }
 
@@ -1125,20 +919,20 @@ const activeButton = {
   background: "#3b82f6"
 } as const
 
-const metricGrid = {
+const threeColumnGrid = {
   display: "grid",
   gridTemplateColumns:
-    "repeat(auto-fit, minmax(210px, 1fr))",
-  gap: "14px",
-  marginBottom: "18px"
+    "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: "18px"
 } as const
 
-const twoColumnGrid = {
-  display: "grid",
-  gridTemplateColumns:
-    "repeat(auto-fit, minmax(360px, 1fr))",
-  gap: "18px",
-  marginBottom: "18px"
+const evidenceNote = {
+  marginTop: "18px",
+  padding: "14px 16px",
+  borderRadius: "14px",
+  border:
+    "1px solid rgba(148, 163, 184, 0.18)",
+  background: "rgba(30, 41, 59, 0.45)"
 } as const
 
 const card = {
@@ -1148,25 +942,6 @@ const card = {
   borderRadius: "18px",
   padding: "20px",
   marginBottom: "18px"
-} as const
-
-const metricCard = {
-  ...card,
-  marginBottom: 0,
-  minHeight: "120px"
-} as const
-
-const metricLabel = {
-  opacity: 0.76,
-  fontSize: "14px",
-  fontWeight: 700
-} as const
-
-const metricValue = {
-  fontSize: "36px",
-  lineHeight: 1.1,
-  fontWeight: 800,
-  margin: "8px 0"
 } as const
 
 const supportingJobsTable = {
@@ -1267,35 +1042,6 @@ const supportingJobsHeading = {
   gap: "18px",
   alignItems: "flex-start",
   flexWrap: "wrap"
-} as const
-
-const agingTable = {
-  overflowX: "auto"
-} as const
-
-const agingHeader = {
-  display: "grid",
-  gridTemplateColumns:
-    "minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 70px",
-  gap: "14px",
-  minWidth: "800px",
-  padding: "10px 0",
-  opacity: 0.72,
-  fontSize: "13px",
-  borderBottom:
-    "1px solid rgba(148, 163, 184, 0.28)"
-} as const
-
-const agingRow = {
-  display: "grid",
-  gridTemplateColumns:
-    "minmax(180px, 1.5fr) minmax(130px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) 70px",
-  gap: "14px",
-  minWidth: "800px",
-  padding: "12px 0",
-  alignItems: "start",
-  borderBottom:
-    "1px solid rgba(148, 163, 184, 0.16)"
 } as const
 
 const noteCard = {
