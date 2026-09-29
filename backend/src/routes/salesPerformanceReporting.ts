@@ -347,6 +347,173 @@ export async function registerSalesPerformanceReportingRoutes(
             operationalParams
           )
 
+        const actualAssistantPerformanceResult =
+          await pool.query(
+            `
+              with selected_jobs as (
+                select
+                  j.id,
+                  j.tenant_id,
+                  j.estimate_sent_at,
+                  j.contract_sent_at,
+
+                  (
+                    select min(te.created_at)
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind in (
+                        'ai_message_sent',
+                        'ai_inbound_response_sent',
+                        'voice_followup_sms_sent'
+                      )
+                  ) as first_aa_engagement_at,
+
+                  (
+                    select min(te.created_at)
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind =
+                        'buying_signal_detected'
+                  ) as first_buying_signal_at,
+
+                  (
+                    select min(dp.sent_at)
+                    from job_document_packages dp
+                    where dp.tenant_id = j.tenant_id
+                      and dp.job_id = j.id
+                      and dp.package_type <> 'ems_tarp'
+                      and dp.sent_at is not null
+                  ) as package_sent_at,
+
+                  (
+                    select min(dp.signed_at)
+                    from job_document_packages dp
+                    where dp.tenant_id = j.tenant_id
+                      and dp.job_id = j.id
+                      and dp.package_type <> 'ems_tarp'
+                      and dp.signed_at is not null
+                  ) as package_signed_at,
+
+                  (
+                    select min(te.created_at)
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind =
+                        'document_package_sent'
+                      and coalesce(
+                        te.meta ->> 'package_type',
+                        ''
+                      ) <> 'ems_tarp'
+                  ) as package_sent_event_at,
+
+                  (
+                    select min(te.created_at)
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind =
+                        'document_package_signed'
+                      and coalesce(
+                        te.meta ->> 'package_type',
+                        ''
+                      ) <> 'ems_tarp'
+                  ) as package_signed_event_at
+
+                from jobs j
+
+                left join customers c
+                  on c.id = j.customer_id
+                  and c.tenant_id = j.tenant_id
+
+                where 1 = 1
+                ${tenantClause}
+                ${businessPopulationClause}
+                ${createdDuringPeriodClause}
+              ),
+
+              classified as (
+                select
+                  *,
+
+                  case
+                    when package_sent_at is null
+                      then package_sent_event_at
+                    when package_sent_event_at is null
+                      then package_sent_at
+                    else least(
+                      package_sent_at,
+                      package_sent_event_at
+                    )
+                  end as first_package_sent_at,
+
+                  case
+                    when package_signed_at is null
+                      then package_signed_event_at
+                    when package_signed_event_at is null
+                      then package_signed_at
+                    else least(
+                      package_signed_at,
+                      package_signed_event_at
+                    )
+                  end as first_package_signed_at
+
+                from selected_jobs
+              )
+
+              select
+                count(*) filter (
+                  where first_aa_engagement_at is not null
+                )::int as engaged_opportunities,
+
+                count(*) filter (
+                  where
+                    first_aa_engagement_at is not null
+                    and estimate_sent_at is not null
+                    and estimate_sent_at >=
+                      first_aa_engagement_at
+                )::int as estimates_sent_after_engagement,
+
+                count(*) filter (
+                  where
+                    first_aa_engagement_at is not null
+                    and (
+                      (
+                        contract_sent_at is not null
+                        and contract_sent_at >=
+                          first_aa_engagement_at
+                      )
+                      or (
+                        first_package_sent_at is not null
+                        and first_package_sent_at >=
+                          first_aa_engagement_at
+                      )
+                    )
+                )::int as contracts_sent_after_engagement,
+
+                count(*) filter (
+                  where
+                    first_aa_engagement_at is not null
+                    and first_package_signed_at is not null
+                    and first_package_signed_at >=
+                      first_aa_engagement_at
+                )::int as contracts_signed_after_engagement,
+
+                count(*) filter (
+                  where
+                    first_aa_engagement_at is not null
+                    and first_buying_signal_at is not null
+                    and first_buying_signal_at >=
+                      first_aa_engagement_at
+                )::int as buying_signals_after_engagement
+
+              from classified
+            `,
+            operationalParams
+          )
+
         const currentPipelineResult =
           await pool.query(
             `
@@ -465,6 +632,215 @@ export async function registerSalesPerformanceReportingRoutes(
                 lead_source_detail asc,
                 marketing_campaign asc,
                 carrier asc
+            `,
+            operationalParams
+          )
+
+        const opportunityJourneyResult =
+          await pool.query(
+            `
+              with selected_jobs as (
+                select
+                  j.id,
+
+                  nullif(trim(j.lead_source), '')
+                    as stored_lead_source,
+
+                  nullif(trim(j.lead_source_detail), '')
+                    as stored_lead_source_detail,
+
+                  nullif(trim(j.marketing_campaign), '')
+                    as marketing_campaign,
+
+                  (
+                    select te.meta
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.message = 'Website estimate received'
+                    order by te.created_at asc
+                    limit 1
+                  ) as estimator_meta,
+
+                  exists (
+                    select 1
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.message = 'Website estimate received'
+                  ) as entered_via_estimator,
+
+                  exists (
+                    select 1
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and (
+                        te.meta ->> 'source' =
+                          'wordpress_contact_form'
+                        or te.meta ->> 'source_detail' =
+                          'wordpress_contact_form'
+                      )
+                  ) as entered_via_contact_form,
+
+                  exists (
+                    select 1
+                    from timeline_events te
+                    where te.tenant_id = j.tenant_id
+                      and te.job_id = j.id
+                      and te.kind in (
+                        'ai_message_sent',
+                        'ai_inbound_response_sent',
+                        'voice_followup_sms_sent'
+                      )
+                  ) as aa_engaged
+
+                from jobs j
+
+                left join customers c
+                  on c.id = j.customer_id
+                  and c.tenant_id = j.tenant_id
+
+                where 1 = 1
+                ${tenantClause}
+                ${businessPopulationClause}
+                ${createdDuringPeriodClause}
+              ),
+
+              interpreted as (
+                select
+                  *,
+
+                  nullif(
+                    trim(
+                      coalesce(
+                        estimator_meta ->> 'custSource',
+                        estimator_meta ->> 'heardAbout'
+                      )
+                    ),
+                    ''
+                  ) as customer_reported_source,
+
+                  case
+                    when entered_via_estimator
+                      then 'Instant Estimator'
+                    when entered_via_contact_form
+                      then 'Website Contact Form'
+                    when lower(
+                      coalesce(stored_lead_source, '')
+                    ) in (
+                      'manual_office_email',
+                      'manual office email'
+                    )
+                      then 'Office Email'
+                    when lower(
+                      coalesce(stored_lead_source, '')
+                    ) in (
+                      'manual_office_entry',
+                      'manual office entry'
+                    )
+                      then 'Manual Office Entry'
+                    when lower(
+                      coalesce(stored_lead_source, '')
+                    ) like '%voice%'
+                      then 'Voice Intake'
+                    when lower(
+                      coalesce(stored_lead_source, '')
+                    ) like '%sms%'
+                      then 'SMS Intake'
+                    when lower(
+                      coalesce(stored_lead_source, '')
+                    ) like '%universal%outreach%'
+                      then 'Universal Outreach'
+                    else 'Unknown'
+                  end as entry_channel
+
+                from selected_jobs
+              ),
+
+              qualified as (
+                select
+                  *,
+
+                  case
+                    /*
+                     * Customer-reported estimator source is acquisition
+                     * evidence, but explicitly labeled as customer-reported.
+                     */
+                    when customer_reported_source is not null
+                      then customer_reported_source
+
+                    /*
+                     * These are acquisition/origin values only when the
+                     * stored source is not merely an intake mechanism.
+                     */
+                    when stored_lead_source is not null
+                      and lower(stored_lead_source) not in (
+                        'instant_estimator',
+                        'website estimator',
+                        'estimator',
+                        'manual_office_email',
+                        'manual office email',
+                        'manual_office_entry',
+                        'manual office entry',
+                        'wordpress_contact_form',
+                        'website contact form',
+                        'voice_intake',
+                        'twilio_voice_intake',
+                        'sms_intake'
+                      )
+                      then stored_lead_source
+
+                    else 'Unknown'
+                  end as acquisition_source,
+
+                  case
+                    when customer_reported_source is not null
+                      then 'customer_reported'
+                    when stored_lead_source is not null
+                      and lower(stored_lead_source) not in (
+                        'instant_estimator',
+                        'website estimator',
+                        'estimator',
+                        'manual_office_email',
+                        'manual office email',
+                        'manual_office_entry',
+                        'manual office entry',
+                        'wordpress_contact_form',
+                        'website contact form',
+                        'voice_intake',
+                        'twilio_voice_intake',
+                        'sms_intake'
+                      )
+                      then 'stored_navigator_attribution'
+                    else 'unknown'
+                  end as acquisition_evidence
+
+                from interpreted
+              )
+
+              select
+                acquisition_source,
+                acquisition_evidence,
+                entry_channel,
+                aa_engaged,
+                coalesce(marketing_campaign, 'unknown')
+                  as marketing_campaign,
+                count(*)::int as count
+
+              from qualified
+
+              group by
+                acquisition_source,
+                acquisition_evidence,
+                entry_channel,
+                aa_engaged,
+                coalesce(marketing_campaign, 'unknown')
+
+              order by
+                count desc,
+                acquisition_source asc,
+                entry_channel asc
             `,
             operationalParams
           )
@@ -737,6 +1113,56 @@ export async function registerSalesPerformanceReportingRoutes(
             operationalParams
           )
 
+        const opportunityJourney =
+          opportunityJourneyResult.rows.map((row: any) => ({
+            acquisition_source:
+              row.acquisition_source || "Unknown",
+            acquisition_evidence:
+              row.acquisition_evidence || "unknown",
+            entry_channel:
+              row.entry_channel || "Unknown",
+            aa_engaged:
+              row.aa_engaged === true,
+            marketing_campaign:
+              row.marketing_campaign || "unknown",
+            count: Number(row.count || 0)
+          }))
+
+        const actualAssistantPerformanceRow =
+          actualAssistantPerformanceResult.rows[0] || {}
+
+        const actualAssistantPerformance = {
+          authority:
+            "durable_customer_facing_navigator_timeline_evidence",
+          interpretation:
+            "chronology_after_documented_aa_engagement_not_causation",
+          engagement_event_kinds: [
+            "ai_message_sent",
+            "ai_inbound_response_sent",
+            "voice_followup_sms_sent"
+          ],
+          engaged_opportunities: Number(
+            actualAssistantPerformanceRow
+              .engaged_opportunities || 0
+          ),
+          estimates_sent_after_engagement: Number(
+            actualAssistantPerformanceRow
+              .estimates_sent_after_engagement || 0
+          ),
+          contracts_sent_after_engagement: Number(
+            actualAssistantPerformanceRow
+              .contracts_sent_after_engagement || 0
+          ),
+          contracts_signed_after_engagement: Number(
+            actualAssistantPerformanceRow
+              .contracts_signed_after_engagement || 0
+          ),
+          buying_signals_after_engagement: Number(
+            actualAssistantPerformanceRow
+              .buying_signals_after_engagement || 0
+          )
+        }
+
         const createdDuringPeriod =
           Number(
             createdDuringPeriodResult
@@ -1000,6 +1426,33 @@ export async function registerSalesPerformanceReportingRoutes(
               by_job_type: workMix
             },
 
+            opportunity_journey: {
+              population:
+                range === "all"
+                  ? "all_available_business_population_jobs"
+                  : "jobs_created_during_selected_period",
+              semantics: {
+                acquisition_source:
+                  "who_or_what_generated_the_opportunity_when_supported_by_evidence",
+                acquisition_evidence:
+                  "strength_or_type_of_evidence_supporting_acquisition_source",
+                entry_channel:
+                  "how_the_opportunity_entered_navigator_or_actual_assistant",
+                aa_engaged:
+                  "durable_customer_facing_actual_assistant_engagement_exists",
+                unknown:
+                  "unknown_is_preserved_when_acquisition_cannot_be_proven"
+              },
+              dimensions_preserved_independently: [
+                "acquisition_source",
+                "acquisition_evidence",
+                "entry_channel",
+                "marketing_campaign",
+                "aa_engaged"
+              ],
+              rows: opportunityJourney
+            },
+
             attribution: {
               population:
                 range === "all"
@@ -1023,6 +1476,9 @@ export async function registerSalesPerformanceReportingRoutes(
                 "current_stage_of_selected_population_not_historical_transition",
               by_current_stage: periodOutcomes
             },
+
+            actual_assistant_performance:
+              actualAssistantPerformance,
 
             buying_signals: {
               authority:

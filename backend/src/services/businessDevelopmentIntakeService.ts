@@ -216,6 +216,34 @@ async function notifyStaff(
   )
 }
 
+
+function attributionForSource(
+  input: BusinessDevelopmentIntakeInput
+): {
+  leadSource: string | null
+  leadSourceDetail: string | null
+} {
+  // Intake provenance and business attribution are separate truths.
+  // A forwarded office email proves how Navigator received the record;
+  // it does not prove who or what generated the opportunity.
+  if (
+    input.source === "manual_office_email" ||
+    input.source === "manual_office_entry"
+  ) {
+    return {
+      leadSource: null,
+      leadSourceDetail: null,
+    }
+  }
+
+  return {
+    leadSource: sourceLabel(input.source),
+    leadSourceDetail:
+      clean(input.sourceDetail) || sourceLabel(input.source),
+  }
+}
+
+
 function buildVisibleAdministrativeNote(
   input: BusinessDevelopmentIntakeInput,
   action: "created_job" | "updated_existing_job"
@@ -301,6 +329,8 @@ export async function processBusinessDevelopmentIntake(
     suppressStaffNotification:
       rawInput.suppressStaffNotification === true,
   }
+
+  const attribution = attributionForSource(input)
 
   if (!input.tenantSlug) {
     throw new Error("tenantSlug required")
@@ -528,8 +558,8 @@ export async function processBusinessDevelopmentIntake(
         [
           tenantId,
           jobId,
-          sourceLabel(input.source),
-          input.sourceDetail || input.source,
+          attribution.leadSource,
+          attribution.leadSourceDetail,
           input.carrier,
           input.claimNumber,
         ]
@@ -726,8 +756,8 @@ export async function processBusinessDevelopmentIntake(
           input.zip,
           input.carrier,
           input.claimNumber,
-          sourceLabel(input.source),
-          input.sourceDetail || input.source,
+          attribution.leadSource,
+          attribution.leadSourceDetail,
         ]
       )
 
