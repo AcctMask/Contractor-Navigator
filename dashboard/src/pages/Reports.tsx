@@ -178,9 +178,6 @@ export default function ReportsPage() {
   const summary = data?.operational_summary
 
 
-  const pipeline =
-    summary?.current_pipeline?.by_stage || []
-
   const attribution =
     summary?.attribution?.combinations || []
 
@@ -765,12 +762,6 @@ function SimpleRows({
       ))}
     </div>
   )
-}
-
-function normalizeKey(value: unknown) {
-  return cleanValue(value)
-    .toLowerCase()
-    .replaceAll(" ", "_")
 }
 
 function canonicalDisplayValue(value: unknown) {
