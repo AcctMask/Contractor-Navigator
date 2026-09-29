@@ -287,6 +287,67 @@ export default function ReportsPage() {
     )
   }, [opportunityJourney])
 
+
+  const estimatorJourney = useMemo(
+    () =>
+      opportunityJourney.filter((row) => {
+        const evidence = [
+          row.acquisition_source,
+          row.acquisition_evidence,
+          row.entry_channel,
+          row.marketing_campaign
+        ]
+          .map((value) => cleanValue(value).toLowerCase())
+          .join(" ")
+
+        return (
+          evidence.includes("estimator") ||
+          evidence.includes("instant estimate") ||
+          evidence.includes("website estimate")
+        )
+      }),
+    [opportunityJourney]
+  )
+
+  const estimatorOpportunities = useMemo(
+    () =>
+      estimatorJourney.reduce(
+        (total, row) => total + Number(row.count || 0),
+        0
+      ),
+    [estimatorJourney]
+  )
+
+  const outreachJourney = useMemo(
+    () =>
+      opportunityJourney.filter((row) => {
+        const evidence = [
+          row.acquisition_source,
+          row.acquisition_evidence,
+          row.entry_channel,
+          row.marketing_campaign
+        ]
+          .map((value) => cleanValue(value).toLowerCase())
+          .join(" ")
+
+        return (
+          evidence.includes("universal outreach") ||
+          evidence.includes("universal_outreach") ||
+          evidence.includes("outreach reply")
+        )
+      }),
+    [opportunityJourney]
+  )
+
+  const outreachOpportunities = useMemo(
+    () =>
+      outreachJourney.reduce(
+        (total, row) => total + Number(row.count || 0),
+        0
+      ),
+    [outreachJourney]
+  )
+
   const insuranceByCarrier = useMemo(() => {
     const grouped = new Map<
       string,
@@ -486,7 +547,7 @@ export default function ReportsPage() {
 
             <div style={threeColumnGrid}>
               <div style={compactBreakdown}>
-                <strong>Acquisition Source</strong>
+                <strong>Business Origin</strong>
                 <p style={smallMuted}>
                   Who or what generated the opportunity when supported by evidence.
                 </p>
@@ -497,7 +558,7 @@ export default function ReportsPage() {
               </div>
 
               <div style={compactBreakdown}>
-                <strong>Entry Channel</strong>
+                <strong>How It Entered Navigator</strong>
                 <p style={smallMuted}>
                   How the opportunity entered Navigator or Actual Assistant.
                 </p>
@@ -508,7 +569,7 @@ export default function ReportsPage() {
               </div>
 
               <div style={compactBreakdown}>
-                <strong>Acquisition Evidence</strong>
+                <strong>Origin Evidence</strong>
                 <p style={smallMuted}>
                   Evidence supporting the acquisition source, including estimator or outreach evidence where recorded.
                 </p>
@@ -519,11 +580,93 @@ export default function ReportsPage() {
               </div>
             </div>
           </section>
+            <section style={card}>
+              <SectionHeading
+                title="Instant Estimator Performance"
+                subtitle="Documented estimator activity contained in the authoritative opportunity journey."
+              />
+
+              <div style={aaMetricRow}>
+                <div style={compactMetric}>
+                  <span style={smallMuted}>Estimator Opportunities</span>
+                  <strong style={compactMetricValue}>
+                    {estimatorOpportunities}
+                  </strong>
+                </div>
+              </div>
+
+              {estimatorJourney.length > 0 ? (
+                <div style={{ marginTop: 16 }}>
+                  {estimatorJourney.map((row, index) => (
+                    <div key={`estimator-${index}`} style={simpleRow}>
+                      <span>
+                        {canonicalDisplayValue(row.acquisition_source)}
+                        {" · "}
+                        {canonicalDisplayValue(row.acquisition_evidence)}
+                        {" · Entered via "}
+                        {canonicalDisplayValue(row.entry_channel)}
+                      </span>
+                      <strong style={number}>
+                        {Number(row.count || 0)}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={muted}>
+                  No documented Instant Estimator opportunities in this selected period.
+                </p>
+              )}
+            </section>
+
+            <section style={card}>
+              <SectionHeading
+                title="Universal Outreach Performance"
+                subtitle="Documented Universal Outreach activity contained in the authoritative opportunity journey."
+              />
+
+              <div style={aaMetricRow}>
+                <div style={compactMetric}>
+                  <span style={smallMuted}>
+                    Documented Outreach Opportunities
+                  </span>
+                  <strong style={compactMetricValue}>
+                    {outreachOpportunities}
+                  </strong>
+                </div>
+              </div>
+
+              {outreachJourney.length > 0 ? (
+                <div style={{ marginTop: 16 }}>
+                  {outreachJourney.map((row, index) => (
+                    <div key={`outreach-${index}`} style={simpleRow}>
+                      <span>
+                        {canonicalDisplayValue(row.acquisition_source)}
+                        {" · "}
+                        {canonicalDisplayValue(row.acquisition_evidence)}
+                        {cleanValue(row.marketing_campaign)
+                          ? ` · ${canonicalDisplayValue(row.marketing_campaign)}`
+                          : ""}
+                      </span>
+                      <strong style={number}>
+                        {Number(row.count || 0)}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={muted}>
+                  No documented Universal Outreach opportunities in this selected period.
+                </p>
+              )}
+            </section>
+
+
 
           <section style={card}>
             <SectionHeading
               title="Actual Assistant Performance"
-              subtitle="Documented Navigator chronology. Events occurring after AA engagement are shown as chronology, not claimed causation."
+              subtitle="Documented customer-facing Actual Assistant engagement and the business events that occurred afterward. Chronology does not claim causation."
             />
 
             <div style={aaMetricRow}>
@@ -557,7 +700,7 @@ export default function ReportsPage() {
           <section style={card}>
             <SectionHeading
               title="Insurance / Assignment Performance"
-              subtitle="Carrier is the primary management view. TPA/source, job type, and current stage remain independent dimensions."
+              subtitle="Documented insurance and assignment work, with carrier, TPA/source, job type, and current stage kept as separate business dimensions."
             />
 
             {insuranceByCarrier.length === 0 ? (
