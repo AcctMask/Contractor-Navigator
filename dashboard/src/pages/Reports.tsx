@@ -27,6 +27,39 @@ type AttributionRow = CountRow & {
   carrier: string
 }
 
+type OpportunityJourneyRow = CountRow & {
+  acquisition_source: string
+  acquisition_evidence: string
+  entry_channel: string
+  marketing_campaign: string
+  aa_engaged: boolean
+}
+
+type ActualAssistantPerformance = {
+  documented_engagement_jobs?: number
+  jobs_with_documented_engagement?: number
+  opportunities_with_documented_engagement?: number
+  engaged_opportunities?: number
+
+  buying_signals_after_engagement?: number
+  jobs_with_buying_signal_after_engagement?: number
+
+  estimates_sent_after_engagement?: number
+  contracts_sent_after_engagement?: number
+  contracts_signed_after_engagement?: number
+  signed_package_received_after_engagement?: number
+}
+
+type Funnel = {
+  opportunities?: number
+  estimates_sent?: number
+  estimate_rate?: number
+  contracts_sent?: number
+  contract_rate?: number
+  signed_package_received?: number
+  package_received_rate?: number
+}
+
 type InsurancePerformanceRow = CountRow & {
   carrier: string
   tpa_or_source_detail: string
@@ -84,11 +117,24 @@ type SalesPerformanceResponse = {
       population?: string
       by_job_type?: JobTypeRow[]
     }
+    opportunity_journey?: {
+      population?: string
+      semantics?: {
+        acquisition_source?: string
+        acquisition_evidence?: string
+        entry_channel?: string
+        aa_engaged?: string
+        unknown?: string
+      }
+      dimensions_preserved_independently?: string[]
+      rows?: OpportunityJourneyRow[]
+    }
     attribution?: {
       population?: string
       dimensions_preserved_independently?: string[]
       combinations?: AttributionRow[]
     }
+    actual_assistant_performance?: ActualAssistantPerformance
     buying_signals?: {
       authority?: string
       population?: string
@@ -112,6 +158,7 @@ type SalesPerformanceResponse = {
       jobs?: AgingJob[]
     }
   }
+  funnel?: Funnel
 }
 
 export default function ReportsPage() {
@@ -122,9 +169,6 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [showSupportingJobs, setShowSupportingJobs] =
     useState(false)
-
-  const [selectedPipelineStage, setSelectedPipelineStage] =
-    useState<StageRow | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -178,8 +222,8 @@ export default function ReportsPage() {
   const summary = data?.operational_summary
 
 
-  const attribution =
-    summary?.attribution?.combinations || []
+  const opportunityJourney =
+    summary?.opportunity_journey?.rows || []
 
   const insurance =
     summary?.insurance_performance?.rows || []
@@ -187,47 +231,61 @@ export default function ReportsPage() {
   const supportingJobs =
     summary?.supporting_jobs?.jobs || []
 
+  const funnel = data?.funnel || {}
+
+  const aa =
+    summary?.actual_assistant_performance || {}
+
   const acquisitionSources = useMemo(() => {
     const grouped = new Map<string, number>()
 
-    for (const row of attribution) {
+    for (const row of opportunityJourney) {
       addGroupedCount(
         grouped,
-        row.lead_source,
+        row.acquisition_source,
         Number(row.count || 0)
       )
     }
 
     return groupedRows(grouped)
-  }, [attribution])
+  }, [opportunityJourney])
 
   const entryChannels = useMemo(() => {
     const grouped = new Map<string, number>()
 
-    for (const row of attribution) {
+    for (const row of opportunityJourney) {
       addGroupedCount(
         grouped,
-        row.lead_source_detail,
+        row.entry_channel,
         Number(row.count || 0)
       )
     }
 
     return groupedRows(grouped)
-  }, [attribution])
+  }, [opportunityJourney])
 
   const acquisitionEvidence = useMemo(() => {
     const grouped = new Map<string, number>()
 
-    for (const row of attribution) {
+    for (const row of opportunityJourney) {
       addGroupedCount(
         grouped,
-        row.marketing_campaign,
+        row.acquisition_evidence,
         Number(row.count || 0)
       )
     }
 
     return groupedRows(grouped)
-  }, [attribution])
+  }, [opportunityJourney])
+
+  const aaEngagedFromJourney = useMemo(() => {
+    return opportunityJourney.reduce(
+      (total, row) =>
+        total +
+        (row.aa_engaged ? Number(row.count || 0) : 0),
+      0
+    )
+  }, [opportunityJourney])
 
   const insuranceByCarrier = useMemo(() => {
     const grouped = new Map<
@@ -263,11 +321,13 @@ export default function ReportsPage() {
         row.tpa_or_source_detail,
         count
       )
+
       addGroupedCount(
         current.jobTypes,
         row.job_type,
         count
       )
+
       addGroupedCount(
         current.stages,
         row.current_stage,
@@ -284,56 +344,35 @@ export default function ReportsPage() {
     )
   }, [insurance])
 
-  const buyingSignals =
+  const aaEngaged =
     Number(
-      summary?.buying_signals
-        ?.jobs_with_buying_signal || 0
+      aa.documented_engagement_jobs ??
+      aa.jobs_with_documented_engagement ??
+      aa.opportunities_with_documented_engagement ??
+      aa.engaged_opportunities ??
+      aaEngagedFromJourney ??
+      0
     )
 
-  const actualAssistantJobs = useMemo(() => {
-    return supportingJobs.filter((job) =>
-      [
-        job.lead_source,
-        job.lead_source_detail,
-        job.marketing_campaign,
-        job.job_type
-      ].some((value) =>
-        isActualAssistantEvidence(value)
-      )
+  const aaBuyingSignals =
+    Number(
+      aa.buying_signals_after_engagement ??
+      aa.jobs_with_buying_signal_after_engagement ??
+      0
     )
-  }, [supportingJobs])
 
-  const actualAssistantByType = useMemo(() => {
-    const grouped = new Map<string, number>()
+  const aaEstimates =
+    Number(aa.estimates_sent_after_engagement ?? 0)
 
-    for (const job of actualAssistantJobs) {
-      addGroupedCount(
-        grouped,
-        job.job_type,
-        1
-      )
-    }
+  const aaContracts =
+    Number(aa.contracts_sent_after_engagement ?? 0)
 
-    return groupedRows(grouped)
-  }, [actualAssistantJobs])
-
-  const actualAssistantByStage = useMemo(() => {
-    const grouped = new Map<string, number>()
-
-    for (const job of actualAssistantJobs) {
-      addGroupedCount(
-        grouped,
-        job.current_stage,
-        1
-      )
-    }
-
-    return groupedRows(grouped)
-  }, [actualAssistantJobs])
-
-
-
-
+  const aaSigned =
+    Number(
+      aa.contracts_signed_after_engagement ??
+      aa.signed_package_received_after_engagement ??
+      0
+    )
 
   return (
     <div style={page}>
@@ -387,11 +426,61 @@ export default function ReportsPage() {
         <>
           <section style={card}>
             <SectionHeading
+              title="Business Funnel"
+              subtitle={
+                range === "all"
+                  ? "All available Navigator opportunity and conversion evidence."
+                  : `Navigator opportunity and conversion evidence for work created ${rangeLabel(range).toLowerCase()}.`
+              }
+            />
+
+            <div style={aaMetricRow}>
+              <div style={compactMetric}>
+                <span style={smallMuted}>Opportunities</span>
+                <strong style={compactMetricValue}>
+                  {Number(funnel.opportunities || 0)}
+                </strong>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Estimates Sent</span>
+                <strong style={compactMetricValue}>
+                  {Number(funnel.estimates_sent || 0)}
+                </strong>
+                <span style={smallMuted}>
+                  {Number(funnel.estimate_rate || 0)}% of opportunities
+                </span>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Contracts Sent</span>
+                <strong style={compactMetricValue}>
+                  {Number(funnel.contracts_sent || 0)}
+                </strong>
+                <span style={smallMuted}>
+                  {Number(funnel.contract_rate || 0)}% of opportunities
+                </span>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Signed Contracts</span>
+                <strong style={compactMetricValue}>
+                  {Number(funnel.signed_package_received || 0)}
+                </strong>
+                <span style={smallMuted}>
+                  {Number(funnel.package_received_rate || 0)}% of opportunities
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section style={card}>
+            <SectionHeading
               title="Where Did Our Business Come From?"
               subtitle={
                 range === "all"
-                  ? "All available Navigator business attribution. Acquisition source, entry channel, and acquisition evidence remain separate dimensions."
-                  : `Navigator business attribution for work created ${rangeLabel(range).toLowerCase()}.`
+                  ? "All available Navigator acquisition evidence. Source, entry channel, and evidence remain independent."
+                  : `Navigator acquisition evidence for work created ${rangeLabel(range).toLowerCase()}.`
               }
             />
 
@@ -399,7 +488,7 @@ export default function ReportsPage() {
               <div style={compactBreakdown}>
                 <strong>Acquisition Source</strong>
                 <p style={smallMuted}>
-                  Who or what originated the business relationship.
+                  Who or what generated the opportunity when supported by evidence.
                 </p>
                 <SimpleRows
                   rows={acquisitionSources}
@@ -410,7 +499,7 @@ export default function ReportsPage() {
               <div style={compactBreakdown}>
                 <strong>Entry Channel</strong>
                 <p style={smallMuted}>
-                  How the opportunity entered Navigator.
+                  How the opportunity entered Navigator or Actual Assistant.
                 </p>
                 <SimpleRows
                   rows={entryChannels}
@@ -421,7 +510,7 @@ export default function ReportsPage() {
               <div style={compactBreakdown}>
                 <strong>Acquisition Evidence</strong>
                 <p style={smallMuted}>
-                  Recorded campaign or other acquisition detail where available.
+                  Evidence supporting the acquisition source, including estimator or outreach evidence where recorded.
                 </p>
                 <SimpleRows
                   rows={acquisitionEvidence}
@@ -433,13 +522,47 @@ export default function ReportsPage() {
 
           <section style={card}>
             <SectionHeading
+              title="Actual Assistant Performance"
+              subtitle="Documented Navigator chronology. Events occurring after AA engagement are shown as chronology, not claimed causation."
+            />
+
+            <div style={aaMetricRow}>
+              <div style={compactMetric}>
+                <span style={smallMuted}>AA-Engaged Opportunities</span>
+                <strong style={compactMetricValue}>{aaEngaged}</strong>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Buying Signals After AA Engagement</span>
+                <strong style={compactMetricValue}>{aaBuyingSignals}</strong>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Estimates After AA Engagement</span>
+                <strong style={compactMetricValue}>{aaEstimates}</strong>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Contracts After AA Engagement</span>
+                <strong style={compactMetricValue}>{aaContracts}</strong>
+              </div>
+
+              <div style={compactMetric}>
+                <span style={smallMuted}>Signed After AA Engagement</span>
+                <strong style={compactMetricValue}>{aaSigned}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section style={card}>
+            <SectionHeading
               title="Insurance / Assignment Performance"
-              subtitle="Carrier is the primary management view. TPA/source detail, job type, and current stage remain separate operational dimensions."
+              subtitle="Carrier is the primary management view. TPA/source, job type, and current stage remain independent dimensions."
             />
 
             {insuranceByCarrier.length === 0 ? (
               <p style={muted}>
-                No insurance-attributed work recorded for this period.
+                No insurance / assignment evidence recorded for this period.
               </p>
             ) : (
               <div style={carrierGrid}>
@@ -450,9 +573,7 @@ export default function ReportsPage() {
                   >
                     <div style={carrierHeading}>
                       <strong>{row.carrier}</strong>
-                      <strong style={number}>
-                        {row.count}
-                      </strong>
+                      <strong style={number}>{row.count}</strong>
                     </div>
 
                     <Breakdown
@@ -476,66 +597,6 @@ export default function ReportsPage() {
           </section>
 
           <section style={card}>
-            <SectionHeading
-              title="Actual Assistant Performance"
-              subtitle="Navigator-native evidence only. This view does not infer causation, conversion, or financial performance."
-            />
-
-            <div style={aaMetricRow}>
-              <div style={compactMetric}>
-                <span style={smallMuted}>
-                  Explicitly attributed work
-                </span>
-                <strong style={compactMetricValue}>
-                  {actualAssistantJobs.length}
-                </strong>
-                <span style={smallMuted}>
-                  Jobs containing explicit Actual Assistant attribution evidence
-                </span>
-              </div>
-
-              <div style={compactMetric}>
-                <span style={smallMuted}>
-                  Buying Signals
-                </span>
-                <strong style={compactMetricValue}>
-                  {buyingSignals}
-                </strong>
-                <span style={smallMuted}>
-                  Jobs with at least one durable Navigator buying signal
-                </span>
-              </div>
-
-              <div style={compactBreakdown}>
-                <strong>Attributed Work Type</strong>
-                <SimpleRows
-                  rows={actualAssistantByType}
-                  empty="No explicitly attributed AA work types."
-                />
-              </div>
-
-              <div style={compactBreakdown}>
-                <strong>Current Stage of Attributed Work</strong>
-                <SimpleRows
-                  rows={actualAssistantByStage}
-                  empty="No explicitly attributed AA stages."
-                />
-              </div>
-            </div>
-
-            <div style={evidenceNote}>
-              <strong>Conversion evidence boundary</strong>
-              <p style={{ ...muted, marginBottom: 0 }}>
-                Estimates, contracts, and signed contracts occurring after
-                documented Actual Assistant engagement are not displayed here
-                unless Navigator provides authoritative event evidence tying
-                those events to the documented engagement. Current stage alone
-                is not treated as proof of that sequence.
-              </p>
-            </div>
-          </section>
-
-          <section style={card}>
             <div style={supportingJobsHeading}>
               <SectionHeading
                 title="Supporting Jobs"
@@ -554,46 +615,14 @@ export default function ReportsPage() {
                 {showSupportingJobs
                   ? "Hide Supporting Jobs"
                   : `View Supporting Jobs (${
-                      selectedPipelineStage
-                        ? selectedPipelineStage.jobs?.length || 0
-                        : supportingJobs.length
+                      supportingJobs.length
                     })`}
               </button>
             </div>
 
             {showSupportingJobs && (
               <>
-                {selectedPipelineStage && (
-                  <div style={{ marginBottom: 14 }}>
-                    <strong>
-                      {humanize(
-                        selectedPipelineStage.stage
-                      )}
-                    </strong>
-
-                    <span style={muted}>
-                      {" "}— supporting Navigator jobs
-                    </span>
-
-                    <button
-                      type="button"
-                      style={{
-                        ...button,
-                        marginLeft: 12
-                      }}
-                      onClick={() =>
-                        setSelectedPipelineStage(null)
-                      }
-                    >
-                      Show All
-                    </button>
-                  </div>
-                )}
-
-                {(selectedPipelineStage
-                  ? selectedPipelineStage.jobs || []
-                  : supportingJobs
-                ).length === 0 ? (
+                {supportingJobs.length === 0 ? (
                   <p style={muted}>
                     No supporting jobs for this period.
                   </p>
@@ -609,10 +638,7 @@ export default function ReportsPage() {
                         Days
                       </strong>
 
-                      {(selectedPipelineStage
-                        ? selectedPipelineStage.jobs || []
-                        : supportingJobs
-                      ).map((job) => (
+                      {supportingJobs.map((job) => (
                         <div
                           key={job.navigator_job_id}
                           style={{ display: "contents" }}
@@ -802,18 +828,6 @@ function groupedRows(map: Map<string, number>) {
     )
 }
 
-function isActualAssistantEvidence(value: unknown) {
-  const normalized = cleanValue(value).toLowerCase()
-
-  return (
-    normalized === "actual assistant" ||
-    normalized === "actual_assistant" ||
-    normalized === "actual-assistant" ||
-    normalized === "voice_intake" ||
-    normalized === "twilio_voice_intake" ||
-    normalized.includes("actual assistant")
-  )
-}
 
 function Breakdown({
   label,
@@ -917,14 +931,6 @@ const threeColumnGrid = {
   gap: "18px"
 } as const
 
-const evidenceNote = {
-  marginTop: "18px",
-  padding: "14px 16px",
-  borderRadius: "14px",
-  border:
-    "1px solid rgba(148, 163, 184, 0.18)",
-  background: "rgba(30, 41, 59, 0.45)"
-} as const
 
 const card = {
   background: "rgba(15, 23, 42, 0.92)",
