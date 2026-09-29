@@ -744,13 +744,6 @@ export async function registerSalesPerformanceReportingRoutes(
               ?.records_created || 0
           )
 
-        const currentPipeline =
-          currentPipelineResult.rows.map(
-            (row) => ({
-              stage: row.stage,
-              count: Number(row.count || 0)
-            })
-          )
 
         const workMix =
           workMixResult.rows.map(
@@ -814,6 +807,27 @@ export async function registerSalesPerformanceReportingRoutes(
                 row.days_in_current_stage === null
                   ? null
                   : Number(row.days_in_current_stage)
+            })
+          )
+
+        const currentPipeline =
+          currentPipelineResult.rows.map(
+            (row) => ({
+              stage: row.stage,
+              count: Number(row.count || 0),
+              jobs: supportingJobs
+                .filter(
+                  (job) =>
+                    String(
+                      job.current_stage || "unknown"
+                    ).toLowerCase() ===
+                    String(
+                      row.stage || "unknown"
+                    ).toLowerCase()
+                )
+                .map((job) => ({
+                  ...job
+                }))
             })
           )
 

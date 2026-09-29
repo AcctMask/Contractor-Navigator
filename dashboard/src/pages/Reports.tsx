@@ -13,6 +13,7 @@ type CountRow = {
 
 type StageRow = CountRow & {
   stage: string
+  jobs?: SupportingJob[]
 }
 
 type JobTypeRow = CountRow & {
@@ -122,6 +123,9 @@ export default function ReportsPage() {
   const [showSupportingJobs, setShowSupportingJobs] =
     useState(false)
 
+  const [selectedPipelineStage, setSelectedPipelineStage] =
+    useState<StageRow | null>(null)
+
   useEffect(() => {
     let cancelled = false
 
@@ -220,10 +224,10 @@ export default function ReportsPage() {
   }, [workMix])
 
   const orderedPipeline = useMemo(() => {
-    const terminalBottom = new Map([
-      ["intake_pending", 1000],
-      ["disqualified", 1001],
-      ["archived", 1002]
+    const excludedFromActivePipeline = new Set([
+      "intake_pending",
+      "disqualified",
+      "archived"
     ])
 
     const operationalOrder = [
@@ -253,28 +257,38 @@ export default function ReportsPage() {
       ])
     )
 
-    return [...pipeline].sort((a, b) => {
-      const aStage = normalizeKey(a.stage)
-      const bStage = normalizeKey(b.stage)
-
-      const aRank =
-        terminalBottom.get(aStage) ??
-        rank.get(aStage) ??
-        900
-
-      const bRank =
-        terminalBottom.get(bStage) ??
-        rank.get(bStage) ??
-        900
-
-      return (
-        aRank - bRank ||
-        humanize(a.stage).localeCompare(
-          humanize(b.stage)
-        )
+    return pipeline
+      .filter(
+        (row) =>
+          !excludedFromActivePipeline.has(
+            normalizeKey(row.stage)
+          )
       )
-    })
+      .sort((a, b) => {
+        const aStage = normalizeKey(a.stage)
+        const bStage = normalizeKey(b.stage)
+
+        const aRank = rank.get(aStage) ?? 900
+        const bRank = rank.get(bStage) ?? 900
+
+        return (
+          aRank - bRank ||
+          humanize(a.stage).localeCompare(
+            humanize(b.stage)
+          )
+        )
+      })
   }, [pipeline])
+
+  const intakePending = useMemo(
+    () =>
+      pipeline.find(
+        (row) =>
+          normalizeKey(row.stage) ===
+          "intake_pending"
+      ) || null,
+    [pipeline]
+  )
 
   const insuranceByCarrier = useMemo(() => {
     const grouped = new Map<
@@ -390,11 +404,11 @@ export default function ReportsPage() {
 
   const activePipelineTotal = useMemo(
     () =>
-      pipeline.reduce(
+      orderedPipeline.reduce(
         (sum, row) => sum + Number(row.count || 0),
         0
       ),
-    [pipeline]
+    [orderedPipeline]
   )
 
 
@@ -515,11 +529,44 @@ export default function ReportsPage() {
               <SimpleRows
                 rows={orderedPipeline.map((row) => ({
                   label: humanize(row.stage),
-                  value: Number(row.count || 0)
+                  value: Number(row.count || 0),
+                  onClick: () => {
+                    setSelectedPipelineStage(row)
+                    setShowSupportingJobs(true)
+                  }
                 }))}
-                empty="No current pipeline data."
+                empty="No active pipeline data."
                 preserveOrder
               />
+
+              {intakePending &&
+                Number(intakePending.count || 0) > 0 && (
+                  <div style={{ marginTop: 16 }}>
+                    <p style={muted}>
+                      Intake Pending is unqualified intake and is
+                      not included in Active Pipeline.
+                    </p>
+
+                    <SimpleRows
+                      rows={[
+                        {
+                          label: "Intake Pending",
+                          value: Number(
+                            intakePending.count || 0
+                          ),
+                          onClick: () => {
+                            setSelectedPipelineStage(
+                              intakePending
+                            )
+                            setShowSupportingJobs(true)
+                          }
+                        }
+                      ]}
+                      empty=""
+                      preserveOrder
+                    />
+                  </div>
+                )}
             </section>
           </div>
 
@@ -697,13 +744,47 @@ export default function ReportsPage() {
               >
                 {showSupportingJobs
                   ? "Hide Supporting Jobs"
-                  : `View Supporting Jobs (${supportingJobs.length})`}
+                  : `View Supporting Jobs (${
+                      selectedPipelineStage
+                        ? selectedPipelineStage.jobs?.length || 0
+                        : supportingJobs.length
+                    })`}
               </button>
             </div>
 
             {showSupportingJobs && (
               <>
-                {supportingJobs.length === 0 ? (
+                {selectedPipelineStage && (
+                  <div style={{ marginBottom: 14 }}>
+                    <strong>
+                      {humanize(
+                        selectedPipelineStage.stage
+                      )}
+                    </strong>
+
+                    <span style={muted}>
+                      {" "}— supporting Navigator jobs
+                    </span>
+
+                    <button
+                      type="button"
+                      style={{
+                        ...button,
+                        marginLeft: 12
+                      }}
+                      onClick={() =>
+                        setSelectedPipelineStage(null)
+                      }
+                    >
+                      Show All
+                    </button>
+                  </div>
+                )}
+
+                {(selectedPipelineStage
+                  ? selectedPipelineStage.jobs || []
+                  : supportingJobs
+                ).length === 0 ? (
                   <p style={muted}>
                     No supporting jobs for this period.
                   </p>
@@ -719,7 +800,10 @@ export default function ReportsPage() {
                         Days
                       </strong>
 
-                      {supportingJobs.map((job) => (
+                      {(selectedPipelineStage
+                        ? selectedPipelineStage.jobs || []
+                        : supportingJobs
+                      ).map((job) => (
                         <div
                           key={job.navigator_job_id}
                           style={{ display: "contents" }}
@@ -822,6 +906,7 @@ function SimpleRows({
   rows: Array<{
     label: string
     value: number
+    onClick?: () => void
   }>
   empty: string
   preserveOrder?: boolean
@@ -844,8 +929,41 @@ function SimpleRows({
   return (
     <div>
       {visible.map((row) => (
-        <div key={row.label} style={simpleRow}>
-          <span>{row.label}</span>
+        <div
+          key={row.label}
+          style={{
+            ...simpleRow,
+            ...(row.onClick
+              ? { cursor: "pointer" }
+              : {})
+          }}
+          role={row.onClick ? "button" : undefined}
+          tabIndex={row.onClick ? 0 : undefined}
+          onClick={row.onClick}
+          onKeyDown={
+            row.onClick
+              ? (event) => {
+                  if (
+                    event.key === "Enter" ||
+                    event.key === " "
+                  ) {
+                    event.preventDefault()
+                    row.onClick?.()
+                  }
+                }
+              : undefined
+          }
+        >
+          <span
+            style={
+              row.onClick
+                ? { textDecoration: "underline" }
+                : undefined
+            }
+          >
+            {row.label}
+          </span>
+
           <strong style={number}>
             {row.value}
           </strong>
