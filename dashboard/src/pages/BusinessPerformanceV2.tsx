@@ -210,6 +210,7 @@ function MetricGrid({
             ? "2px solid currentColor"
             : "1px solid #ddd",
           background: "white",
+          color: "#111",
           minHeight: 92,
         };
 
@@ -246,6 +247,7 @@ function Breakdown({
         borderRadius: 10,
         padding: 16,
         background: "white",
+          color: "#111",
       }}
     >
       <h3 style={{ marginTop: 0 }}>{title}</h3>
