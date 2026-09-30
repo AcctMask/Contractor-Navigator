@@ -23,6 +23,7 @@ import { registerSalesEmailIntakeRoutes } from "./routes/salesEmailIntake"
 import { registerBusinessDevelopmentIntakeRoutes } from "./routes/businessDevelopmentIntake"
 import { registerReportingRoutes } from "./routes/reporting"
 import { registerSalesPerformanceReportingRoutes } from "./routes/salesPerformanceReporting"
+import { registerBusinessPerformanceV2Routes } from "./routes/businessPerformanceV2"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { registerFinancialOperationsBridgeRoutes } from "./routes/financialOperationsBridge"
 import { registerOpsIntelBridgeRoutes } from "./routes/opsIntelBridge"
@@ -79,6 +80,7 @@ await registerCalendarRoutes(app)
 await registerTaskRoutes(app)
 await registerReportingRoutes(app)
 await registerSalesPerformanceReportingRoutes(app)
+await registerBusinessPerformanceV2Routes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerFinancialOperationsBridgeRoutes(app)
 await registerOpsIntelBridgeRoutes(app)

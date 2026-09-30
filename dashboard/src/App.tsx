@@ -17,7 +17,7 @@ import AcceptInvitePage from "./pages/AcceptInvite"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
 import TasksPage from "./pages/Tasks"
-import ReportsPage from "./pages/Reports"
+import BusinessPerformanceV2 from "./pages/BusinessPerformanceV2"
 import TermsPage from "./pages/Terms"
 import CommercialPipelinePage from "./pages/CommercialPipeline"
 import StormPage from "./pages/Storm"
@@ -406,7 +406,7 @@ export default function App() {
       <Route path="/" element={<ProtectedPage><DashboardPage /></ProtectedPage>} />
       <Route path="/commercial" element={<ProtectedPage><CommercialPipelinePage /></ProtectedPage>} />
       <Route path="/users" element={<ProtectedPage><UsersPage /></ProtectedPage>} />
-      <Route path="/reports" element={<ProtectedPage><ReportsPage /></ProtectedPage>} />
+      <Route path="/reports" element={<ProtectedPage><BusinessPerformanceV2 /></ProtectedPage>} />
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/job-admin" element={<ProtectedPage><JobAdminPage /></ProtectedPage>} />
       <Route
