@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 
-type Range = "7d" | "30d" | "all";
+type Range = "7d" | "30d" | "90d" | "365d" | "all";
 
 function numberValue(value: unknown): number {
   return Number(value || 0);
@@ -32,6 +32,9 @@ export async function registerBusinessPerformanceV2Routes(
 
         const range: Range =
           requestedRange === "7d" ||
+          requestedRange === "30d" ||
+          requestedRange === "90d" ||
+          requestedRange === "365d" ||
           requestedRange === "all"
             ? requestedRange
             : "30d";
@@ -61,7 +64,11 @@ export async function registerBusinessPerformanceV2Routes(
             ? ""
             : range === "7d"
               ? "and j.created_at >= now() - interval '7 days'"
-              : "and j.created_at >= now() - interval '30 days'";
+              : range === "30d"
+                ? "and j.created_at >= now() - interval '30 days'"
+                : range === "90d"
+                  ? "and j.created_at >= now() - interval '90 days'"
+                  : "and j.created_at >= now() - interval '365 days'";
 
         /*
          * V2 REPORTING CONTRACT

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { getTenantSlug } from "../lib/tenant";
 
 type GroupCount = {
+  name?: string;
   value?: string;
   label?: string;
   key?: string;
@@ -145,7 +146,7 @@ function percent(value: number) {
 }
 
 function groupLabel(row: GroupCount) {
-  return row.value || row.label || row.key || "Unknown";
+  return row.name || row.value || row.label || row.key || "Unknown";
 }
 
 function Section({
