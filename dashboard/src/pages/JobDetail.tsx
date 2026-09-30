@@ -156,43 +156,29 @@ export default function JobDetail() {
     setBotPauseReason(String(data.job.bot_pause_reason || ""))
     setCrewAssignments(Array.isArray(data.crew_assignments) ? data.crew_assignments : [])
 
-    const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
-      [
-        "manual_note",
-        "staff_note",
-        "estimate_details",
-        "lead_created",
-        "lead_intent_classified",
-        "ai_message_sent",
-        "ai_inbound_response_sent",
-        "ai_message_skipped",
-        "customer_reply",
-        "customer_reply_alert_routed",
-        "sales_intent_detected",
-        "high_intent_alert_routed",
-        "voice_intake_alert_routed",
-        "voice_ai_response_spoken",
-        "voice_ai_transcript",
-        "voice_followup_sms_sent",
-        "job_manually_updated",
-        "manual_stage_updated",
-        "production_planner_explanation_updated",
-        "ai_followup_workflow_started",
-        "ai_followup_workflow_restarted",
-        "ai_followup_workflow_ready_paused",
-        "ai_followup_paused",
-        "ai_followup_unpaused",
-        "calendar_stage_event_created",
-        "calendar_stage_event_rescheduled",
-        "calendar_event_rescheduled",
-        "task_created",
-        "task_rescheduled",
-        "task_deleted",
-        "job_archived",
-        "document_package_sent",
-        "document_package_signed",
-      ].includes(String(event.kind || "").toLowerCase())
-    )
+    // Project History contract:
+    // Job-linked timeline events are presumed to be legitimate durable
+    // project history unless they are explicitly known technical/noise events.
+    //
+    // This intentionally avoids a positive allowlist so future AA modules can
+    // contribute job history without requiring JobDetail to be updated for
+    // every new legitimate event kind.
+    const projectHistoryExcludedKinds = new Set([
+      "voice_call_received",
+      "voice_ai_summary_created",
+      "voice_intake_started",
+      "voice_generic_lead_alert_skipped",
+      "voice_reason_captured",
+      "voice_name_captured",
+      "voice_address_captured",
+      "voice_callback_number_captured",
+      "voice_callback_time_captured",
+    ])
+
+    const jobTimelineNotes = (data.timeline || []).filter((event: any) => {
+      const kind = String(event?.kind || "").toLowerCase()
+      return !projectHistoryExcludedKinds.has(kind)
+    })
 
     setNotes(jobTimelineNotes)
   }
