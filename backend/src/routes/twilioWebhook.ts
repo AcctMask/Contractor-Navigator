@@ -221,14 +221,14 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
   return twimlResponse(`
   ${sayBlock("Thank you for calling Good to Go Roofing.")}
 
+  ${sayBlock("This call may be recorded for customer service and training purposes.")}
+
   <Start>
     <Recording
       recordingStatusCallback="${xmlEscape(recordingCallback)}"
       recordingStatusCallbackMethod="POST"
     />
   </Start>
-
-  ${sayBlock("This call may be recorded for customer service and training purposes.")}
 
   <Gather input="speech dtmf" numDigits="1" method="POST" action="${xmlEscape(actionUrl)}" speechTimeout="auto" language="${VOICE_LANGUAGE}">
     ${sayBlock(prompt)}
