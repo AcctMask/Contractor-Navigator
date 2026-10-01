@@ -827,7 +827,8 @@ async function logUserManagementActivity(
     | "user_password_reset"
     | "user_deactivated"
     | "user_financials_authorization_changed"
-    | "user_mobile_phone_changed",
+    | "user_mobile_phone_changed"
+    | "user_full_name_changed",
   message: string,
   meta: Record<string, unknown>
 ) {
@@ -1023,6 +1024,112 @@ export async function updateManagedUserRoleByTenantSlug(
 
   return user
 }
+
+export async function updateManagedUserFullNameByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  fullNameInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have their name changed"
+    )
+  }
+
+  const nextFullName =
+    String(fullNameInput || "")
+      .trim()
+      .replace(/\s+/g, " ")
+
+  if (!nextFullName) {
+    throw new Error(
+      "Full name is required"
+    )
+  }
+
+  if (
+    String(target.full_name || "") ===
+    nextFullName
+  ) {
+    return target
+  }
+
+  const result =
+    await pool.query(
+      `
+        update app_users
+        set
+          full_name = $1,
+          updated_at = now()
+        where tenant_id = $2
+          and id = $3
+        returning
+          id,
+          tenant_id,
+          email,
+          full_name,
+          mobile_phone,
+          role,
+          is_active,
+          financials_authorized,
+          deactivated_at,
+          created_at,
+          updated_at
+      `,
+      [
+        nextFullName,
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    result.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_full_name_changed",
+    `Navigator user name changed from ${target.full_name || target.email} to ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      old_full_name:
+        target.full_name || null,
+      new_full_name:
+        user.full_name,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
 
 export async function updateManagedUserMobilePhoneByTenantSlug(
   tenantSlug: string,

@@ -76,6 +76,11 @@ export default function UsersPage() {
     useState("staff")
 
   const [
+    managedFullName,
+    setManagedFullName,
+  ] = useState("")
+
+  const [
     managedMobilePhone,
     setManagedMobilePhone,
   ] = useState("")
@@ -329,6 +334,11 @@ export default function UsersPage() {
       user.role ||
         "staff"
     )
+    setManagedFullName(
+      user.full_name ||
+        ""
+    )
+
     setManagedMobilePhone(
       user.mobile_phone ||
         ""
@@ -341,12 +351,100 @@ export default function UsersPage() {
 
   function closeManageUser() {
     setSelectedUser(null)
+    setManagedFullName("")
     setManagedMobilePhone("")
     setNewPassword("")
     setConfirmNewPassword("")
     setManageError("")
     setManageStatus("")
   }
+
+  async function saveManagedFullName() {
+    if (
+      !selectedUser?.id
+    ) {
+      return
+    }
+
+    const nextFullName =
+      managedFullName
+        .trim()
+        .replace(/\s+/g, " ")
+
+    if (!nextFullName) {
+      setManageError(
+        "Full name is required"
+      )
+      setManageStatus("")
+      return
+    }
+
+    setManaging(true)
+    setManageError("")
+    setManageStatus(
+      "Saving name..."
+    )
+
+    try {
+      const res =
+        await fetch(
+          `${API_BASE}/auth/${getTenantSlug()}/users/${selectedUser.id}/full-name`,
+          {
+            method:
+              "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${getToken()}`,
+            },
+            body:
+              JSON.stringify({
+                full_name:
+                  nextFullName,
+              }),
+          }
+        )
+
+      const json =
+        await res.json()
+          .catch(() => ({}))
+
+      if (
+        !res.ok ||
+        !json?.ok
+      ) {
+        throw new Error(
+          json?.error ||
+            "User name update failed"
+        )
+      }
+
+      setSelectedUser(
+        json.user
+      )
+
+      setManagedFullName(
+        json.user?.full_name ||
+          nextFullName
+      )
+
+      setManageStatus(
+        "User name updated successfully"
+      )
+
+      await loadAll()
+    } catch (err: any) {
+      setManageError(
+        err?.message ||
+          "User name update failed"
+      )
+      setManageStatus("")
+    } finally {
+      setManaging(false)
+    }
+  }
+
 
   async function saveManagedMobilePhone() {
     if (
@@ -1039,6 +1137,56 @@ export default function UsersPage() {
                 {formatDate(
                   selectedUser.created_at
                 )}
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    fontWeight: 700,
+                  }}
+                >
+                  Full Name
+                </label>
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <input
+                    value={managedFullName}
+                    onChange={(e) =>
+                      setManagedFullName(
+                        e.target.value
+                      )
+                    }
+                    placeholder="Full name"
+                    disabled={managing}
+                    style={{
+                      ...inputStyle,
+                      flex: "1 1 260px",
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    onClick={saveManagedFullName}
+                    disabled={
+                      managing ||
+                      !managedFullName.trim() ||
+                      managedFullName.trim() ===
+                        (selectedUser.full_name || "").trim()
+                    }
+                    style={secondaryButtonStyle}
+                  >
+                    Save Name
+                  </button>
+                </div>
               </div>
 
               <div

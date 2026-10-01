@@ -12,6 +12,7 @@ import {
   updateManagedUserRoleByTenantSlug,
   updateManagedUserFinancialsAuthorizationByTenantSlug,
   updateManagedUserMobilePhoneByTenantSlug,
+  updateManagedUserFullNameByTenantSlug,
   resetManagedUserPasswordByTenantSlug,
   deactivateManagedUserByTenantSlug,
   recordUserInvitationEmailSent,
@@ -455,6 +456,73 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       }
     }
   })
+
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/full-name",
+    async (request: any, reply) => {
+      try {
+        const tenantSlug =
+          String(
+            request.params?.tenantSlug ||
+              ""
+          ).trim()
+
+        const manager =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!manager) {
+          return
+        }
+
+        const userId =
+          Number(
+            request.params?.userId
+          )
+
+        if (
+          !tenantSlug ||
+          !Number.isInteger(userId) ||
+          userId <= 0
+        ) {
+          return reply.code(400).send({
+            ok: false,
+            error:
+              "Valid tenant and user are required",
+          })
+        }
+
+        const { full_name } =
+          request.body || {}
+
+        const user =
+          await updateManagedUserFullNameByTenantSlug(
+            tenantSlug,
+            userId,
+            full_name,
+            manager.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (error: any) {
+        request.log.error(error)
+
+        return reply.code(400).send({
+          ok: false,
+          error:
+            error?.message ||
+            "Unable to update user name",
+        })
+      }
+    }
+  )
+
 
   app.patch(
     "/auth/:tenantSlug/users/:userId/mobile-phone",
