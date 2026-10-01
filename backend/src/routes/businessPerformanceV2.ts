@@ -705,6 +705,23 @@ export async function registerBusinessPerformanceV2Routes(
               )
           );
 
+        const aaSourceJobs = reportableJobs.filter(
+          (job: any) =>
+            !insuranceJobs.includes(job) &&
+            [
+              "Instant Estimator",
+              "Voice Intake",
+              "SMS Intake",
+              "Universal Outreach"
+            ].includes(job.entry.channel)
+        );
+
+        const unknownSourceJobs = reportableJobs.filter(
+          (job: any) =>
+            !insuranceJobs.includes(job) &&
+            !aaSourceJobs.includes(job)
+        );
+
         const opportunities =
           reportableJobs.length;
 
@@ -805,7 +822,22 @@ export async function registerBusinessPerformanceV2Routes(
             by_entry_channel: groupBy(
               reportableJobs,
               (job) => job.entry.channel
-            )
+            ),
+
+            source_categories: [
+              {
+                name: "AA Sources",
+                count: aaSourceJobs.length
+              },
+              {
+                name: "Insurance / Carrier / TPA Sources",
+                count: insuranceJobs.length
+              },
+              {
+                name: "Unknown / Other",
+                count: unknownSourceJobs.length
+              }
+            ]
           },
 
           actual_assistant: {

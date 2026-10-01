@@ -90,6 +90,7 @@ type ReportData = {
   acquisition: {
     by_source: GroupCount[];
     by_entry_channel: GroupCount[];
+    source_categories: GroupCount[];
   };
 
   actual_assistant: {
@@ -259,37 +260,70 @@ function Breakdown({
       {rows.length === 0 ? (
         <div style={{ color: "#666" }}>No evidence in this period.</div>
       ) : (
-        rows.map((row, index) => {
-          const percentage =
-            denominator > 0 ? (row.count / denominator) * 100 : 0;
+        <>
+          {rows.map((row, index) => {
+            const percentage =
+              denominator > 0 ? (row.count / denominator) * 100 : 0;
 
-          return (
-            <div
-              key={`${groupLabel(row)}-${index}`}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                padding: "8px 0",
-                borderTop: index ? "1px solid #eee" : undefined,
-              }}
-            >
-              <span>{groupLabel(row)}</span>
-              <strong>
-                {row.count}
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontWeight: 400,
-                    color: "#666",
-                  }}
-                >
-                  ({percentage.toFixed(1)}%)
-                </span>
-              </strong>
-            </div>
-          );
-        })
+            return (
+              <div
+                key={`${groupLabel(row)}-${index}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "8px 0",
+                  borderTop: index ? "1px solid #eee" : undefined,
+                }}
+              >
+                <span>{groupLabel(row)}</span>
+                <strong>
+                  {row.count}
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontWeight: 400,
+                      color: "#666",
+                    }}
+                  >
+                    ({percentage.toFixed(1)}%)
+                  </span>
+                </strong>
+              </div>
+            );
+          })}
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              padding: "10px 0 0",
+              marginTop: 4,
+              borderTop: "2px solid #ccc",
+            }}
+          >
+            <strong>Total</strong>
+            <strong>
+              {rows.reduce((sum, row) => sum + row.count, 0)}
+              <span
+                style={{
+                  marginLeft: 8,
+                  fontWeight: 400,
+                  color: "#666",
+                }}
+              >
+                ({denominator > 0
+                  ? (
+                      (rows.reduce((sum, row) => sum + row.count, 0) /
+                        denominator) *
+                      100
+                    ).toFixed(1)
+                  : "0.0"}%)
+              </span>
+            </strong>
+          </div>
+        </>
       )}
     </div>
   );
@@ -502,11 +536,129 @@ export default function BusinessPerformanceV2() {
             gap: 16,
           }}
         >
-          <Breakdown
-            title="Acquisition Source"
-            rows={data.acquisition.by_source}
-            denominator={data.population.reportable_opportunities}
-          />
+          <div>
+            <Breakdown
+              title="Acquisition Source"
+              rows={data.acquisition.by_source}
+              denominator={data.population.reportable_opportunities}
+            />
+
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 10,
+                borderTop: "2px solid #ccc",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "6px 0",
+                }}
+              >
+                <strong>AA Sources</strong>
+                <strong>
+                  {data.acquisition.source_categories.find(
+                    (row) => row.name === "AA Sources"
+                  )?.count ?? 0}
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontWeight: 400,
+                      color: "#666",
+                    }}
+                  >
+                    (
+                    {data.population.reportable_opportunities > 0
+                      ? (
+                          ((data.acquisition.source_categories.find(
+                            (row) => row.name === "AA Sources"
+                          )?.count ?? 0) /
+                            data.population.reportable_opportunities) *
+                          100
+                        ).toFixed(1)
+                      : "0.0"}
+                    %)
+                  </span>
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "6px 0",
+                }}
+              >
+                <strong>Insurance / Carrier / TPA Sources</strong>
+                <strong>
+                  {data.acquisition.source_categories.find(
+                    (row) =>
+                      row.name === "Insurance / Carrier / TPA Sources"
+                  )?.count ?? 0}
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontWeight: 400,
+                      color: "#666",
+                    }}
+                  >
+                    (
+                    {data.population.reportable_opportunities > 0
+                      ? (
+                          ((data.acquisition.source_categories.find(
+                            (row) =>
+                              row.name ===
+                              "Insurance / Carrier / TPA Sources"
+                          )?.count ?? 0) /
+                            data.population.reportable_opportunities) *
+                          100
+                        ).toFixed(1)
+                      : "0.0"}
+                    %)
+                  </span>
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "6px 0",
+                }}
+              >
+                <strong>Unknown / Other</strong>
+                <strong>
+                  {data.acquisition.source_categories.find(
+                    (row) => row.name === "Unknown / Other"
+                  )?.count ?? 0}
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontWeight: 400,
+                      color: "#666",
+                    }}
+                  >
+                    (
+                    {data.population.reportable_opportunities > 0
+                      ? (
+                          ((data.acquisition.source_categories.find(
+                            (row) => row.name === "Unknown / Other"
+                          )?.count ?? 0) /
+                            data.population.reportable_opportunities) *
+                          100
+                        ).toFixed(1)
+                      : "0.0"}
+                    %)
+                  </span>
+                </strong>
+              </div>
+            </div>
+          </div>
           <Breakdown
             title="Entry Channel"
             rows={data.acquisition.by_entry_channel}
