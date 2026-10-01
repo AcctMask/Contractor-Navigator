@@ -859,7 +859,7 @@ export async function registerBusinessPerformanceV2Routes(
                 "Unknown"
             ),
             by_sales_source: groupBy(
-              insuranceJobs,
+              reportableJobs,
               (job) =>
                 job.acquisition.source ||
                 "Unknown"
