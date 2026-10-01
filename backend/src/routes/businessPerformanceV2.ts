@@ -857,6 +857,12 @@ export async function registerBusinessPerformanceV2Routes(
               (job) =>
                 job.insurance.carrier ||
                 "Unknown"
+            ),
+            by_sales_source: groupBy(
+              insuranceJobs,
+              (job) =>
+                job.acquisition.source ||
+                "Unknown"
             )
           },
 

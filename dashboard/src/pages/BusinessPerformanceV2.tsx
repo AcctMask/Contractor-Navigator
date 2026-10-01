@@ -106,6 +106,7 @@ type ReportData = {
     jobs: number;
     by_assignment_source: GroupCount[];
     by_carrier: GroupCount[];
+    by_sales_source: GroupCount[];
   };
 
   supporting_jobs: {
@@ -581,6 +582,10 @@ export default function BusinessPerformanceV2() {
           <Breakdown
             title="Carrier"
             rows={data.insurance.by_carrier}
+          />
+          <Breakdown
+            title="Sales Source"
+            rows={data.insurance.by_sales_source}
           />
         </div>
       </Section>
