@@ -511,10 +511,6 @@ export default function BusinessPerformanceV2() {
               active: drilldown === "production",
             },
             {
-              label: "Tarp → Roof Conversions",
-              value: data.funnel.tarp_roof_conversions,
-            },
-            {
               label: "Invoiced",
               value: data.funnel.invoiced,
               onClick: select("invoiced"),
@@ -525,6 +521,10 @@ export default function BusinessPerformanceV2() {
               value: data.funnel.paid,
               onClick: select("paid"),
               active: drilldown === "paid",
+            },
+            {
+              label: "Tarp → Roof Conversions",
+              value: data.funnel.tarp_roof_conversions,
             },
           ]}
         />
