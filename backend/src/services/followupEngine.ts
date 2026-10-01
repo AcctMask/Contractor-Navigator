@@ -3202,32 +3202,69 @@ export async function handleInboundMessageByTenantSlug(
       message: trimmed,
     })
 
-    const sms = await sendSMS(callbackNumber, salesIntentReply, replyFrom)
+    /*
+     * Qualified inbound intent must change the Navigator stage before
+     * the current AI response is sent. This preserves the existing
+     * stage/workflow architecture: the customer response qualifies
+     * the job first, then the Lead workflow owns the conversation.
+     *
+     * Do not redesign the stage system here. This is only the timing
+     * boundary between classification and the next AI response.
+     */
+    const qualifiedLeadIntent =
+      classification === "estimate_request" ||
+      classification === "inspection_request" ||
+      classification === "contract_request"
 
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "ai_inbound_response_sent",
-      salesIntentReply,
-      {
-        intent: salesIntent,
-        from,
-        to: callbackNumber,
-        channel: "sms",
-        twilio_sid: sms.sid,
-        twilio_status: sms.status,
-      }
-    )
+    if (qualifiedLeadIntent) {
+      await updateJobRoutingForClassification(
+        tenantId,
+        jobId,
+        classification
+      )
+
+      await pool.query(
+        `
+        update jobs
+        set
+          stage = 'lead',
+          updated_at = now()
+        where tenant_id = $1
+          and id = $2
+        `,
+        [tenantId, jobId]
+      )
+
+      job.stage = "lead"
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "qualified_lead_stage_entered",
+        `Qualified inbound ${classification} moved job to Lead before the next AI response.`,
+        {
+          classification,
+          from,
+          channel: "sms",
+        }
+      )
+    }
 
     let buyingSignalAlertResult: any = null
 
     const isHighIntent =
+      qualifiedLeadIntent ||
       salesIntent === "contract_request" ||
       matchedSignals.length > 0 ||
       trimmed.toLowerCase().includes("ready") ||
       trimmed.toLowerCase().includes("move forward") ||
       trimmed.toLowerCase().includes("get started")
 
+    /*
+     * Buying-signal detection/alerting remains exactly where it belongs:
+     * after classification and stage qualification, but before the next
+     * customer-facing AI response.
+     */
     if (isHighIntent) {
       /*
        * Buying-signal durability is a Navigator invariant.
@@ -3301,6 +3338,29 @@ export async function handleInboundMessageByTenantSlug(
         channel: "sms",
       })
     }
+
+    /*
+     * The stage/alert boundary is complete. Only now send the immediate
+     * sales-intent response. Subsequent follow-up scheduling sees the
+     * updated Lead stage and uses the Lead workflow.
+     */
+    const sms = await sendSMS(callbackNumber, salesIntentReply, replyFrom)
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "ai_inbound_response_sent",
+      salesIntentReply,
+      {
+        intent: salesIntent,
+        from,
+        to: callbackNumber,
+        channel: "sms",
+        twilio_sid: sms.sid,
+        twilio_status: sms.status,
+        stage: job.stage,
+      }
+    )
 
     if (salesIntent === "callback_request") {
       await pool.query(

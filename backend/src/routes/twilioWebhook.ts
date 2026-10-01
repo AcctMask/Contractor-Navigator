@@ -219,6 +219,8 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
   const recordingCallback = `${buildBaseUrl()}/twilio/voice/recording-status`
 
   return twimlResponse(`
+  ${sayBlock("Thank you for calling Good to Go Roofing.")}
+
   <Start>
     <Recording
       recordingStatusCallback="${xmlEscape(recordingCallback)}"
@@ -238,7 +240,6 @@ function gatherSpeechOrDigitsXml(prompt: string, actionUrl: string) {
 
 function firstPrompt() {
   return [
-    "Thank you for calling Good to Go Roofing.",
     "For emergency tarp or emergency service, press 1.",
     "For roofing service, an estimate, repair, production, or an existing project, press 2.",
     "For contractor, vendor, or business partnership inquiries, press 3.",
