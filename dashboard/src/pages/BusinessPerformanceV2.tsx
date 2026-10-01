@@ -238,9 +238,11 @@ function MetricGrid({
 function Breakdown({
   title,
   rows,
+  denominator,
 }: {
   title: string;
   rows: GroupCount[];
+  denominator: number;
 }) {
   return (
     <div
@@ -257,21 +259,37 @@ function Breakdown({
       {rows.length === 0 ? (
         <div style={{ color: "#666" }}>No evidence in this period.</div>
       ) : (
-        rows.map((row, index) => (
-          <div
-            key={`${groupLabel(row)}-${index}`}
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
-              padding: "8px 0",
-              borderTop: index ? "1px solid #eee" : undefined,
-            }}
-          >
-            <span>{groupLabel(row)}</span>
-            <strong>{row.count}</strong>
-          </div>
-        ))
+        rows.map((row, index) => {
+          const percentage =
+            denominator > 0 ? (row.count / denominator) * 100 : 0;
+
+          return (
+            <div
+              key={`${groupLabel(row)}-${index}`}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "8px 0",
+                borderTop: index ? "1px solid #eee" : undefined,
+              }}
+            >
+              <span>{groupLabel(row)}</span>
+              <strong>
+                {row.count}
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontWeight: 400,
+                    color: "#666",
+                  }}
+                >
+                  ({percentage.toFixed(1)}%)
+                </span>
+              </strong>
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -487,10 +505,12 @@ export default function BusinessPerformanceV2() {
           <Breakdown
             title="Acquisition Source"
             rows={data.acquisition.by_source}
+            denominator={data.population.reportable_opportunities}
           />
           <Breakdown
             title="Entry Channel"
             rows={data.acquisition.by_entry_channel}
+            denominator={data.population.reportable_opportunities}
           />
         </div>
       </Section>
@@ -530,6 +550,14 @@ export default function BusinessPerformanceV2() {
             {
               label: "Signed After AA",
               value: data.actual_assistant.signed_after_engagement,
+              detail:
+                data.actual_assistant.engaged_opportunities > 0
+                  ? `${(
+                      (data.actual_assistant.signed_after_engagement /
+                        data.actual_assistant.engaged_opportunities) *
+                      100
+                    ).toFixed(1)}% of AA Engaged`
+                  : "0.0% of AA Engaged",
               onClick: select("aa_signed"),
               active: drilldown === "aa_signed",
             },
@@ -546,17 +574,33 @@ export default function BusinessPerformanceV2() {
             {
               label: "Raw Customer Records",
               value: data.population.raw_customer_records,
+              detail: "100.0% of raw intake population",
             },
             {
               label: "Reportable Opportunities",
               value: data.population.reportable_opportunities,
+              detail:
+                data.population.raw_customer_records > 0
+                  ? `${(
+                      (data.population.reportable_opportunities /
+                        data.population.raw_customer_records) *
+                      100
+                    ).toFixed(1)}% of raw records`
+                  : "0.0% of raw records",
               onClick: select("opportunities"),
               active: drilldown === "opportunities",
             },
             {
               label: "Activity Only",
               value: data.population.activity_only_records,
-              detail: "Includes intake activity lacking qualifying business evidence",
+              detail:
+                data.population.raw_customer_records > 0
+                  ? `${(
+                      (data.population.activity_only_records /
+                        data.population.raw_customer_records) *
+                      100
+                    ).toFixed(1)}% of raw records — includes intake activity lacking qualifying business evidence`
+                  : "0.0% of raw records — includes intake activity lacking qualifying business evidence",
               onClick: select("activity_only"),
               active: drilldown === "activity_only",
             },
@@ -578,14 +622,17 @@ export default function BusinessPerformanceV2() {
           <Breakdown
             title="Assignment Source"
             rows={data.insurance.by_assignment_source}
+            denominator={data.insurance.jobs}
           />
           <Breakdown
             title="Carrier"
             rows={data.insurance.by_carrier}
+            denominator={data.insurance.jobs}
           />
           <Breakdown
             title="Sales Source"
             rows={data.insurance.by_sales_source}
+            denominator={data.population.reportable_opportunities}
           />
         </div>
       </Section>
