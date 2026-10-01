@@ -95,6 +95,46 @@ export async function registerBusinessPerformanceV2Routes(
          * Unknown evidence is preserved as Unknown.
          */
 
+        const tarpRoofConversionResult = await pool.query(
+          `
+            select count(*)::int as tarp_roof_conversions
+            from (
+              select
+                j.id,
+                min(completed_event.created_at) as completed_at
+              from jobs j
+              join lateral (
+                select min(te.created_at) as tarp_at
+                from timeline_events te
+                where te.tenant_id = j.tenant_id
+                  and te.job_id = j.id
+                  and te.kind = 'manual_stage_updated'
+                  and coalesce(te.meta->>'stage', '') = 'tarp_complete'
+              ) tarp_event on tarp_event.tarp_at is not null
+              join lateral (
+                select min(te.created_at) as created_at
+                from timeline_events te
+                where te.tenant_id = j.tenant_id
+                  and te.job_id = j.id
+                  and te.kind = 'manual_stage_updated'
+                  and coalesce(te.meta->>'stage', '') = 'completed'
+                  and te.created_at > tarp_event.tarp_at
+              ) completed_event on completed_event.created_at is not null
+              where j.tenant_id = $1
+              group by j.id
+            ) conversions
+            where conversions.completed_at >=
+              case
+                when $2 = '7d' then now() - interval '7 days'
+                when $2 = '30d' then now() - interval '30 days'
+                when $2 = '90d' then now() - interval '90 days'
+                when $2 = '365d' then now() - interval '365 days'
+                else '-infinity'::timestamptz
+              end
+          `,
+          [tenant.id, range]
+        );
+
         const result = await pool.query(
           `
             with selected_jobs as (
@@ -796,6 +836,10 @@ export async function registerBusinessPerformanceV2Routes(
 
           funnel: {
             opportunities,
+            tarp_roof_conversions:
+              Number(
+                tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0
+              ),
             estimates_sent: estimates,
             estimate_rate:
               percent(estimates, opportunities),

@@ -85,6 +85,7 @@ type ReportData = {
     production: number;
     invoiced: number;
     paid: number;
+    tarp_roof_conversions: number;
   };
 
   acquisition: {
@@ -508,6 +509,10 @@ export default function BusinessPerformanceV2() {
               value: data.funnel.production,
               onClick: select("production"),
               active: drilldown === "production",
+            },
+            {
+              label: "Tarp → Roof Conversions",
+              value: data.funnel.tarp_roof_conversions,
             },
             {
               label: "Invoiced",
