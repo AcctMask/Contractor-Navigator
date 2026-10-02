@@ -7,6 +7,7 @@ type GroupCount = {
   label?: string;
   key?: string;
   count: number;
+  work_scheduled?: number;
 };
 
 type JobRecord = {
@@ -50,6 +51,7 @@ type JobRecord = {
     production: boolean;
     invoiced: boolean;
     paid: boolean;
+    work_scheduled: boolean;
   };
 };
 
@@ -96,6 +98,7 @@ type ReportData = {
 
   actual_assistant: {
     engaged_opportunities: number;
+    work_scheduled: number;
     engagement_rate: number;
     buying_signals_after_engagement: number;
     estimates_after_engagement: number;
@@ -258,6 +261,28 @@ function Breakdown({
     >
       <h3 style={{ marginTop: 0 }}>{title}</h3>
 
+      {rows.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 95px 120px",
+            gap: 10,
+            paddingBottom: 7,
+            fontSize: 11,
+            color: "#666",
+            borderBottom: "1px solid #ddd",
+          }}
+        >
+          <span />
+          <strong style={{ textAlign: "right" }}>
+            Opportunities
+          </strong>
+          <strong style={{ textAlign: "right" }}>
+            Work / Scheduled
+          </strong>
+        </div>
+      )}
+
       {rows.length === 0 ? (
         <div style={{ color: "#666" }}>No evidence in this period.</div>
       ) : (
@@ -270,25 +295,30 @@ function Breakdown({
               <div
                 key={`${groupLabel(row)}-${index}`}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
+                  display: "grid",
+                  gridTemplateColumns: "1fr 95px 120px",
+                  gap: 10,
                   padding: "8px 0",
                   borderTop: index ? "1px solid #eee" : undefined,
+                  alignItems: "center",
                 }}
               >
                 <span>{groupLabel(row)}</span>
-                <strong>
+                <strong style={{ textAlign: "right" }}>
                   {row.count}
                   <span
                     style={{
-                      marginLeft: 8,
+                      display: "block",
+                      fontSize: 11,
                       fontWeight: 400,
                       color: "#666",
                     }}
                   >
-                    ({percentage.toFixed(1)}%)
+                    {percentage.toFixed(1)}%
                   </span>
+                </strong>
+                <strong style={{ textAlign: "right" }}>
+                  {row.work_scheduled ?? 0}
                 </strong>
               </div>
             );
@@ -296,32 +326,24 @@ function Breakdown({
 
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 12,
+              display: "grid",
+              gridTemplateColumns: "1fr 95px 120px",
+              gap: 10,
               padding: "10px 0 0",
               marginTop: 4,
               borderTop: "2px solid #ccc",
+              alignItems: "center",
             }}
           >
             <strong>Total</strong>
-            <strong>
+            <strong style={{ textAlign: "right" }}>
               {rows.reduce((sum, row) => sum + row.count, 0)}
-              <span
-                style={{
-                  marginLeft: 8,
-                  fontWeight: 400,
-                  color: "#666",
-                }}
-              >
-                ({denominator > 0
-                  ? (
-                      (rows.reduce((sum, row) => sum + row.count, 0) /
-                        denominator) *
-                      100
-                    ).toFixed(1)
-                  : "0.0"}%)
-              </span>
+            </strong>
+            <strong style={{ textAlign: "right" }}>
+              {rows.reduce(
+                (sum, row) => sum + (row.work_scheduled ?? 0),
+                0
+              )}
             </strong>
           </div>
         </>
@@ -681,7 +703,9 @@ export default function BusinessPerformanceV2() {
             {
               label: "AA Engaged",
               value: data.actual_assistant.engaged_opportunities,
-              detail: percent(data.actual_assistant.engagement_rate),
+              detail:
+                `${percent(data.actual_assistant.engagement_rate)} · ` +
+                `${data.actual_assistant.work_scheduled} Work / Scheduled`,
               onClick: select("aa_engaged"),
               active: drilldown === "aa_engaged",
             },
@@ -824,6 +848,7 @@ export default function BusinessPerformanceV2() {
                   "First AA",
                   "Assignment Source",
                   "Carrier",
+                  "Work / Scheduled",
                   "Estimate",
                   "Contract",
                   "Signed",
@@ -885,6 +910,9 @@ export default function BusinessPerformanceV2() {
                   </td>
                   <td style={{ padding: 8 }}>
                     {job.insurance.carrier || "—"}
+                  </td>
+                  <td style={{ padding: 8 }}>
+                    {job.outcomes.work_scheduled ? "Yes" : "—"}
                   </td>
                   <td style={{ padding: 8 }}>
                     {job.outcomes.estimate ? "Yes" : "—"}

@@ -480,7 +480,18 @@ export async function registerBusinessPerformanceV2Routes(
                 ) as invoiced_evidence,
 
                 stage = 'paid'
-                  as paid_evidence
+                  as paid_evidence,
+
+                (
+                  first_package_signed_at is not null
+                  or stage in (
+                    'contract_signed',
+                    'pre_production',
+                    'in_production',
+                    'invoiced',
+                    'paid'
+                  )
+                ) as work_scheduled_evidence
 
               from interpreted
             )
@@ -606,7 +617,9 @@ export async function registerBusinessPerformanceV2Routes(
                 row.production_evidence === true,
               invoiced:
                 row.invoiced_evidence === true,
-              paid: row.paid_evidence === true
+              paid: row.paid_evidence === true,
+              work_scheduled:
+                row.work_scheduled_evidence === true
             }
           };
         });
@@ -687,6 +700,12 @@ export async function registerBusinessPerformanceV2Routes(
             job.actual_assistant.engaged
         );
 
+        const aaWorkScheduled =
+          engagedJobs.filter(
+            (job: any) =>
+              job.outcomes.work_scheduled
+          ).length;
+
         const aaAfter = (
           key:
             | "buying_signal_after_engagement"
@@ -716,6 +735,11 @@ export async function registerBusinessPerformanceV2Routes(
             .map(([name, groupedJobs]) => ({
               name,
               count: groupedJobs.length,
+              work_scheduled:
+                groupedJobs.filter(
+                  (job: any) =>
+                    job.outcomes.work_scheduled
+                ).length,
               job_ids: groupedJobs.map(
                 (job: any) =>
                   job.navigator_job_id
@@ -871,15 +895,30 @@ export async function registerBusinessPerformanceV2Routes(
             source_categories: [
               {
                 name: "AA Sources",
-                count: aaSourceJobs.length
+                count: aaSourceJobs.length,
+                work_scheduled:
+                  aaSourceJobs.filter(
+                    (job: any) =>
+                      job.outcomes.work_scheduled
+                  ).length
               },
               {
                 name: "Insurance / Carrier / TPA Sources",
-                count: insuranceJobs.length
+                count: insuranceJobs.length,
+                work_scheduled:
+                  insuranceJobs.filter(
+                    (job: any) =>
+                      job.outcomes.work_scheduled
+                  ).length
               },
               {
                 name: "Unknown / Other",
-                count: unknownSourceJobs.length
+                count: unknownSourceJobs.length,
+                work_scheduled:
+                  unknownSourceJobs.filter(
+                    (job: any) =>
+                      job.outcomes.work_scheduled
+                  ).length
               }
             ]
           },
@@ -887,6 +926,9 @@ export async function registerBusinessPerformanceV2Routes(
           actual_assistant: {
             engaged_opportunities:
               engagedJobs.length,
+
+            work_scheduled:
+              aaWorkScheduled,
 
             engagement_rate:
               percent(
