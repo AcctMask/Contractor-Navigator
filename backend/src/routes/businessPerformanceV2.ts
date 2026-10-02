@@ -97,11 +97,16 @@ export async function registerBusinessPerformanceV2Routes(
 
         const tarpRoofConversionResult = await pool.query(
           `
-            select count(*)::int as tarp_roof_conversions
+            select
+              count(*)::int as tarp_roof_conversions,
+              coalesce(
+                array_agg(conversions.id order by conversions.id),
+                '{}'::int[]
+              ) as tarp_roof_conversion_job_ids
             from (
               select
                 j.id,
-                min(completed_event.created_at) as completed_at
+                min(qualifying_event.created_at) as qualifying_at
               from jobs j
               join lateral (
                 select min(te.created_at) as tarp_at
@@ -117,13 +122,19 @@ export async function registerBusinessPerformanceV2Routes(
                 where te.tenant_id = j.tenant_id
                   and te.job_id = j.id
                   and te.kind = 'manual_stage_updated'
-                  and coalesce(te.meta->>'stage', '') = 'completed'
+                  and coalesce(te.meta->>'stage', '') in (
+                    'roof_repair',
+                    'roof_replacement',
+                    'completed',
+                    'invoiced',
+                    'paid'
+                  )
                   and te.created_at > tarp_event.tarp_at
-              ) completed_event on completed_event.created_at is not null
+              ) qualifying_event on qualifying_event.created_at is not null
               where j.tenant_id = $1
               group by j.id
             ) conversions
-            where conversions.completed_at >=
+            where conversions.qualifying_at >=
               case
                 when $2 = '7d' then now() - interval '7 days'
                 when $2 = '30d' then now() - interval '30 days'
@@ -864,6 +875,11 @@ export async function registerBusinessPerformanceV2Routes(
               Number(
                 tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0
               ),
+            tarp_roof_conversion_job_ids:
+              (
+                tarpRoofConversionResult.rows[0]
+                  ?.tarp_roof_conversion_job_ids || []
+              ).map((id: any) => numberValue(id)),
             estimates_sent: estimates,
             estimate_rate:
               percent(estimates, opportunities),
@@ -896,6 +912,9 @@ export async function registerBusinessPerformanceV2Routes(
               {
                 name: "AA Sources",
                 count: aaSourceJobs.length,
+                job_ids: aaSourceJobs.map(
+                  (job: any) => job.navigator_job_id
+                ),
                 work_scheduled:
                   aaSourceJobs.filter(
                     (job: any) =>
@@ -905,6 +924,9 @@ export async function registerBusinessPerformanceV2Routes(
               {
                 name: "Insurance / Carrier / TPA Sources",
                 count: insuranceJobs.length,
+                job_ids: insuranceJobs.map(
+                  (job: any) => job.navigator_job_id
+                ),
                 work_scheduled:
                   insuranceJobs.filter(
                     (job: any) =>
@@ -914,6 +936,9 @@ export async function registerBusinessPerformanceV2Routes(
               {
                 name: "Unknown / Other",
                 count: unknownSourceJobs.length,
+                job_ids: unknownSourceJobs.map(
+                  (job: any) => job.navigator_job_id
+                ),
                 work_scheduled:
                   unknownSourceJobs.filter(
                     (job: any) =>

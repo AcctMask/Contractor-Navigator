@@ -8,6 +8,7 @@ type GroupCount = {
   key?: string;
   count: number;
   work_scheduled?: number;
+  job_ids?: number[];
 };
 
 type JobRecord = {
@@ -88,6 +89,7 @@ type ReportData = {
     invoiced: number;
     paid: number;
     tarp_roof_conversions: number;
+    tarp_roof_conversion_job_ids?: number[];
   };
 
   acquisition: {
@@ -244,10 +246,15 @@ function Breakdown({
   title,
   rows,
   denominator,
+  onSelectJobs,
 }: {
   title: string;
   rows: GroupCount[];
   denominator: number;
+  onSelectJobs?: (
+    jobIds: number[],
+    workScheduledOnly?: boolean
+  ) => void;
 }) {
   return (
     <div
@@ -305,7 +312,28 @@ function Breakdown({
               >
                 <span>{groupLabel(row)}</span>
                 <strong style={{ textAlign: "right" }}>
-                  {row.count}
+                  {onSelectJobs && row.job_ids ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelectJobs(row.job_ids || [])
+                      }
+                      style={{
+                        border: 0,
+                        padding: 0,
+                        background: "transparent",
+                        font: "inherit",
+                        fontWeight: "inherit",
+                        color: "inherit",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {row.count}
+                    </button>
+                  ) : (
+                    row.count
+                  )}
                   <span
                     style={{
                       display: "block",
@@ -318,7 +346,31 @@ function Breakdown({
                   </span>
                 </strong>
                 <strong style={{ textAlign: "right" }}>
-                  {row.work_scheduled ?? 0}
+                  {onSelectJobs && row.job_ids ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelectJobs(
+                          row.job_ids || [],
+                          true
+                        )
+                      }
+                      style={{
+                        border: 0,
+                        padding: 0,
+                        background: "transparent",
+                        font: "inherit",
+                        fontWeight: "inherit",
+                        color: "inherit",
+                        cursor: "pointer",
+                        textDecoration: "underline",
+                      }}
+                    >
+                      {row.work_scheduled ?? 0}
+                    </button>
+                  ) : (
+                    row.work_scheduled ?? 0
+                  )}
                   <span
                     style={{
                       display: "block",
@@ -406,6 +458,9 @@ export default function BusinessPerformanceV2() {
   const [drilldown, setDrilldown] =
     useState<Drilldown>("opportunities");
 
+  const [selectedJobIds, setSelectedJobIds] =
+    useState<number[] | null>(null);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -454,6 +509,13 @@ export default function BusinessPerformanceV2() {
 
     const jobs = data.supporting_jobs.reportable;
 
+    if (selectedJobIds) {
+      const selected = new Set(selectedJobIds);
+      return jobs.filter((job) =>
+        selected.has(job.navigator_job_id)
+      );
+    }
+
     switch (drilldown) {
       case "estimate":
         return jobs.filter((job) => job.outcomes.estimate);
@@ -489,7 +551,7 @@ export default function BusinessPerformanceV2() {
       default:
         return jobs;
     }
-  }, [data, drilldown]);
+  }, [data, drilldown, selectedJobIds]);
 
   if (loading) {
     return <div style={{ padding: 24 }}>Loading report…</div>;
@@ -504,7 +566,32 @@ export default function BusinessPerformanceV2() {
     );
   }
 
-  const select = (value: Drilldown) => () => setDrilldown(value);
+  const select = (value: Drilldown) => () => {
+    setSelectedJobIds(null);
+    setDrilldown(value);
+  };
+
+  const selectJobs = (
+    jobIds: number[],
+    workScheduledOnly = false
+  ) => {
+    if (!workScheduledOnly) {
+      setSelectedJobIds(jobIds);
+      return;
+    }
+
+    const workScheduledIds = new Set(
+      data.supporting_jobs.reportable
+        .filter(
+          (job) =>
+            job.outcomes.work_scheduled &&
+            jobIds.includes(job.navigator_job_id)
+        )
+        .map((job) => job.navigator_job_id)
+    );
+
+    setSelectedJobIds(Array.from(workScheduledIds));
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 1500, margin: "0 auto" }}>
@@ -591,6 +678,10 @@ export default function BusinessPerformanceV2() {
             {
               label: "Tarp → Roof Conversions",
               value: data.funnel.tarp_roof_conversions,
+              onClick: () =>
+                selectJobs(
+                  data.funnel.tarp_roof_conversion_job_ids || []
+                ),
             },
           ]}
         />
@@ -610,6 +701,7 @@ export default function BusinessPerformanceV2() {
           <div>
             <Breakdown
               title="Acquisition Source"
+              onSelectJobs={selectJobs}
               rows={data.acquisition.by_source}
               denominator={data.population.reportable_opportunities}
             />
@@ -631,9 +723,30 @@ export default function BusinessPerformanceV2() {
               >
                 <strong>AA Sources</strong>
                 <strong>
-                  {data.acquisition.source_categories.find(
-                    (row) => row.name === "AA Sources"
-                  )?.count ?? 0}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectJobs(
+                        data.acquisition.source_categories.find(
+                          (row) => row.name === "AA Sources"
+                        )?.job_ids || []
+                      )
+                    }
+                    style={{
+                      border: 0,
+                      padding: 0,
+                      background: "transparent",
+                      font: "inherit",
+                      fontWeight: "inherit",
+                      color: "inherit",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    {data.acquisition.source_categories.find(
+                      (row) => row.name === "AA Sources"
+                    )?.count ?? 0}
+                  </button>
                   <span
                     style={{
                       marginLeft: 8,
@@ -666,10 +779,32 @@ export default function BusinessPerformanceV2() {
               >
                 <strong>Insurance / Carrier / TPA Sources</strong>
                 <strong>
-                  {data.acquisition.source_categories.find(
-                    (row) =>
-                      row.name === "Insurance / Carrier / TPA Sources"
-                  )?.count ?? 0}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectJobs(
+                        data.acquisition.source_categories.find(
+                          (row) =>
+                            row.name === "Insurance / Carrier / TPA Sources"
+                        )?.job_ids || []
+                      )
+                    }
+                    style={{
+                      border: 0,
+                      padding: 0,
+                      background: "transparent",
+                      font: "inherit",
+                      fontWeight: "inherit",
+                      color: "inherit",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    {data.acquisition.source_categories.find(
+                      (row) =>
+                        row.name === "Insurance / Carrier / TPA Sources"
+                    )?.count ?? 0}
+                  </button>
                   <span
                     style={{
                       marginLeft: 8,
@@ -704,9 +839,30 @@ export default function BusinessPerformanceV2() {
               >
                 <strong>Unknown / Other</strong>
                 <strong>
-                  {data.acquisition.source_categories.find(
-                    (row) => row.name === "Unknown / Other"
-                  )?.count ?? 0}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectJobs(
+                        data.acquisition.source_categories.find(
+                          (row) => row.name === "Unknown / Other"
+                        )?.job_ids || []
+                      )
+                    }
+                    style={{
+                      border: 0,
+                      padding: 0,
+                      background: "transparent",
+                      font: "inherit",
+                      fontWeight: "inherit",
+                      color: "inherit",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    {data.acquisition.source_categories.find(
+                      (row) => row.name === "Unknown / Other"
+                    )?.count ?? 0}
+                  </button>
                   <span
                     style={{
                       marginLeft: 8,
@@ -732,6 +888,7 @@ export default function BusinessPerformanceV2() {
           </div>
           <Breakdown
             title="Entry Channel"
+            onSelectJobs={selectJobs}
             rows={data.acquisition.by_entry_channel}
             denominator={data.population.reportable_opportunities}
           />
@@ -855,16 +1012,19 @@ export default function BusinessPerformanceV2() {
         >
           <Breakdown
             title="Assignment Source"
+            onSelectJobs={selectJobs}
             rows={data.insurance.by_assignment_source}
             denominator={data.insurance.jobs}
           />
           <Breakdown
             title="Carrier"
+            onSelectJobs={selectJobs}
             rows={data.insurance.by_carrier}
             denominator={data.insurance.jobs}
           />
           <Breakdown
             title="Sales Source"
+            onSelectJobs={selectJobs}
             rows={data.insurance.by_sales_source}
             denominator={data.population.reportable_opportunities}
           />
@@ -929,8 +1089,17 @@ export default function BusinessPerformanceV2() {
               {visibleJobs.map((job) => (
                 <tr key={job.navigator_job_id}>
                   <td style={{ padding: 8 }}>
-                    #{job.navigator_job_id}
-                    {job.job_label ? ` · ${job.job_label}` : ""}
+                    <a
+                      href={`/job/${job.navigator_job_id}`}
+                      style={{
+                        color: "inherit",
+                        fontWeight: 600,
+                        textDecoration: "underline",
+                      }}
+                    >
+                      #{job.navigator_job_id}
+                      {job.job_label ? ` · ${job.job_label}` : ""}
+                    </a>
                   </td>
                   <td style={{ padding: 8 }}>
                     {formatDate(job.created_at)}
