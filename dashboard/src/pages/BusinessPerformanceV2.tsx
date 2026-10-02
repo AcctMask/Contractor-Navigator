@@ -319,6 +319,22 @@ function Breakdown({
                 </strong>
                 <strong style={{ textAlign: "right" }}>
                   {row.work_scheduled ?? 0}
+                  <span
+                    style={{
+                      display: "block",
+                      fontSize: 11,
+                      fontWeight: 400,
+                      color: "#666",
+                    }}
+                  >
+                    {row.count > 0
+                      ? (
+                          ((row.work_scheduled ?? 0) /
+                            row.count) *
+                          100
+                        ).toFixed(1)
+                      : "0.0"}%
+                  </span>
                 </strong>
               </div>
             );
@@ -344,6 +360,34 @@ function Breakdown({
                 (sum, row) => sum + (row.work_scheduled ?? 0),
                 0
               )}
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 11,
+                  fontWeight: 400,
+                  color: "#666",
+                }}
+              >
+                {rows.reduce(
+                  (sum, row) => sum + row.count,
+                  0
+                ) > 0
+                  ? (
+                      (
+                        rows.reduce(
+                          (sum, row) =>
+                            sum + (row.work_scheduled ?? 0),
+                          0
+                        ) /
+                        rows.reduce(
+                          (sum, row) => sum + row.count,
+                          0
+                        )
+                      ) *
+                      100
+                    ).toFixed(1)
+                  : "0.0"}%
+              </span>
             </strong>
           </div>
         </>
@@ -704,8 +748,17 @@ export default function BusinessPerformanceV2() {
               label: "AA Engaged",
               value: data.actual_assistant.engaged_opportunities,
               detail:
-                `${percent(data.actual_assistant.engagement_rate)} · ` +
-                `${data.actual_assistant.work_scheduled} Work / Scheduled`,
+                `${percent(data.actual_assistant.engagement_rate)} of opportunities · ` +
+                `${data.actual_assistant.work_scheduled} Work / Scheduled (` +
+                `${
+                  data.actual_assistant.engaged_opportunities > 0
+                    ? (
+                        (data.actual_assistant.work_scheduled /
+                          data.actual_assistant.engaged_opportunities) *
+                        100
+                      ).toFixed(1)
+                    : "0.0"
+                }%)`,
               onClick: select("aa_engaged"),
               active: drilldown === "aa_engaged",
             },
