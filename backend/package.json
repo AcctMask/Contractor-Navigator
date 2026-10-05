@@ -9,7 +9,8 @@
     "start:commercial": "tsx src/commercialIndex.ts",
     "followup:backfill:preview": "tsx scripts/backfillFollowupWorkflows.ts --preview",
     "followup:backfill:execute": "tsx scripts/backfillFollowupWorkflows.ts --execute",
-    "verify:followup-candidates": "tsx scripts/verifyFollowupCandidatePredicate.ts"
+    "verify:followup-candidates": "tsx scripts/verifyFollowupCandidatePredicate.ts",
+    "verify:owner-protected-followup": "tsx scripts/verifyOwnerProtectedFollowup.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
