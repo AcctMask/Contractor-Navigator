@@ -8,7 +8,8 @@
     "dev:commercial": "tsx watch src/commercialIndex.ts",
     "start:commercial": "tsx src/commercialIndex.ts",
     "followup:backfill:preview": "tsx scripts/backfillFollowupWorkflows.ts --preview",
-    "followup:backfill:execute": "tsx scripts/backfillFollowupWorkflows.ts --execute"
+    "followup:backfill:execute": "tsx scripts/backfillFollowupWorkflows.ts --execute",
+    "verify:followup-candidates": "tsx scripts/verifyFollowupCandidatePredicate.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
