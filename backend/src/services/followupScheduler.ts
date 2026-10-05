@@ -126,9 +126,15 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
       on t.id = j.tenant_id
     where (
       j.active_followup_workflow is not null
-      or j.crm_flow_key = 'weather_evidence_report'
+      or (
+        j.crm_flow_key = 'weather_evidence_report'
+        and j.active_followup_workflow is null
+      )
     )
-      and j.crm_flow_key <> 'ems_tarp_email_intake'
+      and (
+        j.active_followup_workflow is not null
+        or j.crm_flow_key <> 'ems_tarp_email_intake'
+      )
     order by coalesce(j.followup_workflow_started_at, j.created_at) desc
     limit 500
     `
