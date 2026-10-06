@@ -1268,11 +1268,15 @@ await sendSMS(
     ) + 1
   )
 
+  const overdueTaskIdentity = taskJobIdentity
+    ? `${taskJobIdentity} — `
+    : ""
+
   await sendSMS(
     String(task.mobile_phone),
-    `Navigator overdue task: ${
+    `Navigator: ${overdueTaskIdentity}"${
       task.title || "Task"
-    } is ${overdueDays} day${
+    }" is ${overdueDays} day${
       overdueDays === 1 ? "" : "s"
     } overdue.`
   )
