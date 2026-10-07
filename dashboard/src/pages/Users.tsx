@@ -57,6 +57,7 @@ export default function UsersPage() {
   const [mobilePhone, setMobilePhone] = useState("")
   const [fullName, setFullName] = useState("")
   const [role, setRole] = useState("admin")
+  const [subcontractorCompanyName, setSubcontractorCompanyName] = useState("")
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [status, setStatus] = useState("Loading users and invitations...")
@@ -240,6 +241,11 @@ export default function UsersPage() {
       return
     }
 
+    if (role === "subcontractor" && !subcontractorCompanyName.trim()) {
+      setError("Company name is required for subcontractors")
+      return
+    }
+
     setSubmitting(true)
     setError("")
     setCopied(false)
@@ -259,6 +265,10 @@ export default function UsersPage() {
           full_name: fullName.trim(),
           mobile_phone: mobilePhone.trim(),
           role,
+          subcontractor_company_name:
+            role === "subcontractor"
+              ? subcontractorCompanyName.trim()
+              : undefined,
         }),
       })
 
@@ -272,6 +282,7 @@ export default function UsersPage() {
       setFullName("")
       setMobilePhone("")
       setRole("admin")
+      setSubcontractorCompanyName("")
 
       const finalStatus =
         json?.email_sent
@@ -964,6 +975,21 @@ export default function UsersPage() {
                 <option value="subcontractor">subcontractor</option>
               </select>
             </div>
+
+            {role === "subcontractor" ? (
+              <div>
+                <label style={{ display: "block", marginBottom: "8px", fontWeight: 700 }}>
+                  Company Name
+                </label>
+                <input
+                  value={subcontractorCompanyName}
+                  onChange={(e) => setSubcontractorCompanyName(e.target.value)}
+                  placeholder="Subcontractor company"
+                  required
+                  style={inputStyle}
+                />
+              </div>
+            ) : null}
 
             <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
               <button

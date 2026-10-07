@@ -87,6 +87,33 @@ async function ensureAuthTables() {
     create index if not exists idx_user_invitations_tenant_email
     on user_invitations (tenant_id, lower(email))
   `)
+
+  await pool.query(`
+    create table if not exists subcontractor_companies (
+      id bigserial primary key,
+      tenant_id bigint not null references tenants(id) on delete cascade,
+      company_name text not null,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      unique (tenant_id, company_name)
+    )
+  `)
+
+  await pool.query(`
+    create table if not exists subcontractor_company_users (
+      subcontractor_company_id bigint not null references subcontractor_companies(id) on delete cascade,
+      app_user_id bigint not null references app_users(id) on delete cascade,
+      created_at timestamptz not null default now(),
+      primary key (subcontractor_company_id, app_user_id),
+      unique (app_user_id)
+    )
+  `)
+
+  await pool.query(`
+    alter table user_invitations
+      add column if not exists subcontractor_company_id bigint null
+      references subcontractor_companies(id) on delete set null
+  `)
 }
 
 export async function getTenantIdBySlug(slug: string): Promise<number> {
@@ -274,6 +301,7 @@ export async function inviteUserByTenantSlug(
     full_name: string
     mobile_phone: string
     role?: string
+    subcontractor_company_name?: string
     invited_by_user_id?: number | null
   }
 ) {
@@ -284,7 +312,32 @@ export async function inviteUserByTenantSlug(
   const fullName = cleanName(input.full_name)
   const mobilePhone = cleanMobilePhone(input.mobile_phone)
   const role = cleanRole(input.role)
+  const subcontractorCompanyName = cleanName(input.subcontractor_company_name)
   const invitedByUserId = input.invited_by_user_id || null
+
+  if (role === "subcontractor" && !subcontractorCompanyName) {
+    throw new Error("Company name is required for subcontractors")
+  }
+
+  let subcontractorCompanyId: number | null = null
+
+  if (role === "subcontractor") {
+    const companyResult = await pool.query(
+      `
+      insert into subcontractor_companies
+        (tenant_id, company_name, created_at, updated_at)
+      values
+        ($1, $2, now(), now())
+      on conflict (tenant_id, company_name)
+      do update set
+        updated_at = subcontractor_companies.updated_at
+      returning id
+      `,
+      [tenantId, subcontractorCompanyName]
+    )
+
+    subcontractorCompanyId = Number(companyResult.rows[0].id)
+  }
 
   if (!email) {
     throw new Error("Email is required")
@@ -343,6 +396,7 @@ export async function inviteUserByTenantSlug(
         role = $5,
         invite_token = $6,
         invited_by_user_id = $7,
+        subcontractor_company_id = $8,
         expires_at = now() + interval '30 days',
         invite_email_sent_at = null,
         tenant_send_notified_at = null,
@@ -360,6 +414,7 @@ export async function inviteUserByTenantSlug(
         role,
         inviteToken,
         invitedByUserId,
+        subcontractorCompanyId,
       ]
     )
 
@@ -376,9 +431,9 @@ export async function inviteUserByTenantSlug(
   const result = await pool.query(
     `
     insert into user_invitations
-      (tenant_id, email, full_name, mobile_phone, role, invite_token, invited_by_user_id, expires_at)
+      (tenant_id, email, full_name, mobile_phone, role, invite_token, invited_by_user_id, subcontractor_company_id, expires_at)
     values
-      ($1, $2, $3, $4, $5, $6, $7, now() + interval '30 days')
+      ($1, $2, $3, $4, $5, $6, $7, $8, now() + interval '30 days')
     returning id, email, full_name, mobile_phone, role, invite_token, accepted_at, expires_at, created_at
     `,
     [
@@ -389,6 +444,7 @@ export async function inviteUserByTenantSlug(
       role,
       inviteToken,
       invitedByUserId,
+      subcontractorCompanyId,
     ]
   )
 
@@ -558,6 +614,7 @@ export async function getInvitationByToken(inviteToken: string) {
       i.role,
       i.invite_token,
       i.invited_by_user_id,
+      i.subcontractor_company_id,
       i.accepted_at,
       i.expires_at,
       i.created_at
@@ -647,6 +704,27 @@ export async function acceptInvitation(
   )
 
   const user = userResult.rows[0] as AppUser
+
+  if (
+    invite.role === "subcontractor" &&
+    invite.subcontractor_company_id
+  ) {
+    await pool.query(
+      `
+      insert into subcontractor_company_users
+        (subcontractor_company_id, app_user_id, created_at)
+      values
+        ($1, $2, now())
+      on conflict (app_user_id)
+      do update set
+        subcontractor_company_id = excluded.subcontractor_company_id
+      `,
+      [
+        Number(invite.subcontractor_company_id),
+        Number(user.id),
+      ]
+    )
+  }
 
   await logUserInvitationActivity(
     Number(invite.tenant_id),

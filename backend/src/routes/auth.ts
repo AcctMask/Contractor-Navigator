@@ -136,6 +136,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         full_name,
         mobile_phone,
         role,
+        subcontractor_company_name,
       } = request.body || {}
 
       const invite =
@@ -146,6 +147,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             full_name,
             mobile_phone,
             role,
+            subcontractor_company_name,
             invited_by_user_id:
               Number(actor.id),
           }
