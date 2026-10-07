@@ -271,7 +271,14 @@ export default function TasksPage() {
     try {
       setMessage("Loading tasks...")
 
-      const res = await fetch(`${API_BASE}/tasks/${getTenantSlug()}/events`)
+      const res = await fetch(
+        `${API_BASE}/tasks/${getTenantSlug()}/events`,
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
+      )
       const data = await res.json()
 
       if (!res.ok || !data.ok) {

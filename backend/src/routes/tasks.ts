@@ -43,6 +43,39 @@ async function requireTaskUser(
   }
 }
 
+async function subcontractorCanAccessTask(
+  tenantId: number,
+  userId: number,
+  task: {
+    job_id?: number | null
+    assigned_user_id?: number | null
+  }
+): Promise<boolean> {
+  if (Number(task.assigned_user_id) === userId) {
+    return true
+  }
+
+  const jobId = Number(task.job_id)
+
+  if (!jobId) {
+    return false
+  }
+
+  const assignment = await pool.query(
+    `
+    select id
+    from crew_assignments
+    where tenant_id = $1
+      and job_id = $2
+      and app_user_id = $3
+    limit 1
+    `,
+    [tenantId, jobId, userId]
+  )
+
+  return Boolean(assignment.rowCount)
+}
+
 function taskActorMeta(user: any) {
   return {
     actor_name:
@@ -507,6 +540,12 @@ export async function registerTaskRoutes(app: FastifyInstance) {
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
 
+      const actor = await requireTaskUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
+
       const result = await pool.query(
         `
         select
@@ -550,9 +589,20 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           on cbu.id = ce.completed_by_user_id
          and cbu.tenant_id = ce.tenant_id
         where ce.tenant_id = $1
+          and (
+            $2::text <> 'subcontractor'
+            or ce.assigned_user_id = $3
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = ce.tenant_id
+                and ca.job_id = ce.job_id
+                and ca.app_user_id = $3
+            )
+          )
         order by ce.start_time asc, ce.id asc
         `,
-        [tenantId]
+        [tenantId, String(actor.role), Number(actor.id)]
       )
 
       return {
@@ -587,6 +637,34 @@ export async function registerTaskRoutes(app: FastifyInstance) {
       if (!body.start_time) {
         reply.code(400)
         return { ok: false, error: "Start time is required" }
+      }
+
+      if (
+        String(actor.role) === "subcontractor" &&
+        body.job_id
+      ) {
+        const allowed = await subcontractorCanAccessTask(
+          tenantId,
+          Number(actor.id),
+          {
+            job_id: Number(body.job_id),
+            assigned_user_id: null,
+          }
+        )
+
+        if (!allowed) {
+          reply.code(403)
+          return { ok: false, error: "Not authorized for this job" }
+        }
+      }
+
+      if (
+        String(actor.role) === "subcontractor" &&
+        body.assigned_user_id &&
+        Number(body.assigned_user_id) !== Number(actor.id)
+      ) {
+        reply.code(403)
+        return { ok: false, error: "Not authorized to assign this task to that user" }
       }
 
       let assignedUser: any = null
@@ -780,6 +858,18 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         return { ok: false, error: "Task not found" }
       }
 
+      if (
+        String(actor.role) === "subcontractor" &&
+        !(await subcontractorCanAccessTask(
+          tenantId,
+          Number(actor.id),
+          previousResult.rows[0]
+        ))
+      ) {
+        reply.code(403)
+        return { ok: false, error: "Not authorized for this task" }
+      }
+
       if (!body.title) {
         reply.code(400)
         return { ok: false, error: "Title is required" }
@@ -796,6 +886,15 @@ export async function registerTaskRoutes(app: FastifyInstance) {
           : body.assigned_user_id
             ? Number(body.assigned_user_id)
             : null
+
+      if (
+        String(actor.role) === "subcontractor" &&
+        requestedAssignedUserId &&
+        Number(requestedAssignedUserId) !== Number(actor.id)
+      ) {
+        reply.code(403)
+        return { ok: false, error: "Not authorized to assign this task to that user" }
+      }
 
       let assignedUser: any = null
 
@@ -969,6 +1068,18 @@ export async function registerTaskRoutes(app: FastifyInstance) {
 
       const existingTask = existingResult.rows[0]
 
+      if (
+        String(actor.role) === "subcontractor" &&
+        !(await subcontractorCanAccessTask(
+          tenantId,
+          Number(actor.id),
+          existingTask
+        ))
+      ) {
+        reply.code(403)
+        return { ok: false, error: "Not authorized for this task" }
+      }
+
       if (existingTask.completed_at) {
         return {
           ok: true,
@@ -1069,6 +1180,34 @@ export async function registerTaskRoutes(app: FastifyInstance) {
 
       if (!actor) {
         return { ok: false, error: "Unauthorized" }
+      }
+
+      const existingResult = await pool.query(
+        `
+        select id, job_id, assigned_user_id
+        from task_items
+        where tenant_id = $1
+          and id = $2
+        limit 1
+        `,
+        [tenantId, Number(eventId)]
+      )
+
+      if (!existingResult.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Task not found" }
+      }
+
+      if (
+        String(actor.role) === "subcontractor" &&
+        !(await subcontractorCanAccessTask(
+          tenantId,
+          Number(actor.id),
+          existingResult.rows[0]
+        ))
+      ) {
+        reply.code(403)
+        return { ok: false, error: "Not authorized for this task" }
       }
 
       const result = await pool.query(
