@@ -846,12 +846,12 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
   const result = await pool.query(
     `
     select
-      id,
-      email,
-      full_name,
-      mobile_phone,
-      role,
-      is_active,
+      au.id,
+      au.email,
+      au.full_name,
+      au.mobile_phone,
+      au.role,
+      au.is_active,
       au.financials_authorized,
       au.deactivated_at,
       au.created_at,
