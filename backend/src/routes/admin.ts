@@ -781,16 +781,19 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       [tenantId, jobId]
     );
 
-    const timeline = await pool.query(
-      `
-      select id, kind, message, meta, created_at
-      from timeline_events
-      where tenant_id = $1 and job_id = $2
-      order by id desc
-      limit 250
-      `,
-      [tenantId, jobId]
-    );
+    const timeline =
+      String(user.role) === "subcontractor"
+        ? { rows: [] }
+        : await pool.query(
+            `
+            select id, kind, message, meta, created_at
+            from timeline_events
+            where tenant_id = $1 and job_id = $2
+            order by id desc
+            limit 250
+            `,
+            [tenantId, jobId]
+          );
 
     const filesRaw = await listJobAssetsByTenantSlug(tenant_slug, jobId);
     const files = filesRaw.map((f: any) => ({
