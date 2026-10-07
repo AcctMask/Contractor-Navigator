@@ -15,6 +15,8 @@ type UserRow = {
   deactivated_at?: string | null
   created_at?: string
   updated_at?: string
+  subcontractor_company_id?: string | number | null
+  subcontractor_company_name?: string | null
 }
 
 type InvitationRow = {
@@ -84,6 +86,11 @@ export default function UsersPage() {
   const [
     managedMobilePhone,
     setManagedMobilePhone,
+  ] = useState("")
+
+  const [
+    managedSubcontractorCompanyName,
+    setManagedSubcontractorCompanyName,
   ] = useState("")
 
   const [newPassword, setNewPassword] =
@@ -354,6 +361,10 @@ export default function UsersPage() {
       user.mobile_phone ||
         ""
     )
+    setManagedSubcontractorCompanyName(
+      user.subcontractor_company_name ||
+        ""
+    )
     setNewPassword("")
     setConfirmNewPassword("")
     setManageError("")
@@ -364,6 +375,7 @@ export default function UsersPage() {
     setSelectedUser(null)
     setManagedFullName("")
     setManagedMobilePhone("")
+    setManagedSubcontractorCompanyName("")
     setNewPassword("")
     setConfirmNewPassword("")
     setManageError("")
@@ -604,6 +616,90 @@ export default function UsersPage() {
       setManageError(
         err?.message ||
           "Role update failed"
+      )
+      setManageStatus("")
+    } finally {
+      setManaging(false)
+    }
+  }
+
+  async function saveManagedSubcontractorCompany() {
+    if (
+      !selectedUser?.id ||
+      selectedUser.role !== "subcontractor"
+    ) {
+      return
+    }
+
+    if (
+      !managedSubcontractorCompanyName.trim()
+    ) {
+      setManageError(
+        "Company name is required for subcontractors"
+      )
+      return
+    }
+
+    setManaging(true)
+    setManageError("")
+    setManageStatus(
+      "Saving subcontractor company..."
+    )
+
+    try {
+      const res =
+        await fetch(
+          `${API_BASE}/auth/${getTenantSlug()}/users/${selectedUser.id}/subcontractor-company`,
+          {
+            method:
+              "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+              Authorization:
+                `Bearer ${getToken()}`,
+            },
+            body:
+              JSON.stringify({
+                company_name:
+                  managedSubcontractorCompanyName.trim(),
+              }),
+          }
+        )
+
+      const json =
+        await res.json()
+          .catch(() => ({}))
+
+      if (
+        !res.ok ||
+        !json?.ok
+      ) {
+        throw new Error(
+          json?.error ||
+            "Subcontractor company update failed"
+        )
+      }
+
+      setSelectedUser(
+        json.user
+      )
+
+      setManagedSubcontractorCompanyName(
+        json.user
+          ?.subcontractor_company_name ||
+          managedSubcontractorCompanyName
+      )
+
+      setManageStatus(
+        "Subcontractor company updated successfully"
+      )
+
+      await loadAll()
+    } catch (err: any) {
+      setManageError(
+        err?.message ||
+          "Subcontractor company update failed"
       )
       setManageStatus("")
     } finally {
@@ -1462,6 +1558,60 @@ export default function UsersPage() {
                     </button>
                   </div>
 
+
+                  {selectedUser.role === "subcontractor" ? (
+                    <div
+                      style={{
+                        marginBottom:
+                          "18px",
+                      }}
+                    >
+                      <label
+                        style={{
+                          display:
+                            "block",
+                          marginBottom:
+                            "8px",
+                          fontWeight:
+                            700,
+                        }}
+                      >
+                        Subcontractor Company
+                      </label>
+
+                      <input
+                        value={
+                          managedSubcontractorCompanyName
+                        }
+                        onChange={(e) =>
+                          setManagedSubcontractorCompanyName(
+                            e.target.value
+                          )
+                        }
+                        placeholder="Company name"
+                        style={
+                          inputStyle
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        disabled={
+                          managing
+                        }
+                        onClick={
+                          saveManagedSubcontractorCompany
+                        }
+                        style={{
+                          ...secondaryButtonStyle,
+                          marginTop:
+                            "12px",
+                        }}
+                      >
+                        Save Company
+                      </button>
+                    </div>
+                  ) : null}
 
                   <select
                     value={

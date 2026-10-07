@@ -852,16 +852,23 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
       mobile_phone,
       role,
       is_active,
-      financials_authorized,
-      deactivated_at,
-      created_at,
-      updated_at
-    from app_users
-    where tenant_id = $1
+      au.financials_authorized,
+      au.deactivated_at,
+      au.created_at,
+      au.updated_at,
+      sc.id as subcontractor_company_id,
+      sc.company_name as subcontractor_company_name
+    from app_users au
+    left join subcontractor_company_users scu
+      on scu.app_user_id = au.id
+    left join subcontractor_companies sc
+      on sc.id = scu.subcontractor_company_id
+      and sc.tenant_id = au.tenant_id
+    where au.tenant_id = $1
     order by
-      is_active desc,
-      created_at desc,
-      id desc
+      au.is_active desc,
+      au.created_at desc,
+      au.id desc
     `,
     [tenantId]
   )
@@ -906,7 +913,8 @@ async function logUserManagementActivity(
     | "user_deactivated"
     | "user_financials_authorization_changed"
     | "user_mobile_phone_changed"
-    | "user_full_name_changed",
+    | "user_full_name_changed"
+    | "user_subcontractor_company_changed",
   message: string,
   meta: Record<string, unknown>
 ) {
@@ -1091,6 +1099,196 @@ export async function updateManagedUserRoleByTenantSlug(
         target.role,
       new_role:
         user.role,
+      actor_user_id:
+        actor.id,
+      actor_email:
+        actor.email,
+      actor_name:
+        actor.full_name || null,
+    }
+  )
+
+  return user
+}
+
+export async function updateManagedUserSubcontractorCompanyByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  companyNameInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId =
+    await getTenantIdBySlug(
+      tenantSlug
+    )
+
+  const target =
+    await getManagedUser(
+      tenantId,
+      userId
+    )
+
+  assertManagedUserIsMutable(
+    target,
+    actor
+  )
+
+  if (!target.is_active) {
+    throw new Error(
+      "Former users cannot have their subcontractor company changed"
+    )
+  }
+
+  if (String(target.role) !== "subcontractor") {
+    throw new Error(
+      "Company is only available for subcontractor users"
+    )
+  }
+
+  const companyName =
+    cleanName(companyNameInput)
+
+  if (!companyName) {
+    throw new Error(
+      "Company name is required for subcontractors"
+    )
+  }
+
+  const previousResult =
+    await pool.query(
+      `
+      select
+        sc.id,
+        sc.company_name
+      from subcontractor_company_users scu
+      join subcontractor_companies sc
+        on sc.id = scu.subcontractor_company_id
+      where scu.app_user_id = $1
+        and sc.tenant_id = $2
+      limit 1
+      `,
+      [
+        userId,
+        tenantId,
+      ]
+    )
+
+  const previousCompany =
+    previousResult.rows[0] || null
+
+  const companyResult =
+    await pool.query(
+      `
+      insert into subcontractor_companies
+        (
+          tenant_id,
+          company_name,
+          created_at,
+          updated_at
+        )
+      values
+        (
+          $1,
+          $2,
+          now(),
+          now()
+        )
+      on conflict (tenant_id, company_name)
+      do update set
+        updated_at = subcontractor_companies.updated_at
+      returning
+        id,
+        company_name
+      `,
+      [
+        tenantId,
+        companyName,
+      ]
+    )
+
+  const company =
+    companyResult.rows[0]
+
+  await pool.query(
+    `
+    insert into subcontractor_company_users
+      (
+        subcontractor_company_id,
+        app_user_id,
+        created_at
+      )
+    values
+      (
+        $1,
+        $2,
+        now()
+      )
+    on conflict (app_user_id)
+    do update set
+      subcontractor_company_id =
+        excluded.subcontractor_company_id
+    `,
+    [
+      Number(company.id),
+      userId,
+    ]
+  )
+
+  const userResult =
+    await pool.query(
+      `
+      select
+        au.id,
+        au.tenant_id,
+        au.email,
+        au.full_name,
+        au.mobile_phone,
+        au.role,
+        au.is_active,
+        au.financials_authorized,
+        au.deactivated_at,
+        au.created_at,
+        au.updated_at,
+        sc.id as subcontractor_company_id,
+        sc.company_name as subcontractor_company_name
+      from app_users au
+      left join subcontractor_company_users scu
+        on scu.app_user_id = au.id
+      left join subcontractor_companies sc
+        on sc.id = scu.subcontractor_company_id
+        and sc.tenant_id = au.tenant_id
+      where au.tenant_id = $1
+        and au.id = $2
+      limit 1
+      `,
+      [
+        tenantId,
+        userId,
+      ]
+    )
+
+  const user =
+    userResult.rows[0]
+
+  await logUserManagementActivity(
+    tenantId,
+    "user_subcontractor_company_changed",
+    `Navigator subcontractor company changed for ${user.full_name}`,
+    {
+      app_user_id:
+        user.id,
+      email:
+        user.email,
+      old_subcontractor_company_id:
+        previousCompany?.id || null,
+      old_subcontractor_company_name:
+        previousCompany?.company_name || null,
+      new_subcontractor_company_id:
+        company.id,
+      new_subcontractor_company_name:
+        company.company_name,
       actor_user_id:
         actor.id,
       actor_email:

@@ -10,6 +10,7 @@ import {
   changePasswordForUser,
   getTenantIdBySlug,
   updateManagedUserRoleByTenantSlug,
+  updateManagedUserSubcontractorCompanyByTenantSlug,
   updateManagedUserFinancialsAuthorizationByTenantSlug,
   updateManagedUserMobilePhoneByTenantSlug,
   updateManagedUserFullNameByTenantSlug,
@@ -681,6 +682,70 @@ export async function registerAuthRoutes(app: FastifyInstance) {
             tenantSlug,
             id,
             role,
+            access.actor
+          )
+
+        return {
+          ok: true,
+          user,
+        }
+      } catch (err: any) {
+        reply.code(400)
+
+        return {
+          ok: false,
+          error:
+            err?.message ||
+            String(err),
+        }
+      }
+    }
+  )
+
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/subcontractor-company",
+    async (request: any, reply) => {
+      try {
+        const {
+          tenantSlug,
+          userId,
+        } = request.params
+
+        const access =
+          await requireTenantUserManager(
+            request,
+            reply,
+            tenantSlug
+          )
+
+        if (!access) {
+          return {
+            ok: false,
+            error: "Not authorized",
+          }
+        }
+
+        const id =
+          Number(userId)
+
+        if (!Number.isFinite(id)) {
+          reply.code(400)
+
+          return {
+            ok: false,
+            error: "Invalid user ID",
+          }
+        }
+
+        const {
+          company_name,
+        } = request.body || {}
+
+        const user =
+          await updateManagedUserSubcontractorCompanyByTenantSlug(
+            tenantSlug,
+            id,
+            company_name,
             access.actor
           )
 
