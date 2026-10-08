@@ -1507,6 +1507,96 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/admin/job/:tenant_slug/:job_id/revoke-subcontractor", async (req, reply) => {
+    try {
+      const actor = await requireAssignmentManager(req, reply);
+
+      if (!actor) {
+        return reply.send({ ok: false, error: "Not authorized" });
+      }
+
+      await ensureCrewAssignmentUserColumn();
+
+      const tenantSlug = String((req.params as any).tenant_slug || "");
+      const tenantId = await getTenantIdBySlug(tenantSlug);
+      const jobId = Number((req.params as any).job_id);
+      const appUserId = Number(((req as any).body || {}).app_user_id);
+
+      if (Number(actor.tenant_id) !== tenantId) {
+        return reply.code(403).send({ ok: false, error: "Tenant access denied" });
+      }
+
+      if (!Number.isInteger(jobId) || jobId <= 0 ||
+          !Number.isInteger(appUserId) || appUserId <= 0) {
+        return reply.code(400).send({ ok: false, error: "Valid job and subcontractor required" });
+      }
+
+      const client = await pool.connect();
+
+      try {
+        await client.query("BEGIN");
+
+        const job = await client.query(
+          `select id from jobs where tenant_id = $1 and id = $2 for update`,
+          [tenantId, jobId]
+        );
+
+        if (!job.rowCount) {
+          await client.query("ROLLBACK");
+          return reply.code(404).send({ ok: false, error: "Job not found" });
+        }
+
+        const revoked = await client.query(
+          `update crew_assignments
+           set status = 'REVOKED', updated_at = now()
+           where tenant_id = $1 and job_id = $2
+             and app_user_id = $3
+             and status IN ('PENDING', 'active')
+           returning id, crew_name`,
+          [tenantId, jobId, appUserId]
+        );
+
+        if (!revoked.rowCount) {
+          await client.query("ROLLBACK");
+          return reply.code(409).send({
+            ok: false,
+            error: "No active assignment to revoke"
+          });
+        }
+
+        await client.query(
+          `insert into timeline_events
+             (tenant_id, job_id, kind, message, meta, created_at)
+           values ($1, $2, 'subcontractor_access_revoked', $3, $4::jsonb, now())`,
+          [
+            tenantId,
+            jobId,
+            `Subcontractor job access revoked: ${revoked.rows[0].crew_name || appUserId}`,
+            JSON.stringify({
+              author: actor.full_name || actor.email,
+              app_user_id: appUserId,
+              assignment_ids: revoked.rows.map((row: any) => row.id)
+            })
+          ]
+        );
+
+        await client.query("COMMIT");
+
+        return reply.send({ ok: true, revoked_count: revoked.rowCount });
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (err: any) {
+      return reply.code(400).send({
+        ok: false,
+        error: err?.message || String(err)
+      });
+    }
+  });
+
   app.post("/admin/simulate-inbound/:tenant_slug", async (req, reply) => {
     try {
       const tenant_slug = String((req.params as any).tenant_slug || "");

@@ -254,6 +254,46 @@ export default function JobDetail() {
     await loadJob()
   }
 
+  async function revokeSubcontractor(assignment: any) {
+    if (!id || !assignment.app_user_id) return
+
+    const confirmed = window.confirm(
+      `Revoke ${assignment.crew_name || "this subcontractor"}'s access to this job?\\n\\n` +
+      "All job records, notes, photos, documents, and history will be preserved."
+    )
+
+    if (!confirmed) return
+
+    try {
+      const token = getToken()
+      const res = await fetch(
+        `${API_BASE}/admin/job/${getTenantSlug()}/${id}/revoke-subcontractor`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            app_user_id: Number(assignment.app_user_id),
+          }),
+        }
+      )
+
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        errorToast(data?.error || "Access revocation failed")
+        return
+      }
+
+      successToast("Subcontractor job access revoked")
+      await loadJob()
+    } catch (err: any) {
+      errorToast(err?.message || "Access revocation failed")
+    }
+  }
+
   async function loadPhotoPreviews(photoAssets: any[]) {
     const token = getToken()
 
@@ -2232,6 +2272,16 @@ export default function JobDetail() {
                           ? new Date(assignment.assigned_at).toLocaleString()
                           : "—"}
                       </div>
+                      {assignment.app_user_id &&
+                      ["PENDING", "active"].includes(String(assignment.status)) ? (
+                        <button
+                          type="button"
+                          onClick={() => revokeSubcontractor(assignment)}
+                          style={{ ...dangerButton, marginTop: 10 }}
+                        >
+                          Revoke Access
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 ))
