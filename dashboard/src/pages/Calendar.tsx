@@ -347,7 +347,11 @@ export default function CalendarPage() {
     try {
       setMessage("Loading calendar...")
 
-      const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`)
+      const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+        },
+      })
       const data = await res.json()
 
       if (!res.ok || !data.ok) {

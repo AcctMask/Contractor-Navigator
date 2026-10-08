@@ -46,6 +46,32 @@ async function requireCalendarUser(
   }
 }
 
+
+async function subcontractorHasCalendarJob(
+  tenantId: number,
+  userId: number,
+  jobId: number
+): Promise<boolean> {
+  if (!Number.isSafeInteger(jobId) || jobId <= 0) return false
+
+  const result = await pool.query(
+    `
+    select 1
+    from jobs j
+    join crew_assignments ca
+      on ca.tenant_id = j.tenant_id
+     and ca.job_id = j.id
+    where j.tenant_id = $1
+      and j.id = $2
+      and ca.app_user_id = $3
+    limit 1
+    `,
+    [tenantId, jobId, userId]
+  )
+
+  return Boolean(result.rowCount)
+}
+
 function calendarActorMeta(user: any) {
   return {
     actor_name:
@@ -116,6 +142,13 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const actor = await requireCalendarUser(request, reply, tenantId)
+
+      if (!actor) {
+        return { ok: false, error: "Unauthorized" }
+      }
+
+      const isSubcontractor = String(actor.role) === "subcontractor"
 
       const result = await pool.query(
         `
@@ -149,9 +182,19 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           on c.id = j.customer_id
          and c.tenant_id = j.tenant_id
         where ce.tenant_id = $1
+          and (
+            $2::boolean = false
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = ce.tenant_id
+                and ca.job_id = ce.job_id
+                and ca.app_user_id = $3
+            )
+          )
         order by ce.start_time asc, ce.id asc
         `,
-        [tenantId]
+        [tenantId, isSubcontractor, Number(actor.id)]
       )
 
       return {
@@ -178,6 +221,19 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       const body = request.body || {}
 
+      if (String(actor.role) === "subcontractor") {
+        const jobId = Number(body.job_id)
+
+        if (!(await subcontractorHasCalendarJob(
+          tenantId,
+          Number(actor.id),
+          jobId
+        ))) {
+          reply.code(403)
+          return { ok: false, error: "Calendar job access denied" }
+        }
+      }
+
       if (!body.title) {
         reply.code(400)
         return { ok: false, error: "Title is required" }
@@ -202,8 +258,17 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           created_at,
           updated_at
         )
-        values (
+        select
           $1, $2, $3, $4, $5, $6, $7, $8, now(), now()
+        where (
+          $9::boolean = false
+          or exists (
+            select 1
+            from crew_assignments ca
+            where ca.tenant_id = $1
+              and ca.job_id = $2
+              and ca.app_user_id = $10
+          )
         )
         returning
           id,
@@ -226,8 +291,15 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           body.location || null,
           body.notes || null,
           body.event_type || "general",
+          String(actor.role) === "subcontractor",
+          Number(actor.id),
         ]
       )
+
+      if (!result.rowCount) {
+        reply.code(403)
+        return { ok: false, error: "Calendar job access denied" }
+      }
 
       if (result.rows[0]?.job_id) {
         await pool.query(
@@ -312,6 +384,19 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
         return { ok: false, error: "Calendar event not found" }
       }
 
+      if (String(actor.role) === "subcontractor") {
+        const jobId = Number(previousResult.rows[0].job_id)
+
+        if (!(await subcontractorHasCalendarJob(
+          tenantId,
+          Number(actor.id),
+          jobId
+        ))) {
+          reply.code(403)
+          return { ok: false, error: "Calendar job access denied" }
+        }
+      }
+
       if (!body.title) {
         reply.code(400)
         return { ok: false, error: "Title is required" }
@@ -335,6 +420,16 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           updated_at = now()
         where tenant_id = $7
           and id = $8
+          and (
+            $9::boolean = false
+            or exists (
+              select 1
+              from crew_assignments ca
+              where ca.tenant_id = calendar_events.tenant_id
+                and ca.job_id = calendar_events.job_id
+                and ca.app_user_id = $10
+            )
+          )
         returning
           id,
           job_id,
@@ -358,6 +453,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           body.event_type || "general",
           tenantId,
           Number(eventId),
+          String(actor.role) === "subcontractor",
+          Number(actor.id),
         ]
       )
 
@@ -391,6 +488,11 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
 
       if (!actor) {
         return { ok: false, error: "Unauthorized" }
+      }
+
+      if (String(actor.role) === "subcontractor") {
+        reply.code(403)
+        return { ok: false, error: "Subcontractors cannot delete calendar events" }
       }
 
       const result = await pool.query(
