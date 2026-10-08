@@ -10,7 +10,7 @@ import { enUS } from "date-fns/locale/en-US"
 import "react-big-calendar/lib/css/react-big-calendar.css"
 import "react-big-calendar/lib/addons/dragAndDrop/styles.css"
 import { getTenantSlug } from "../lib/tenant"
-import { getToken } from "../lib/auth"
+import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { stagePresentation } from "../lib/stagePresentation"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
@@ -228,7 +228,12 @@ export default function CalendarPage() {
   const [message, setMessage] = useState("")
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
   const [plannerJobs, setPlannerJobs] = useState<ProductionPlannerJob[]>([])
+  const [tarpVisibleCount, setTarpVisibleCount] = useState(25)
   const [plannerMessage, setPlannerMessage] = useState("")
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null)
+  const [identityLoaded, setIdentityLoaded] = useState(false)
+  const isSubcontractor = currentUser?.role === "subcontractor"
+  const canViewUpstreamPlanner = identityLoaded && !!currentUser && !isSubcontractor
   const [plannerExplanationDrafts, setPlannerExplanationDrafts] = useState<Record<number, string>>({})
 
   async function loadProductionPlanner() {
@@ -437,6 +442,16 @@ export default function CalendarPage() {
   }
 
   async function createEvent() {
+    if (!identityLoaded || !currentUser) {
+      setMessage("Calendar authentication required.")
+      return
+    }
+
+    if (isSubcontractor && (!Number.isSafeInteger(Number(jobId)) || Number(jobId) <= 0)) {
+      setMessage("An assigned Job ID is required.")
+      return
+    }
+
     try {
       setMessage("Creating event...")
 
@@ -493,7 +508,7 @@ export default function CalendarPage() {
   }
 
   async function deleteSelectedEvent() {
-    if (!selectedEvent) return
+    if (!selectedEvent || !identityLoaded || !currentUser || isSubcontractor) return
 
     const confirmed = window.confirm(`Delete calendar event: ${selectedEvent.title}?`)
     if (!confirmed) return
@@ -539,6 +554,11 @@ export default function CalendarPage() {
     end: Date,
     auditSource: string,
   ) {
+    if (!identityLoaded || !currentUser) {
+      setMessage("Calendar authentication required.")
+      return
+    }
+
     try {
       setMessage("Saving calendar change...")
 
@@ -630,8 +650,39 @@ export default function CalendarPage() {
   }
 
   useEffect(() => {
-    loadEvents()
-    loadProductionPlanner()
+    let cancelled = false
+
+    async function initializeCalendar() {
+      try {
+        const user = await getMe()
+        if (cancelled) return
+
+        setCurrentUser(user)
+        setIdentityLoaded(true)
+
+        if (!user) {
+          setMessage("Calendar authentication required.")
+          return
+        }
+
+        await loadEvents()
+
+        if (user.role !== "subcontractor") {
+          await loadProductionPlanner()
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setIdentityLoaded(true)
+          setMessage(err?.message || "Unable to verify calendar access.")
+        }
+      }
+    }
+
+    void initializeCalendar()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return (
@@ -766,9 +817,11 @@ export default function CalendarPage() {
             Open Job
           </button>
 
-          <button onClick={deleteSelectedEvent} style={{ ...buttonStyle, background: "#991b1b", color: "white" }}>
-            Delete Event
-          </button>
+          {canViewUpstreamPlanner && (
+            <button onClick={deleteSelectedEvent} style={{ ...buttonStyle, background: "#991b1b", color: "white" }}>
+              Delete Event
+            </button>
+          )}
 
           <button onClick={() => setSelectedEvent(null)} style={buttonStyle}>
             Clear Selection
@@ -784,6 +837,7 @@ export default function CalendarPage() {
           alignItems: "start",
         }}
       >
+        {canViewUpstreamPlanner && (
         <div
           style={{
             background: "#111827",
@@ -802,10 +856,16 @@ export default function CalendarPage() {
 
           {PRODUCTION_PLANNER_STAGES.map(stage => {
             const presentation = stagePresentation(stage)
-            const jobs = plannerJobs.filter(
+            const stageJobs = plannerJobs.filter(
               job =>
                 String(job.stage || "").trim().toLowerCase() === stage
             )
+            const unassignedTarpJobs = stage === "tarp"
+              ? stageJobs.filter(job => !job.crew_app_user_id)
+              : []
+            const jobs = stage === "tarp"
+              ? unassignedTarpJobs.slice(0, tarpVisibleCount)
+              : stageJobs
 
             return (
               <div key={stage} style={{ marginBottom: 16 }}>
@@ -820,7 +880,12 @@ export default function CalendarPage() {
                     marginBottom: 6,
                   }}
                 >
-                  {plannerStageLabel(stage)} ({jobs.length})
+                  {plannerStageLabel(stage)} ({stageJobs.length})
+                  {stage === "tarp" && (
+                    <div style={{ fontSize: 13, marginTop: 4 }}>
+                      Needs Assignment: {unassignedTarpJobs.length}
+                    </div>
+                  )}
                 </div>
 
                 {jobs.length === 0 ? (
@@ -971,10 +1036,19 @@ export default function CalendarPage() {
                     )
                   })
                 )}
+                {stage === "tarp" && unassignedTarpJobs.length > jobs.length && (
+                  <button
+                    onClick={() => setTarpVisibleCount(current => current + 25)}
+                    style={{ ...buttonStyle, marginTop: 8, width: "100%" }}
+                  >
+                    Show 25 More ({unassignedTarpJobs.length - jobs.length} remaining)
+                  </button>
+                )}
               </div>
             )
           })}
         </div>
+        )}
 
         <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
           <DraggableCalendar

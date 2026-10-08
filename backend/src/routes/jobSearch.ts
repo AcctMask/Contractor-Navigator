@@ -689,7 +689,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
             from crew_assignments ca
             where ca.tenant_id = j.tenant_id
               and ca.job_id = j.id
-              and coalesce(ca.status, 'active') = 'active'
+              and (ca.status = 'PENDING' or coalesce(ca.status, 'active') = 'active')
             order by ca.assigned_at desc nulls last, ca.id desc
             limit 1
           ) crew on true
