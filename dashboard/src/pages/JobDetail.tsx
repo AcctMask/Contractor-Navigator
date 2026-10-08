@@ -1875,6 +1875,13 @@ export default function JobDetail() {
                       </p>
 
                       <p>
+                        <strong>Uploaded:</strong>{" "}
+                        {asset.created_at
+                          ? new Date(asset.created_at).toLocaleString()
+                          : "Date unavailable"}
+                      </p>
+
+                      <p>
                         {asset.mime_type || "file"} —{" "}
                         {asset.size_bytes
                           ? `${Math.round(
