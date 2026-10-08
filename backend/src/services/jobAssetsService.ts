@@ -81,8 +81,16 @@ async function ensureJobExists(tenantId: number, jobId: number) {
   }
 }
 
-export async function listJobAssetsByTenantSlug(tenantSlug: string, jobId: number) {
+export async function listJobAssetsByTenantSlug(
+  tenantSlug: string,
+  jobId: number,
+  creatorUserId?: number
+) {
   await ensureAssetTable()
+  await pool.query(`
+    alter table job_assets
+    add column if not exists created_by_user_id bigint null
+  `)
   const tenantId = await getTenantIdBySlug(tenantSlug)
   await ensureJobExists(tenantId, jobId)
 
@@ -100,13 +108,15 @@ export async function listJobAssetsByTenantSlug(tenantSlug: string, jobId: numbe
       file_size_bytes,
       note,
       uploaded_by,
+      created_by_user_id,
       created_at
     from job_assets
     where tenant_id = $1
       and job_id = $2
+      and ($3::bigint is null or created_by_user_id = $3)
     order by created_at desc, id desc
     `,
-    [tenantId, jobId]
+    [tenantId, jobId, creatorUserId ?? null]
   )
 
   return result.rows

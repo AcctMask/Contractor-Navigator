@@ -795,7 +795,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             [tenantId, jobId]
           );
 
-    const filesRaw = await listJobAssetsByTenantSlug(tenant_slug, jobId);
+    const filesRaw = await listJobAssetsByTenantSlug(
+      tenant_slug,
+      jobId,
+      String(user.role) === "subcontractor" ? Number(user.id) : undefined
+    );
     const files = filesRaw.map((f: any) => ({
       id: f.id,
       kind: f.asset_type || "other",
@@ -814,7 +818,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       contacts: contacts.rows,
       insurance: insurance.rows[0] || null,
       damage_reports: damage.rows,
-      documents: documents.rows,
+      documents: String(user.role) === "subcontractor" ? [] : documents.rows,
       crew_assignments: crew.rows,
       timeline: timeline.rows,
       files

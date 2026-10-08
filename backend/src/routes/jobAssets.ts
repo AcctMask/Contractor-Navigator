@@ -107,6 +107,11 @@ async function ensureAssetCategoryColumn() {
     alter table job_assets
     add column if not exists asset_category text
   `)
+
+  await pool.query(`
+    alter table job_assets
+    add column if not exists created_by_user_id bigint null
+  `)
 }
 
 export async function registerJobAssetsRoutes(app: FastifyInstance) {
@@ -144,13 +149,19 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           file_size_bytes,
           note,
           uploaded_by,
+          created_by_user_id,
           created_at
         from job_assets
         where tenant_id = $1
           and job_id = $2
+          and ($3::bigint is null or created_by_user_id = $3)
         order by created_at desc, id desc
         `,
-        [tenantId, numericJobId]
+        [
+          tenantId,
+          numericJobId,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       const notesResult = await pool.query(
@@ -179,9 +190,21 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             'document_package_sent',
             'document_package_signed'
           )
+          and (
+            $3::bigint is null
+            or (
+              kind = 'staff_note'
+              and meta->>'author_app_user_id' = $3::text
+              and coalesce(meta->>'note_type', '') <> 'manual_sms_sent'
+            )
+          )
         order by created_at desc, id desc
         `,
-        [tenantId, numericJobId]
+        [
+          tenantId,
+          numericJobId,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       const sequenceResult = await pool.query(
@@ -191,10 +214,18 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and kind = 'photo_report_sequence_saved'
+          and (
+            $3::bigint is null
+            or meta->>'saved_by_user_id' = $3::text
+          )
         order by created_at desc, id desc
         limit 1
         `,
-        [tenantId, numericJobId]
+        [
+          tenantId,
+          numericJobId,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       const savedSequence =
@@ -231,7 +262,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           job_id,
           original_name,
           stored_path,
-          mime_type
+          mime_type,
+          created_by_user_id
         from job_assets
         where tenant_id = $1
           and id = $2
@@ -255,6 +287,14 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
       if (!user) {
         return { ok: false, error: "Not authorized" }
+      }
+
+      if (
+        String(user.role) === "subcontractor" &&
+        Number(asset.created_by_user_id) !== Number(user.id)
+      ) {
+        reply.code(403)
+        return { ok: false, error: "File not authorized" }
       }
 
       const resolvedPath = asset.stored_path
@@ -348,10 +388,11 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             file_size_bytes,
             note,
             uploaded_by,
+            created_by_user_id,
             created_at
           )
           values
-          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+          ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
           returning
             id,
             job_id,
@@ -382,6 +423,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
             stat.size,
             uploadNote,
             String(user.full_name || user.email || "Team"),
+            Number(user.id),
           ]
         )
 
@@ -428,6 +470,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
   app.post("/assets/:tenantSlug/job/:jobId/photo-sequence", async (req: any, reply) => {
     try {
+      await ensureAssetCategoryColumn()
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
@@ -480,12 +523,18 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
+          and ($4::bigint is null or created_by_user_id = $4)
           and (
             asset_type = 'photo'
             or mime_type like 'image/%'
           )
         `,
-        [tenantId, numericJobId, photoIds]
+        [
+          tenantId,
+          numericJobId,
+          photoIds,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       if (photoResult.rows.length !== photoIds.length) {
@@ -524,6 +573,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           `Photo report sequence saved with ${photoIds.length} photo${photoIds.length === 1 ? "" : "s"}`,
           JSON.stringify({
             photo_ids: photoIds,
+            saved_by_user_id: Number(user.id),
             saved_by: String(
               user.full_name ||
                 user.email ||
@@ -553,6 +603,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
   app.get("/assets/:tenantSlug/job/:jobId/photo-download", async (req: any, reply) => {
     try {
+      await ensureAssetCategoryColumn()
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
@@ -575,10 +626,18 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and kind = 'photo_report_sequence_saved'
+          and (
+            $3::bigint is null
+            or meta->>'saved_by_user_id' = $3::text
+          )
         order by created_at desc, id desc
         limit 1
         `,
-        [tenantId, numericJobId]
+        [
+          tenantId,
+          numericJobId,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       const savedPhotoIds =
@@ -627,12 +686,18 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
+          and ($4::bigint is null or created_by_user_id = $4)
           and (
             asset_type = 'photo'
             or mime_type like 'image/%'
           )
         `,
-        [tenantId, numericJobId, photoIds]
+        [
+          tenantId,
+          numericJobId,
+          photoIds,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       if (
@@ -1024,8 +1089,14 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
+          and ($4::bigint is null or created_by_user_id = $4)
         `,
-        [tenantId, numericJobId, photoIds]
+        [
+          tenantId,
+          numericJobId,
+          photoIds,
+          String(user.role) === "subcontractor" ? Number(user.id) : null,
+        ]
       )
 
       if (photoResult.rows.length !== photoIds.length) {
@@ -1573,13 +1644,14 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           file_size_bytes,
           note,
           uploaded_by,
+          created_by_user_id,
           created_at
         )
         values
         (
           $1,$2,'file','Documents','local',
           $3,$4,$5,$6,'application/pdf',
-          $7,$8,$9,now()
+          $7,$8,$9,$10,now()
         )
         returning
           id,
@@ -1607,6 +1679,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
               user.email ||
               "Team"
           ),
+          Number(user.id),
         ]
       )
 
@@ -1689,6 +1762,11 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return { ok: false, error: "Not authorized" }
       }
 
+      if (String(user.role) === "subcontractor") {
+        reply.code(403)
+        return { ok: false, error: "Subcontractors cannot edit files" }
+      }
+
       const body = req.body || {}
       const note = String(body.note || "").trim() || null
       const assetCategory =
@@ -1758,6 +1836,23 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId, assetId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+
+      const numericJobId = Number(jobId)
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      if (String(user.role) === "subcontractor") {
+        reply.code(403)
+        return { ok: false, error: "Subcontractors cannot delete files" }
+      }
 
       const result = await pool.query(
         `
@@ -1900,7 +1995,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           tenantId,
           numericJobId,
           String(message).trim(),
-          JSON.stringify({ author: noteAuthor }),
+          JSON.stringify({ author: noteAuthor, author_app_user_id: Number(user.id) }),
         ]
       )
 
@@ -1915,6 +2010,23 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId, noteId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedJobAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      if (String(user.role) === "subcontractor") {
+        reply.code(403)
+        return { ok: false, error: "Subcontractors cannot delete notes" }
+      }
 
       const result = await pool.query(
         `
