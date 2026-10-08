@@ -51,6 +51,11 @@ async function ensureAuthTables() {
   `)
 
   await pool.query(`
+    alter table app_users
+      add column if not exists preferred_language text not null default 'en'
+  `)
+
+  await pool.query(`
     create table if not exists user_invitations (
       id bigserial primary key,
       tenant_id bigint not null references tenants(id) on delete cascade,
@@ -819,12 +824,53 @@ export async function loginUserByTenantSlug(
   }
 }
 
-export async function getCurrentUserFromToken(token: string) {
-  const decoded = verifyToken(token)
+export async function updateOwnPreferredLanguage(
+  token: string,
+  languageInput: unknown
+) {
+  await ensureAuthTables()
+
+  const language = String(languageInput || "").trim().toLowerCase()
+
+  if (language !== "en" && language !== "es") {
+    throw new Error("Unsupported language")
+  }
+
+  const user = await getCurrentUserFromToken(token)
+
+  if (!user?.is_active) {
+    throw new Error("User account is inactive")
+  }
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active
+    update app_users
+    set preferred_language = $1,
+        updated_at = now()
+    where id = $2
+      and tenant_id = $3
+      and is_active = true
+    returning id, tenant_id, preferred_language
+    `,
+    [language, user.id, user.tenant_id]
+  )
+
+  if (!result.rowCount) {
+    throw new Error("Unable to update language preference")
+  }
+
+  return result.rows[0]
+}
+
+export async function getCurrentUserFromToken(token: string) {
+  const decoded = verifyToken(token)
+
+  await ensureAuthTables()
+
+  const result = await pool.query(
+    `
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active,
+           preferred_language
     from app_users
     where id = $1
     limit 1
@@ -853,6 +899,7 @@ export async function listUsersByTenantSlug(tenantSlug: string) {
       au.role,
       au.is_active,
       au.financials_authorized,
+      au.preferred_language,
       au.deactivated_at,
       au.created_at,
       au.updated_at,
@@ -1299,6 +1346,49 @@ export async function updateManagedUserSubcontractorCompanyByTenantSlug(
   )
 
   return user
+}
+
+export async function updateManagedUserPreferredLanguageByTenantSlug(
+  tenantSlug: string,
+  userId: number,
+  languageInput: unknown,
+  actor: ManagedUserActor
+) {
+  await ensureAuthTables()
+
+  const tenantId = await getTenantIdBySlug(tenantSlug)
+  const target = await getManagedUser(tenantId, userId)
+
+  assertManagedUserIsMutable(target, actor)
+
+  if (!target.is_active) {
+    throw new Error("Former users cannot have their language changed")
+  }
+
+  const language = String(languageInput || "").trim().toLowerCase()
+
+  if (language !== "en" && language !== "es") {
+    throw new Error("Unsupported language")
+  }
+
+  const result = await pool.query(
+    `
+    update app_users
+    set preferred_language = $1,
+        updated_at = now()
+    where tenant_id = $2
+      and id = $3
+      and is_active = true
+    returning id, tenant_id, preferred_language
+    `,
+    [language, tenantId, userId]
+  )
+
+  if (!result.rowCount) {
+    throw new Error("Unable to update language preference")
+  }
+
+  return result.rows[0]
 }
 
 export async function updateManagedUserFullNameByTenantSlug(

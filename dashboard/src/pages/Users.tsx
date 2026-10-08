@@ -2,6 +2,10 @@ import { getMe, getToken } from "../lib/auth"
 import { useEffect, useMemo,
   useRef, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
+import {
+  normalizeWorkforceLanguage,
+  type WorkforceLanguage,
+} from "../lib/workforceLanguage"
 
 const API_BASE = import.meta.env.VITE_API_BASE
 type UserRow = {
@@ -12,6 +16,7 @@ type UserRow = {
   role: string
   is_active?: boolean
   financials_authorized?: boolean
+  preferred_language?: "en" | "es"
   deactivated_at?: string | null
   created_at?: string
   updated_at?: string
@@ -92,6 +97,9 @@ export default function UsersPage() {
     managedSubcontractorCompanyName,
     setManagedSubcontractorCompanyName,
   ] = useState("")
+
+  const [managedPreferredLanguage, setManagedPreferredLanguage] =
+    useState<WorkforceLanguage>("en")
 
   const [newPassword, setNewPassword] =
     useState("")
@@ -361,6 +369,9 @@ export default function UsersPage() {
       user.mobile_phone ||
         ""
     )
+    setManagedPreferredLanguage(
+      normalizeWorkforceLanguage(user.preferred_language)
+    )
     setManagedSubcontractorCompanyName(
       user.subcontractor_company_name ||
         ""
@@ -373,6 +384,7 @@ export default function UsersPage() {
 
   function closeManageUser() {
     setSelectedUser(null)
+    setManagedPreferredLanguage("en")
     setManagedFullName("")
     setManagedMobilePhone("")
     setManagedSubcontractorCompanyName("")
@@ -380,6 +392,57 @@ export default function UsersPage() {
     setConfirmNewPassword("")
     setManageError("")
     setManageStatus("")
+  }
+
+  async function saveManagedPreferredLanguage() {
+    if (!selectedUser?.id) return
+
+    setManaging(true)
+    setManageError("")
+    setManageStatus("Saving language...")
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/auth/${getTenantSlug()}/users/${selectedUser.id}/language`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            preferred_language: managedPreferredLanguage,
+          }),
+        }
+      )
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(
+          json?.error || "Language update failed"
+        )
+      }
+
+      setSelectedUser((current) =>
+        current
+          ? {
+              ...current,
+              preferred_language: json.user.preferred_language,
+            }
+          : current
+      )
+
+      setManageStatus("Language preference saved")
+      await loadAll()
+    } catch (err: any) {
+      setManageError(
+        err?.message || "Language update failed"
+      )
+      setManageStatus("")
+    } finally {
+      setManaging(false)
+    }
   }
 
   async function saveManagedFullName() {
@@ -1259,6 +1322,53 @@ export default function UsersPage() {
                 {formatDate(
                   selectedUser.created_at
                 )}
+              </div>
+
+              <div>
+                <label
+                  htmlFor="managed-user-language"
+                  style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    fontWeight: 700,
+                  }}
+                >
+                  Preferred Language
+                </label>
+
+                <div style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}>
+                  <select
+                    id="managed-user-language"
+                    value={managedPreferredLanguage}
+                    disabled={managing || selectedUser.is_active === false}
+                    onChange={(e) =>
+                      setManagedPreferredLanguage(
+                        e.target.value as WorkforceLanguage
+                      )
+                    }
+                    style={{
+                      padding: "10px",
+                      borderRadius: "8px",
+                    }}
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => void saveManagedPreferredLanguage()}
+                    disabled={managing || selectedUser.is_active === false}
+                    style={secondaryButtonStyle}
+                  >
+                    Save Language
+                  </button>
+                </div>
               </div>
 
               <div>

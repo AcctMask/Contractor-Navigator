@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { clearToken, getMe, getToken, type AuthUser } from "../lib/auth"
+import { clearToken, getMe, getToken, saveMyPreferredLanguage, type AuthUser } from "../lib/auth"
 import {
   getTenantSlug,
   tenantDisplayName,
 } from "../lib/tenant"
+
+import {
+  normalizeWorkforceLanguage,
+  workforceText,
+  WORKFORCE_LANGUAGES,
+  type WorkforceLanguage,
+} from "../lib/workforceLanguage"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -16,6 +23,11 @@ export default function FieldPortalPage() {
   const [jobs, setJobs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [language, setLanguage] = useState<WorkforceLanguage>("en")
+  const [savingLanguage, setSavingLanguage] = useState(false)
+  const [languageError, setLanguageError] = useState("")
+  const t = (key: Parameters<typeof workforceText>[1]) =>
+    workforceText(language, key)
 
   useEffect(() => {
     let active = true
@@ -26,6 +38,9 @@ export default function FieldPortalPage() {
 
         if (!active) return
         setUser(currentUser)
+        setLanguage(
+          normalizeWorkforceLanguage(currentUser?.preferred_language)
+        )
 
         const token = getToken()
         const res = await fetch(
@@ -64,6 +79,27 @@ export default function FieldPortalPage() {
     }
   }, [])
 
+  async function changeLanguage(next: WorkforceLanguage) {
+    if (savingLanguage || next === language) return
+
+    setSavingLanguage(true)
+    setLanguageError("")
+
+    try {
+      await saveMyPreferredLanguage(next)
+      setLanguage(next)
+      setUser((current) =>
+        current ? { ...current, preferred_language: next } : current
+      )
+    } catch (err: any) {
+      setLanguageError(
+        err?.message || "Unable to save language preference"
+      )
+    } finally {
+      setSavingLanguage(false)
+    }
+  }
+
   function handleLogout() {
     clearToken()
     navigate("/login")
@@ -82,35 +118,60 @@ export default function FieldPortalPage() {
           </div>
 
           <h1 style={{ margin: "8px 0 0", fontSize: "36px" }}>
-            My Assigned Jobs
+            {t("myAssignedJobs")}
           </h1>
 
           <p style={{ marginBottom: 0, opacity: 0.86 }}>
-            Welcome{user?.full_name ? `, ${user.full_name}` : ""}.
+            {t("welcome")}{user?.full_name ? `, ${user.full_name}` : ""}.
           </p>
+          <div style={{ marginTop: "16px" }}>
+            <label htmlFor="field-language" style={{ marginRight: 10 }}>
+              {t("language")}
+            </label>
+            <select
+              id="field-language"
+              value={language}
+              disabled={!user || savingLanguage}
+              onChange={(e) =>
+                void changeLanguage(e.target.value as WorkforceLanguage)
+              }
+              style={{ padding: "8px", borderRadius: "8px" }}
+            >
+              {WORKFORCE_LANGUAGES.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {languageError && (
+              <p role="alert" style={{ color: "#ffb4b4" }}>
+                {languageError}
+              </p>
+            )}
+          </div>
         </div>
 
         <div style={jobsCard}>
           {loading ? (
-            <p style={{ margin: 0 }}>Loading assigned jobs...</p>
+            <p style={{ margin: 0 }}>{t("loadingJobs")}</p>
           ) : error ? (
             <>
-              <h2 style={{ marginTop: 0 }}>Unable to load assigned jobs</h2>
+              <h2 style={{ marginTop: 0 }}>{t("unableToLoadJobs")}</h2>
               <p style={{ marginBottom: 0, lineHeight: 1.55 }}>
                 {error}
               </p>
             </>
           ) : jobs.length === 0 ? (
             <>
-              <h2 style={{ marginTop: 0 }}>No assigned jobs yet</h2>
+              <h2 style={{ marginTop: 0 }}>{t("noAssignedJobs")}</h2>
               <p style={{ marginBottom: 0, lineHeight: 1.55, opacity: 0.84 }}>
-                When the office assigns a job to you, it will appear here.
+                {t("assignmentExplanation")}
               </p>
             </>
           ) : (
             <>
               <h2 style={{ marginTop: 0 }}>
-                Assigned Jobs ({jobs.length})
+                {t("assignedJobs")} ({jobs.length})
               </h2>
 
               <div style={{ display: "grid", gap: "12px" }}>
@@ -121,17 +182,17 @@ export default function FieldPortalPage() {
                     style={jobButton}
                   >
                     <div style={{ fontWeight: 800 }}>
-                      Job #{job.id} — {job.customer_name || "Customer"}
+                      Job #{job.id} — {job.customer_name || t("customer")}
                     </div>
 
                     <div style={{ marginTop: 6, opacity: 0.88 }}>
                       {[job.address1, job.city, job.state, job.zip]
                         .filter(Boolean)
-                        .join(", ") || "Address not yet available"}
+                        .join(", ") || t("addressUnavailable")}
                     </div>
 
                     <div style={{ marginTop: 6, opacity: 0.72 }}>
-                      Stage: {job.stage || "—"}
+                      {t("stage")}: {job.stage || "—"}
                     </div>
                   </button>
                 ))}
@@ -141,7 +202,7 @@ export default function FieldPortalPage() {
         </div>
 
         <button onClick={handleLogout} style={logoutButton}>
-          Logout
+          {t("logout")}
         </button>
       </div>
     </div>

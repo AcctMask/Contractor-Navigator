@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
+  updateOwnPreferredLanguage,
   getInvitationByToken,
   inviteUserByTenantSlug,
   listInvitationsByTenantSlug,
@@ -14,6 +15,7 @@ import {
   updateManagedUserFinancialsAuthorizationByTenantSlug,
   updateManagedUserMobilePhoneByTenantSlug,
   updateManagedUserFullNameByTenantSlug,
+  updateManagedUserPreferredLanguageByTenantSlug,
   resetManagedUserPasswordByTenantSlug,
   deactivateManagedUserByTenantSlug,
   recordUserInvitationEmailSent,
@@ -421,6 +423,30 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   })
 
+  app.patch("/auth/me/language", async (request: any, reply) => {
+    try {
+      const token = getBearerToken(request)
+
+      if (!token) {
+        reply.code(401)
+        return { ok: false, error: "Missing token" }
+      }
+
+      const user = await updateOwnPreferredLanguage(
+        token,
+        request.body?.preferred_language
+      )
+
+      return { ok: true, user }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || String(err),
+      }
+    }
+  })
+
   app.get("/auth/:tenantSlug/users", async (request: any, reply) => {
     try {
       const { tenantSlug } =
@@ -459,6 +485,48 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       }
     }
   })
+
+  app.patch(
+    "/auth/:tenantSlug/users/:userId/language",
+    async (request: any, reply) => {
+      try {
+        const { tenantSlug, userId } = request.params
+
+        const access = await requireTenantUserManager(
+          request,
+          reply,
+          tenantSlug
+        )
+
+        if (!access) {
+          return { ok: false, error: "Not authorized" }
+        }
+
+        const id = Number(userId)
+
+        if (!Number.isSafeInteger(id) || id <= 0) {
+          reply.code(400)
+          return { ok: false, error: "Invalid user ID" }
+        }
+
+        const user =
+          await updateManagedUserPreferredLanguageByTenantSlug(
+            tenantSlug,
+            id,
+            request.body?.preferred_language,
+            access.actor
+          )
+
+        return { ok: true, user }
+      } catch (err: any) {
+        reply.code(400)
+        return {
+          ok: false,
+          error: err?.message || String(err),
+        }
+      }
+    }
+  )
 
   app.patch(
     "/auth/:tenantSlug/users/:userId/full-name",
