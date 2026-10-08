@@ -51,14 +51,10 @@ async function subcontractorCanAccessTask(
     assigned_user_id?: number | null
   }
 ): Promise<boolean> {
-  if (Number(task.assigned_user_id) === userId) {
-    return true
-  }
-
   const jobId = Number(task.job_id)
 
   if (!jobId) {
-    return false
+    return Number(task.assigned_user_id) === userId
   }
 
   const assignment = await pool.query(
@@ -68,6 +64,7 @@ async function subcontractorCanAccessTask(
     where tenant_id = $1
       and job_id = $2
       and app_user_id = $3
+      and status IN ('PENDING', 'active')
     limit 1
     `,
     [tenantId, jobId, userId]
@@ -591,13 +588,17 @@ export async function registerTaskRoutes(app: FastifyInstance) {
         where ce.tenant_id = $1
           and (
             $2::text <> 'subcontractor'
-            or ce.assigned_user_id = $3
+            or (
+              ce.job_id is null
+              and ce.assigned_user_id = $3
+            )
             or exists (
               select 1
               from crew_assignments ca
               where ca.tenant_id = ce.tenant_id
                 and ca.job_id = ce.job_id
                 and ca.app_user_id = $3
+                and ca.status IN ('PENDING', 'active')
             )
           )
         order by ce.start_time asc, ce.id asc

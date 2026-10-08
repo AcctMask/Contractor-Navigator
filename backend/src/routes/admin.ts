@@ -705,6 +705,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
             where ca.tenant_id = j.tenant_id
               and ca.job_id = j.id
               and ca.app_user_id = $4
+              and ca.status IN ('PENDING', 'active')
           )
         )
       limit 1
@@ -1385,95 +1386,114 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
       const subcontractor = subcontractorResult.rows[0];
 
-      const existing = await pool.query(
-        `
-        select id
-        from crew_assignments
-        where tenant_id = $1
-          and job_id = $2
-          and app_user_id = $3
-        limit 1
-        `,
-        [tenantId, jobId, appUserId]
-      );
+      const client = await pool.connect();
 
       let assignment;
 
-      if (existing.rowCount) {
-        const updated = await pool.query(
-          `
-          update crew_assignments
+      try {
+        await client.query("BEGIN");
+
+        await client.query(
+          `select id
+           from jobs
+           where tenant_id = $1 and id = $2
+           for update`,
+          [tenantId, jobId]
+        );
+
+        const previous = await client.query(
+          `update crew_assignments
+           set status = 'REASSIGNED',
+               updated_at = now()
+           where tenant_id = $1
+             and job_id = $2
+             and app_user_id is distinct from $3
+             and status IN ('PENDING', 'active')
+           returning id, app_user_id, crew_name`,
+          [tenantId, jobId, appUserId]
+        );
+
+        const existing = await client.query(
+          `select *
+           from crew_assignments
+           where tenant_id = $1
+             and job_id = $2
+             and app_user_id = $3
+           order by id desc
+           limit 1`,
+          [tenantId, jobId, appUserId]
+        );
+
+        if (
+          existing.rowCount &&
+          ['PENDING', 'active'].includes(String(existing.rows[0].status))
+        ) {
+          assignment = existing.rows[0];
+        } else if (existing.rowCount) {
+          const updated = await client.query(
+            `update crew_assignments
              set crew_name = $1,
                  assigned_by = $2,
                  status = 'PENDING',
                  assigned_at = now(),
                  updated_at = now()
-           where tenant_id = $3
-             and job_id = $4
-             and app_user_id = $5
-          returning *
-          `,
+             where id = $3
+             returning *`,
+            [
+              subcontractor.full_name,
+              actor.full_name || actor.email,
+              existing.rows[0].id
+            ]
+          );
+
+          assignment = updated.rows[0];
+        } else {
+          const inserted = await client.query(
+            `insert into crew_assignments
+               (tenant_id, job_id, crew_name, assigned_by, status,
+                assigned_at, created_at, updated_at, app_user_id)
+             values
+               ($1, $2, $3, $4, 'PENDING', now(), now(), now(), $5)
+             returning *`,
+            [
+              tenantId,
+              jobId,
+              subcontractor.full_name,
+              actor.full_name || actor.email,
+              appUserId
+            ]
+          );
+
+          assignment = inserted.rows[0];
+        }
+
+        await client.query(
+          `insert into timeline_events
+             (tenant_id, job_id, kind, message, meta, created_at)
+           values
+             ($1, $2, 'subcontractor_assigned', $3, $4::jsonb, now())`,
           [
-            subcontractor.full_name,
-            actor.full_name || actor.email,
             tenantId,
             jobId,
-            appUserId
+            `Job assigned to subcontractor: ${subcontractor.full_name}`,
+            JSON.stringify({
+              author: actor.full_name || actor.email,
+              app_user_id: appUserId,
+              subcontractor_name: subcontractor.full_name,
+              subcontractor_email: subcontractor.email,
+              assignment_status: "PENDING",
+              previous_assignments_reassigned: previous.rowCount
+            })
           ]
         );
 
-        assignment = updated.rows[0];
-      } else {
-        const inserted = await pool.query(
-          `
-          insert into crew_assignments
-            (
-              tenant_id,
-              job_id,
-              crew_name,
-              assigned_by,
-              status,
-              assigned_at,
-              created_at,
-              updated_at,
-              app_user_id
-            )
-          values
-            ($1, $2, $3, $4, 'PENDING', now(), now(), now(), $5)
-          returning *
-          `,
-          [
-            tenantId,
-            jobId,
-            subcontractor.full_name,
-            actor.full_name || actor.email,
-            appUserId
-          ]
-        );
-
-        assignment = inserted.rows[0];
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
       }
-
-      await pool.query(
-        `
-        insert into timeline_events
-          (tenant_id, job_id, kind, message, meta, created_at)
-        values
-          ($1, $2, 'subcontractor_assigned', $3, $4::jsonb, now())
-        `,
-        [
-          tenantId,
-          jobId,
-          `Job assigned to subcontractor: ${subcontractor.full_name}`,
-          JSON.stringify({
-            author: actor.full_name || actor.email,
-            app_user_id: appUserId,
-            subcontractor_name: subcontractor.full_name,
-            subcontractor_email: subcontractor.email,
-            assignment_status: "PENDING"
-          })
-        ]
-      );
 
       return reply.send({
         ok: true,

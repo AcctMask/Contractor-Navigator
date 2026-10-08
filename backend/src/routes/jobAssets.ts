@@ -70,6 +70,7 @@ async function requireAssignedJobAccess(
       where tenant_id = $1
         and job_id = $2
         and app_user_id = $3
+        and status IN ('PENDING', 'active')
       limit 1
       `,
       [tenantId, jobId, Number(user.id)]

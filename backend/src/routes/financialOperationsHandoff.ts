@@ -200,6 +200,7 @@ export async function registerFinancialOperationsHandoffRoutes(
                     where ca.tenant_id = j.tenant_id
                       and ca.job_id = j.id
                       and ca.app_user_id = $4
+                      and ca.status IN ('PENDING', 'active')
                   )
                 )
               limit 1

@@ -64,6 +64,7 @@ async function subcontractorHasCalendarJob(
     where j.tenant_id = $1
       and j.id = $2
       and ca.app_user_id = $3
+      and ca.status IN ('PENDING', 'active')
     limit 1
     `,
     [tenantId, jobId, userId]
@@ -209,6 +210,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
               where ca.tenant_id = ce.tenant_id
                 and ca.job_id = ce.job_id
                 and ca.app_user_id = $3
+                and ca.status IN ('PENDING', 'active')
             )
           )
         order by ce.start_time asc, ce.id asc
@@ -287,6 +289,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
             where ca.tenant_id = $1
               and ca.job_id = $2
               and ca.app_user_id = $10
+                and ca.status IN ('PENDING', 'active')
           )
         )
         returning
@@ -447,6 +450,7 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
               where ca.tenant_id = calendar_events.tenant_id
                 and ca.job_id = calendar_events.job_id
                 and ca.app_user_id = $10
+                and ca.status IN ('PENDING', 'active')
             )
           )
         returning

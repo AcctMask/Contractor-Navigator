@@ -130,6 +130,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               where ca.tenant_id = j.tenant_id
                 and ca.job_id = j.id
                 and ca.app_user_id = $6
+                and ca.status IN ('PENDING', 'active')
             )
           )
           and (
@@ -203,6 +204,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               where ca.tenant_id = j.tenant_id
                 and ca.job_id = j.id
                 and ca.app_user_id = $3
+                and ca.status IN ('PENDING', 'active')
             )
           )
         order by j.id desc
@@ -711,6 +713,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
                 where ca.tenant_id = j.tenant_id
                   and ca.job_id = j.id
                   and ca.app_user_id = $3
+                and ca.status IN ('PENDING', 'active')
               )
             )
 
@@ -962,6 +965,7 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
               where ca.tenant_id = j.tenant_id
                 and ca.job_id = j.id
                 and ca.app_user_id = $4
+                and ca.status IN ('PENDING', 'active')
             )
           )
         limit 1
