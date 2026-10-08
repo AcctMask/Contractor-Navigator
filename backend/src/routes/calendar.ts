@@ -167,6 +167,8 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
           ce.updated_at,
           c.full_name as customer_name,
           j.stage as job_stage,
+          assigned_sub.app_user_id as assigned_subcontractor_id,
+          assigned_sub.full_name as assigned_subcontractor_name,
           concat_ws(
             ', ',
             nullif(trim(j.address1), ''),
@@ -181,6 +183,23 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
         left join customers c
           on c.id = j.customer_id
          and c.tenant_id = j.tenant_id
+        left join lateral (
+          select ca.app_user_id, au.full_name
+          from crew_assignments ca
+          join app_users au
+            on au.id = ca.app_user_id
+           and au.tenant_id = ca.tenant_id
+           and au.role = 'subcontractor'
+           and au.is_active = true
+          where ca.tenant_id = ce.tenant_id
+            and ca.job_id = ce.job_id
+            and (
+              ca.status = 'PENDING'
+              or coalesce(ca.status, 'active') = 'active'
+            )
+          order by ca.assigned_at desc nulls last, ca.id desc
+          limit 1
+        ) assigned_sub on true
         where ce.tenant_id = $1
           and (
             $2::boolean = false

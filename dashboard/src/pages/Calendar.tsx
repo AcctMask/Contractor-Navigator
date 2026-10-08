@@ -128,6 +128,8 @@ type CalendarEvent = {
   automation_managed?: boolean
   automation_stage_key?: string | null
   job_stage?: string | null
+  assigned_subcontractor_id?: number | null
+  assigned_subcontractor_name?: string | null
 }
 
 
@@ -218,6 +220,7 @@ export default function CalendarPage() {
   const navigate = useNavigate()
 
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [subcontractorFilter, setSubcontractorFilter] = useState("all")
   const [title, setTitle] = useState("")
   const [jobId, setJobId] = useState("")
   const [startTime, setStartTime] = useState("")
@@ -234,6 +237,25 @@ export default function CalendarPage() {
   const [identityLoaded, setIdentityLoaded] = useState(false)
   const isSubcontractor = currentUser?.role === "subcontractor"
   const canViewUpstreamPlanner = identityLoaded && !!currentUser && !isSubcontractor
+
+  const subcontractorOptions = Array.from(
+    new Map<number, string>(
+      events
+        .filter(event => event.assigned_subcontractor_id)
+        .map(event => [
+          Number(event.assigned_subcontractor_id),
+          event.assigned_subcontractor_name || `Subcontractor ${event.assigned_subcontractor_id}`,
+        ])
+    ).entries()
+  ).sort((a, b) => a[1].localeCompare(b[1]))
+
+  const displayedEvents = !canViewUpstreamPlanner || subcontractorFilter === "all"
+    ? events
+    : subcontractorFilter === "unassigned"
+      ? events.filter(event => !event.assigned_subcontractor_id)
+      : events.filter(
+          event => String(event.assigned_subcontractor_id) === subcontractorFilter
+        )
   const [plannerExplanationDrafts, setPlannerExplanationDrafts] = useState<Record<number, string>>({})
 
   async function loadProductionPlanner() {
@@ -378,6 +400,10 @@ export default function CalendarPage() {
         automation_managed: Boolean(e.automation_managed),
         automation_stage_key: e.automation_stage_key || null,
         job_stage: e.job_stage || null,
+        assigned_subcontractor_id: e.assigned_subcontractor_id
+          ? Number(e.assigned_subcontractor_id)
+          : null,
+        assigned_subcontractor_name: e.assigned_subcontractor_name || null,
       }))
 
       setEvents(mapped)
@@ -1051,9 +1077,31 @@ export default function CalendarPage() {
         )}
 
         <div style={{ background: "white", borderRadius: 12, padding: 12, height: 650 }}>
+          {canViewUpstreamPlanner && (
+            <div style={{ marginBottom: 12 }}>
+              <label htmlFor="calendar-subcontractor-filter" style={{ marginRight: 8, fontWeight: 700 }}>
+                Show calendar for:
+              </label>
+              <select
+                id="calendar-subcontractor-filter"
+                value={subcontractorFilter}
+                onChange={event => {
+                  setSubcontractorFilter(event.target.value)
+                  setSelectedEvent(null)
+                }}
+                style={{ padding: 8 }}
+              >
+                <option value="all">All Subcontractors</option>
+                <option value="unassigned">Unassigned / No Current Assignment</option>
+                {subcontractorOptions.map(([id, name]) => (
+                  <option key={id} value={String(id)}>{name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <DraggableCalendar
           localizer={localizer}
-          events={events}
+          events={displayedEvents}
           startAccessor="start"
           endAccessor="end"
           tooltipAccessor={tooltip}
