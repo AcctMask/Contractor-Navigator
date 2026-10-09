@@ -36,6 +36,8 @@ import {
   normalizeWorkforceLanguage,
   type WorkforceLanguage,
 } from "./lib/workforceLanguage"
+import { useLanguage } from "./context/LanguageContext"
+import { translateNavigationLabel } from "./lib/workforceLanguage"
 import { useTenant } from "./context/TenantContext"
 import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
@@ -56,8 +58,10 @@ function HeaderBar() {
   const [currentUser, setCurrentUser] =
     useState<any>(null)
 
-  const [headerPreferredLanguage, setHeaderPreferredLanguage] =
-    useState<WorkforceLanguage>("en")
+  const {
+    language: headerPreferredLanguage,
+    setLanguage: setHeaderPreferredLanguage,
+  } = useLanguage()
   const [savingHeaderLanguage, setSavingHeaderLanguage] =
     useState(false)
   const [headerLanguageError, setHeaderLanguageError] =
@@ -261,7 +265,7 @@ function HeaderBar() {
                 opacity: 0.62,
               }}
             >
-              Client workspace
+              {headerPreferredLanguage === "es" ? "Espacio de trabajo del cliente" : "Client workspace"}
             </label>
 
             <select
@@ -322,7 +326,7 @@ function HeaderBar() {
                         : mutedLinkStyle
                     }
                   >
-                    {item.label}
+                    {translateNavigationLabel(headerPreferredLanguage, item.label)}
                   </Link>
                   {item.route === "/" ? (
                     <a
@@ -353,7 +357,7 @@ function HeaderBar() {
                       }}
                       style={mutedLinkStyle}
                     >
-                      Financial Operations
+                      {headerPreferredLanguage === "es" ? "Operaciones financieras" : "Financial Operations"}
                     </a>
                   ) : null}
                   {item.route === "/" &&
@@ -406,7 +410,7 @@ function HeaderBar() {
               onClick={handleLogout}
               style={logoutButtonStyle}
             >
-              Logout
+              {headerPreferredLanguage === "es" ? "Cerrar sesión" : "Logout"}
             </button>
           </>
         ) : (

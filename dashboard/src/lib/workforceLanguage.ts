@@ -50,6 +50,36 @@ const translations = {
   },
 } as const
 
+const navigationLabels: Record<string, string> = {
+  "Dashboard": "Panel principal",
+  "Home": "Inicio",
+  "Jobs": "Trabajos",
+  "Job Admin": "Administración de trabajos",
+  "Job Administration": "Administración de trabajos",
+  "Commercial": "Comercial",
+  "Commercial Pipeline": "Oportunidades comerciales",
+  "Users": "Usuarios",
+  "Reports": "Informes",
+  "Business Performance": "Rendimiento del negocio",
+  "Calendar": "Calendario",
+  "Tasks": "Tareas",
+  "Developer Settings": "Configuración de desarrollo",
+  "Document Pipeline": "Gestión de documentos",
+  "Storm": "Tormentas",
+  "Roof Intelligence": "Inteligencia de techos",
+  "Social": "Redes sociales",
+  "Estimator": "Estimador",
+  "Timeline": "Cronología",
+}
+
+export function translateNavigationLabel(
+  language: WorkforceLanguage,
+  label: string
+): string {
+  if (language === "en") return label
+  return navigationLabels[label] || label
+}
+
 export type WorkforceTranslationKey =
   keyof typeof translations.en
 

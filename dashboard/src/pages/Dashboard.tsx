@@ -7,6 +7,7 @@ import {
 } from "../lib/tenant"
 import { useCompanyDna } from "../context/CompanyDnaContext"
 import { stagePresentation } from "../lib/stagePresentation"
+import { useLanguage } from "../context/LanguageContext"
 
 const API_BASE = import.meta.env.VITE_API_BASE
 type DashboardJob = {
@@ -90,6 +91,7 @@ function fmtLeadDate(value?: string | null) {
 }
 
 export default function DashboardPage() {
+  const { language } = useLanguage()
   const {
     branding,
     workflowDefaults,
@@ -671,7 +673,7 @@ export default function DashboardPage() {
               <div style={panelHeaderRow}>
                 <div>
                   <h2 style={panelTitle}>
-                    {jobTerm} Command Center
+                    {language === "es" ? `${jobTerm} - Centro de control` : `${jobTerm} Command Center`}
                   </h2>
                   <div style={panelSub}>
                     {selectedPipelineCard
@@ -681,7 +683,7 @@ export default function DashboardPage() {
                 </div>
 
                 <Link to="/job-admin" style={panelSearchButton}>
-                  Open Search
+                  {language === "es" ? "Abrir búsqueda" : "Open Search"}
                 </Link>
               </div>
 
@@ -727,13 +729,13 @@ export default function DashboardPage() {
 
               <div style={{ marginTop: 18 }}>
                 <Link to="/job-admin" style={primaryAction}>
-                  Go to Command Center
+                  {language === "es" ? "Ir al centro de control" : "Go to Command Center"}
                 </Link>
               </div>
             </div>
 
             <div style={panelCardSide}>
-              <h2 style={panelTitle}>Upcoming Calendar</h2>
+              <h2 style={panelTitle}>{language === "es" ? "Próximos eventos" : "Upcoming Calendar"}</h2>
               <div style={panelSub}>Scheduled projects, {inspectionTerm.toLowerCase()} events, and appointments.</div>
 
               <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
@@ -777,7 +779,7 @@ export default function DashboardPage() {
               </div>
 
               <div style={eventPanel}>
-                <h2 style={panelTitle}>Recent Activity</h2>
+                <h2 style={panelTitle}>{language === "es" ? "Actividad reciente" : "Recent Activity"}</h2>
                 <div style={panelSub}>
                   Current customer, staff, document, estimate, and sales activity.
                 </div>
