@@ -4,6 +4,8 @@ import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
 import { openFinancialOperations } from "../lib/financialOperations"
 import { stagePresentation } from "../lib/stagePresentation"
+import WorkforceCrewInviteForm, { type CrewInviteDetails } from "../components/WorkforceCrewInviteForm"
+import WorkforceAssignedCrew from "../components/WorkforceAssignedCrew"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
@@ -130,7 +132,40 @@ export default function JobDetail() {
     useState<Set<string>>(new Set())
   const [subcontractors, setSubcontractors] = useState<any[]>([])
   const [crewAssignments, setCrewAssignments] = useState<any[]>([])
+  const [workforceCrewRefresh, setWorkforceCrewRefresh] = useState(0)
   const [selectedSubcontractorId, setSelectedSubcontractorId] = useState("")
+
+  async function inviteCrewMember(details: CrewInviteDetails) {
+    if (!id) throw new Error("Job required")
+
+    const response = await fetch(
+      `${API_BASE}/workforce/crew/${encodeURIComponent(id)}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(details),
+      }
+    )
+
+    const result = await response.json()
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Crew registration failed")
+    }
+
+    setWorkforceCrewRefresh(value => value + 1)
+
+    if (result.sms_sent) {
+      successToast("Crew assigned. Invitation SMS submitted.")
+    } else {
+      successToast(
+        "Crew assigned, but invitation SMS was not sent. Assignment remains active."
+      )
+    }
+  }
 
   async function loadJob() {
     if (!id) return
@@ -158,6 +193,8 @@ export default function JobDetail() {
 
     const jobTimelineNotes = (data.timeline || []).filter((event: any) =>
       [
+        "workforce_sms",
+        "workforce_activity",
         "manual_note",
         "staff_note",
         "estimate_details",
@@ -1720,17 +1757,21 @@ export default function JobDetail() {
         ) : (
           <>
             <section style={card}>
-              <h2>My Crew</h2>
-              <p>
-                Invite crew leads and members to this assigned job.
-                Choose their preferred language: English or Español.
-              </p>
-              <button type="button" disabled>
-                Add Crew Member — Coming Soon
-              </button>
-            </section>
+                <h2>My Crew</h2>
+                <WorkforceCrewInviteForm
+                  jobLabel={`#${id}`}
+                  onInvite={inviteCrewMember}
+                  enabled
+                />
+                <WorkforceAssignedCrew
+                  jobId={Number(id)}
+                  apiBase={API_BASE}
+                  token={getToken() || ""}
+                  refreshKey={workforceCrewRefresh}
+                />
+              </section>
 
-            <section style={card}>
+              <section style={card}>
               <h2>Job Details</h2>
 
               <p>

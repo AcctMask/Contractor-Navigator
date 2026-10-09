@@ -8,6 +8,14 @@ import { pool } from "../db/db"
  * No database operations execute unless explicitly called.
  */
 export async function ensureWorkforceCrewTables() {
+  // PostgreSQL requires an explicit unique key for composite
+  // company/tenant foreign keys. This protects tenant isolation.
+  await pool.query(`
+    create unique index if not exists
+      idx_subcontractor_companies_id_tenant
+    on subcontractor_companies (id, tenant_id)
+  `)
+
   await pool.query(`
     create table if not exists workforce_crew_members (
       id bigserial primary key,
@@ -22,6 +30,9 @@ export async function ensureWorkforceCrewTables() {
       invited_by_user_id bigint references app_users(id),
       invited_at timestamptz,
       accepted_at timestamptz,
+      invitation_token_hash text,
+      invitation_expires_at timestamptz,
+      invitation_job_id bigint,
       preferred_language text not null default 'en'
         check (preferred_language in ('en', 'es')),
       is_active boolean not null default true,
@@ -33,6 +44,14 @@ export async function ensureWorkforceCrewTables() {
       constraint workforce_crew_identity_unique
         unique (id, tenant_id, subcontractor_company_id)
     )
+  `)
+
+  // Existing production crew tables need these additive columns.
+  await pool.query(`
+    alter table workforce_crew_members
+      add column if not exists invitation_token_hash text,
+      add column if not exists invitation_expires_at timestamptz,
+      add column if not exists invitation_job_id bigint
   `)
 
   await pool.query(`

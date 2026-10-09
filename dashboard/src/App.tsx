@@ -41,6 +41,7 @@ import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 import { openFinancialOperations } from "./lib/financialOperations"
+import WorkforceAcceptInvite from "./pages/WorkforceAcceptInvite"
 
 function HeaderBar() {
   const location = useLocation()
@@ -494,6 +495,10 @@ export default function App() {
       <Route path="/timeline" element={<ProtectedPage><TimelinePage /></ProtectedPage>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+          <Route
+            path="/crew/accept-invite/:token"
+            element={<WorkforceAcceptInvite />}
+          />
       <Route path="/sign/:id" element={<SignDocument />} />
       <Route path="/field" element={<FieldProtectedPage><FieldPortalPage /></FieldProtectedPage>} />
       <Route path="*" element={<Navigate to="/" replace />} />
