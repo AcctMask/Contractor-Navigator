@@ -195,6 +195,7 @@ export default function JobDetail() {
       [
         "workforce_sms",
         "workforce_activity",
+        "subcontractor_assigned",
         "manual_note",
         "staff_note",
         "estimate_details",
@@ -2320,7 +2321,7 @@ export default function JobDetail() {
                         {assignment.crew_name || "Unnamed Subcontractor"}
                       </div>
                       <div style={{ opacity: 0.8, marginTop: 4 }}>
-                        Status: {assignment.status || "PENDING"}
+                        Status: {["PENDING", "active"].includes(String(assignment.status)) ? "ASSIGNED" : (assignment.status || "—")}
                       </div>
                       <div style={{ opacity: 0.7, marginTop: 4 }}>
                         Assigned by: {assignment.assigned_by || "—"}

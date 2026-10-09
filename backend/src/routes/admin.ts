@@ -3,6 +3,8 @@ import { pool } from "../db/db";
 import { schedulerTick } from "../services/scheduler";
 import { listJobAssetsByTenantSlug } from "../services/jobAssetsService";
 import { getCurrentUserFromToken } from "../services/authService";
+import { sendSMS } from "../services/twilioService";
+import { recordWorkforceSmsNote } from "../services/workforceSmsNotes";
 
 async function getTenantIdBySlug(slug: string): Promise<number> {
   const t = await pool.query(`select id from tenants where slug=$1 limit 1`, [slug]);
@@ -784,7 +786,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
     const timeline =
       String(user.role) === "subcontractor"
-        ? { rows: [] }
+        ? await pool.query(
+            `select id, kind, message, meta, created_at
+             from timeline_events
+             where tenant_id = $1
+               and job_id = $2
+               and kind = 'workforce_activity'
+             order by id desc
+             limit 250`,
+            [tenantId, jobId]
+          )
         : await pool.query(
             `
             select id, kind, message, meta, created_at
@@ -1366,7 +1377,8 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         select
           id,
           email,
-          full_name
+          full_name,
+          mobile_phone
         from app_users
         where tenant_id = $1
           and id = $2
@@ -1389,6 +1401,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       const client = await pool.connect();
 
       let assignment;
+      let newlyAssigned = false;
 
       try {
         await client.query("BEGIN");
@@ -1447,6 +1460,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           );
 
           assignment = updated.rows[0];
+          newlyAssigned = true;
         } else {
           const inserted = await client.query(
             `insert into crew_assignments
@@ -1465,9 +1479,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           );
 
           assignment = inserted.rows[0];
+          newlyAssigned = true;
         }
 
-        await client.query(
+        if (newlyAssigned) await client.query(
           `insert into timeline_events
              (tenant_id, job_id, kind, message, meta, created_at)
            values
@@ -1481,7 +1496,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
               app_user_id: appUserId,
               subcontractor_name: subcontractor.full_name,
               subcontractor_email: subcontractor.email,
-              assignment_status: "PENDING",
+              assignment_status: "ASSIGNED",
               previous_assignments_reassigned: previous.rowCount
             })
           ]
@@ -1495,9 +1510,62 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         client.release();
       }
 
+      let smsStatus = "not_required";
+      if (newlyAssigned) {
+        const phone = String(subcontractor.mobile_phone || "").trim();
+        if (!phone) {
+          smsStatus = "missing_phone";
+        } else {
+          try {
+            const message = `Navigator: Job #${jobId} has been assigned to you. Sign in to Navigator to view the job details.`;
+            const sent = await sendSMS(phone, message);
+            smsStatus = String(sent.status || "submitted");
+            try {
+              await recordWorkforceSmsNote({
+                tenantId,
+                jobId,
+                from: "tenant",
+                to: "sub",
+                message: `Assignment notification submitted to ${subcontractor.full_name}. Provider status: ${smsStatus}.`,
+                providerMessageSid: sent.sid,
+              });
+            } catch (noteError) {
+              req.log.error({ err: noteError, jobId }, "Assignment SMS note failed");
+            }
+          } catch (smsError) {
+            smsStatus = "failed";
+            req.log.error({ err: smsError, jobId }, "Assignment SMS failed");
+          }
+        }
+      }
+
+      if (newlyAssigned && ["missing_phone", "failed"].includes(smsStatus)) {
+        try {
+          await pool.query(
+            `insert into timeline_events
+               (tenant_id, job_id, kind, message, meta, created_at)
+             values ($1, $2, 'workforce_sms', $3, $4::jsonb, now())`,
+            [
+              tenantId,
+              jobId,
+              `Subcontractor assignment notification ${smsStatus === "missing_phone" ? "not sent: no registered mobile number" : "failed"} for ${subcontractor.full_name}. Assignment remains active.`,
+              JSON.stringify({
+                direction: "tenant-sub",
+                notification_type: "subcontractor_assignment",
+                status: smsStatus,
+                app_user_id: appUserId,
+              }),
+            ]
+          );
+        } catch (noteError) {
+          req.log.error({ err: noteError, jobId }, "Assignment SMS failure note failed");
+        }
+      }
+
       return reply.send({
         ok: true,
-        assignment
+        assignment,
+        sms_status: smsStatus
       });
     } catch (err: any) {
       return reply.code(400).send({
