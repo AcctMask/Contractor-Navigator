@@ -791,10 +791,47 @@ export async function registerAdminRoutes(app: FastifyInstance) {
              from timeline_events
              where tenant_id = $1
                and job_id = $2
-               and kind = 'workforce_activity'
+               and (
+             kind = 'workforce_activity'
+             or (
+               kind = 'staff_note'
+               and (
+                 meta->>'author_app_user_id' = $3::text
+                 or (
+                   meta->>'communication_scope' = 'workforce'
+                   and exists (
+                     select 1
+                     from subcontractor_company_users scu
+                     join subcontractor_companies sc
+                       on sc.id = scu.subcontractor_company_id
+                     where scu.app_user_id = $3
+                       and sc.tenant_id = $1
+                       and sc.id::text = meta->>'subcontractor_company_id'
+                   )
+                 )
+               )
+             )
+             or (
+               kind = 'workforce_sms'
+               and meta->>'subcontractor_company_id' is not null
+               and (
+                 meta->>'from_role' = 'sub'
+                 or meta->>'to_role' in ('sub', 'crew')
+               )
+               and exists (
+                 select 1
+                 from subcontractor_company_users scu
+                 join subcontractor_companies sc
+                   on sc.id = scu.subcontractor_company_id
+                 where scu.app_user_id = $3
+                   and sc.tenant_id = $1
+                   and sc.id::text = meta->>'subcontractor_company_id'
+               )
+             )
+           )
              order by id desc
              limit 250`,
-            [tenantId, jobId]
+            [tenantId, jobId, Number(user.id)]
           )
         : await pool.query(
             `

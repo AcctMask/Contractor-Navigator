@@ -2028,6 +2028,37 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         throw new Error("Note is required")
       }
 
+      // Resolve workforce identity from the authenticated user, never the browser.
+      let subcontractorCompanyId: number | null = null
+
+      if (String(user.role) === "subcontractor") {
+        const membership = await pool.query(
+          `select distinct sc.id
+           from subcontractor_company_users scu
+           join subcontractor_companies sc
+             on sc.id = scu.subcontractor_company_id
+           where scu.app_user_id = $1
+             and sc.tenant_id = $2
+             and exists (
+               select 1
+               from crew_assignments ca
+               where ca.tenant_id = $2
+                 and ca.job_id = $3
+                 and ca.app_user_id = $1
+                 and ca.status in ('PENDING', 'active')
+             )
+           limit 2`,
+          [Number(user.id), tenantId, numericJobId]
+        )
+
+        if (membership.rows.length !== 1) {
+          reply.code(403)
+          return { ok: false, error: "Unambiguous subcontractor company required" }
+        }
+
+        subcontractorCompanyId = Number(membership.rows[0].id)
+      }
+
       const result = await pool.query(
         `
         insert into timeline_events
@@ -2044,7 +2075,16 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           tenantId,
           numericJobId,
           String(message).trim(),
-          JSON.stringify({ author: noteAuthor, author_app_user_id: Number(user.id) }),
+          JSON.stringify({
+            author: noteAuthor,
+            author_app_user_id: Number(user.id),
+            ...(subcontractorCompanyId !== null
+              ? {
+                  communication_scope: "workforce",
+                  subcontractor_company_id: subcontractorCompanyId,
+                }
+              : {}),
+          }),
         ]
       )
 

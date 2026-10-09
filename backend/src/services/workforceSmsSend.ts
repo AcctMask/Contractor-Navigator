@@ -12,6 +12,7 @@ export async function sendJobCrewSms(input: {
   crewMemberId: number
   senderLanguage: WorkforceLanguage
   senderRole: "tenant" | "sub"
+  senderAppUserId?: number
   message: string
 }) {
   const original = input.message.trim()
@@ -22,7 +23,8 @@ export async function sendJobCrewSms(input: {
     select
       m.id,
       m.mobile_phone,
-      m.preferred_language
+      m.preferred_language,
+      a.subcontractor_company_id
     from workforce_crew_members m
     join workforce_crew_job_assignments a
       on a.crew_member_id = m.id
@@ -75,6 +77,9 @@ export async function sendJobCrewSms(input: {
         ? `Original: ${translation.original}\nTranslation: ${translation.translated}`
         : translation.original,
     providerMessageSid: sent.sid,
+    senderAppUserId: input.senderAppUserId ?? null,
+    crewMemberId: Number(crew.id),
+    subcontractorCompanyId: Number(crew.subcontractor_company_id),
   })
 
   return {

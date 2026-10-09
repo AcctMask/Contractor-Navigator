@@ -1264,6 +1264,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
         to: "tenant",
         message,
         providerMessageSid: body.MessageSid ? String(body.MessageSid) : null,
+        crewMemberId: Number(crew.crew_member_id),
+        subcontractorCompanyId: Number(crew.subcontractor_company_id),
       })
 
       return reply.send({ ok: true, workforce: true, recorded: true })

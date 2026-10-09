@@ -9,9 +9,10 @@ type Props = {
   text: string
   jobId: string
   language: "en" | "es"
+  onUseTranslation?: (translated: string) => void
 }
 
-export default function TranslateMessage({ text, jobId, language }: Props) {
+export default function TranslateMessage({ text, jobId, language, onUseTranslation }: Props) {
   const [translation, setTranslation] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -79,6 +80,22 @@ export default function TranslateMessage({ text, jobId, language }: Props) {
           <strong>{language === "es" ? "Traducción:" : "Translation:"}</strong>
           <div>{translation}</div>
         </div>
+      )}
+
+      {translation && onUseTranslation && (
+        <button
+          type="button"
+          onClick={() => onUseTranslation(translation)}
+          style={{
+            marginTop: 8,
+            padding: "5px 10px",
+            cursor: "pointer",
+            border: "1px solid #94a3b8",
+            borderRadius: 6,
+          }}
+        >
+          {language === "es" ? "Usar traducción" : "Use translation"}
+        </button>
       )}
 
       {error && (

@@ -412,6 +412,7 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
         crewMemberId,
         senderLanguage: actor.preferred_language === "es" ? "es" : "en",
         senderRole: actor.role === "subcontractor" ? "sub" : "tenant",
+        senderAppUserId: Number(actor.id),
         message,
       })
 

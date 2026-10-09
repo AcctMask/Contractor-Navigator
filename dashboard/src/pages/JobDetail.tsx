@@ -2870,6 +2870,17 @@ export default function JobDetail() {
           placeholder="Type a text message to the customer..."
           style={textarea}
         />
+        {id && smsText.trim() && (
+          <div style={{ marginTop: 10 }}>
+            <TranslateMessage
+              key={`sms-preview-${language}-${smsText}`}
+              onUseTranslation={setSmsText}
+              text={smsText}
+              jobId={id}
+              language={language}
+            />
+          </div>
+        )}
         <button onClick={sendManualSms} style={button}>Send Text</button>
       </section>
 
@@ -2913,6 +2924,14 @@ export default function JobDetail() {
                   >
                     {note.message || note.note || ""}
                   </p>
+                  {id && String(note.message || note.note || "").trim() && (
+                    <TranslateMessage
+                      key={`translate-office-${note.kind || "note"}-${note.id}-${language}`}
+                      text={String(note.message || note.note || "")}
+                      jobId={id}
+                      language={language}
+                    />
+                  )}
                 </div>
 
                 {note.kind ? null : (

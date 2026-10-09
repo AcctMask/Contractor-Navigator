@@ -12,6 +12,9 @@ export async function recordWorkforceSmsNote(input: {
   to: WorkforceRole
   message: string
   providerMessageSid?: string | null
+  senderAppUserId?: number | null
+  crewMemberId?: number | null
+  subcontractorCompanyId?: number | null
 }) {
   const direction = workforceDirection(input.from, input.to)
 
@@ -59,6 +62,9 @@ export async function recordWorkforceSmsNote(input: {
         from_role: input.from,
         to_role: input.to,
         provider_message_sid: input.providerMessageSid || null,
+        sender_app_user_id: input.senderAppUserId ?? null,
+        crew_member_id: input.crewMemberId ?? null,
+        subcontractor_company_id: input.subcontractorCompanyId ?? null,
       }),
     ]
   )
