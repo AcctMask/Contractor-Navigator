@@ -158,7 +158,7 @@ export async function translateIncomingWorkforceMessage(input: {
       !parsed.translated.trim()
     ) {
       if (!retry) return requestTranslation(true)
-      throw new Error("Invalid incoming translation response after retry")
+      return requestPlainTextFallback()
     }
 
     return {
@@ -166,6 +166,58 @@ export async function translateIncomingWorkforceMessage(input: {
       translated: parsed.translated.trim(),
       detectedLanguage: parsed.detected_language as WorkforceLanguage,
       translatedByAi: parsed.detected_language !== input.toLanguage,
+    }
+  }
+
+  async function requestPlainTextFallback() {
+    const response = await fetch(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: process.env.WORKFORCE_TRANSLATION_MODEL || "gpt-4o-mini",
+          temperature: 0,
+          messages: [
+            {
+              role: "system",
+              content:
+                `Translate this construction-job message into ${target}. ` +
+                `If it is already in ${target}, return it unchanged. ` +
+                "Preserve names, addresses, numbers, measurements, dates, " +
+                "and safety instructions. Return only the final text, " +
+                "without JSON, explanations, or quotation marks.",
+            },
+            {
+              role: "user",
+              content: original,
+            },
+          ],
+        }),
+      }
+    )
+
+    if (!response.ok) {
+      throw new Error(`Incoming translation fallback API failed: ${response.status}`)
+    }
+
+    const data: any = await response.json()
+    const translated = String(data?.choices?.[0]?.message?.content || "").trim()
+
+    if (!translated) {
+      throw new Error("Incoming translation fallback returned empty text")
+    }
+
+    return {
+      original,
+      translated,
+      // Plain-text fallback does not verify the source language.
+      // Preserve the existing response contract without claiming detection.
+      detectedLanguage: input.toLanguage,
+      translatedByAi: translated !== original,
     }
   }
 
