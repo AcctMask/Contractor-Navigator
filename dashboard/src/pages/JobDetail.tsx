@@ -1720,6 +1720,17 @@ export default function JobDetail() {
         ) : (
           <>
             <section style={card}>
+              <h2>My Crew</h2>
+              <p>
+                Invite crew leads and members to this assigned job.
+                Choose their preferred language: English or Español.
+              </p>
+              <button type="button" disabled>
+                Add Crew Member — Coming Soon
+              </button>
+            </section>
+
+            <section style={card}>
               <h2>Job Details</h2>
 
               <p>
