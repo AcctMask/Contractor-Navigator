@@ -647,7 +647,11 @@ export default function JobDetail() {
   async function loadCalendarEvents() {
     if (!id) return
 
-    const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`)
+    const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
+      headers: {
+        Authorization: `Bearer ${getToken()}`,
+      },
+    })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -694,7 +698,10 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/calendar/${getTenantSlug()}/events/${event.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({
         title: event.title,
         start_time: event.start_time,
@@ -2887,6 +2894,17 @@ export default function JobDetail() {
       <section style={card}>
         <h2>Add Note</h2>
         <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add a staff note..." style={textarea} />
+        {id && noteText.trim() && (
+          <div style={{ marginTop: 10, marginBottom: 10 }}>
+            <TranslateMessage
+              key={`office-note-preview-${language}`}
+              text={noteText}
+              jobId={id}
+              language={language}
+              onUseTranslation={setNoteText}
+            />
+          </div>
+        )}
         <button onClick={addNote} style={button}>Add Note</button>
       </section>
 
