@@ -44,12 +44,17 @@ export default function TranslateMessage({ text, jobId, language, onUseTranslati
       }
 
       setTranslation(String(data.translated || ""))
-    } catch {
-      setError(
-        language === "es"
-          ? "No se pudo traducir este mensaje."
-          : "Unable to translate this message."
-      )
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : ""
+      const safeDetail =
+        detail.includes("Invalid incoming translation response")
+          ? language === "es"
+            ? "No se pudo interpretar la respuesta de traducción."
+            : "The translation response could not be interpreted."
+          : language === "es"
+            ? "No se pudo traducir este mensaje."
+            : "Unable to translate this message."
+      setError(safeDetail)
     } finally {
       setLoading(false)
     }
@@ -66,7 +71,8 @@ export default function TranslateMessage({ text, jobId, language, onUseTranslati
           padding: "5px 10px",
           border: "1px solid #94a3b8",
           borderRadius: 6,
-          background: "transparent",
+          background: "#334155",
+          color: "#ffffff",
           fontSize: 12,
         }}
       >
@@ -92,6 +98,8 @@ export default function TranslateMessage({ text, jobId, language, onUseTranslati
             cursor: "pointer",
             border: "1px solid #94a3b8",
             borderRadius: 6,
+            background: "#334155",
+            color: "#ffffff",
           }}
         >
           {language === "es" ? "Usar traducción" : "Use translation"}

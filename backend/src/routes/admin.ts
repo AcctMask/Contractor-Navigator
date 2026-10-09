@@ -804,7 +804,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
                      from subcontractor_company_users scu
                      join subcontractor_companies sc
                        on sc.id = scu.subcontractor_company_id
-                     where scu.app_user_id = $3
+                     where scu.app_user_id::text = $3::text
                        and sc.tenant_id = $1
                        and sc.id::text = meta->>'subcontractor_company_id'
                    )
@@ -823,7 +823,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
                  from subcontractor_company_users scu
                  join subcontractor_companies sc
                    on sc.id = scu.subcontractor_company_id
-                 where scu.app_user_id = $3
+                 where scu.app_user_id::text = $3::text
                    and sc.tenant_id = $1
                    and sc.id::text = meta->>'subcontractor_company_id'
                )

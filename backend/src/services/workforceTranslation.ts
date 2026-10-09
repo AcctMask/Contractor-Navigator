@@ -101,7 +101,8 @@ export async function translateIncomingWorkforceMessage(input: {
 
   const target = input.toLanguage === "es" ? "Spanish" : "English"
 
-  const response = await fetch(
+  async function requestTranslation(retry: boolean) {
+    const response = await fetch(
     "https://api.openai.com/v1/chat/completions",
     {
       method: "POST",
@@ -122,7 +123,10 @@ export async function translateIncomingWorkforceMessage(input: {
               `Preserve names, addresses, numbers, measurements, dates, ` +
               `and safety instructions exactly. ` +
               `Return JSON with keys detected_language ("en" or "es") ` +
-              `and translated (the final text in ${target}).`,
+              `and translated (the final text in ${target}). ` +
+              `For short or ambiguous text, choose the most likely language ` +
+              `and preserve the original text if it is already ${target}. ` +
+              `Use exactly "en" or "es" for detected_language.`,
           },
           {
             role: "user",
@@ -137,22 +141,33 @@ export async function translateIncomingWorkforceMessage(input: {
     throw new Error(`Incoming translation API failed: ${response.status}`)
   }
 
-  const data: any = await response.json()
-  const content = String(data?.choices?.[0]?.message?.content || "")
-  const parsed = JSON.parse(content)
+    const data: any = await response.json()
+    const content = String(data?.choices?.[0]?.message?.content || "")
 
-  if (
-    !["en", "es"].includes(parsed.detected_language) ||
-    typeof parsed.translated !== "string" ||
-    !parsed.translated.trim()
-  ) {
-    throw new Error("Invalid incoming translation response")
+    let parsed: any
+    try {
+      parsed = JSON.parse(content)
+    } catch {
+      parsed = null
+    }
+
+    if (
+      !parsed ||
+      !["en", "es"].includes(parsed.detected_language) ||
+      typeof parsed.translated !== "string" ||
+      !parsed.translated.trim()
+    ) {
+      if (!retry) return requestTranslation(true)
+      throw new Error("Invalid incoming translation response after retry")
+    }
+
+    return {
+      original,
+      translated: parsed.translated.trim(),
+      detectedLanguage: parsed.detected_language as WorkforceLanguage,
+      translatedByAi: parsed.detected_language !== input.toLanguage,
+    }
   }
 
-  return {
-    original,
-    translated: parsed.translated.trim(),
-    detectedLanguage: parsed.detected_language,
-    translatedByAi: parsed.detected_language !== input.toLanguage,
-  }
+  return requestTranslation(false)
 }
