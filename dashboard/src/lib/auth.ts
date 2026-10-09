@@ -13,6 +13,7 @@ export type AuthUser = {
   full_name: string
   role: string
   is_active: boolean
+  preferred_language?: "en" | "es"
 }
 
 export function getToken() {
@@ -72,6 +73,37 @@ export async function acceptInvite(inviteToken: string, password: string) {
 
   setToken(json.token)
   return json
+}
+
+export async function saveMyPreferredLanguage(
+  language: "en" | "es"
+): Promise<AuthUser> {
+  const token = getToken()
+
+  if (!token) {
+    throw new Error("Not signed in")
+  }
+
+  const res = await fetch(`${API_BASE}/auth/me/language`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      preferred_language: language,
+    }),
+  })
+
+  const json = await res.json()
+
+  if (!res.ok || !json?.ok) {
+    throw new Error(
+      json?.error || "Unable to save language preference"
+    )
+  }
+
+  return json.user
 }
 
 export async function getMe(): Promise<AuthUser | null> {

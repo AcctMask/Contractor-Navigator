@@ -13,6 +13,7 @@ import { registerTwilioWebhook } from "./routes/twilioWebhook"
 import { registerCustomerRoutes } from "./routes/customers"
 import { registerDevSettingsRoutes } from "./routes/devSettings"
 import { registerAuthRoutes } from "./routes/auth"
+import { registerWorkforceCrewRoutes } from "./routes/workforceCrew"
 import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
 import { registerJobAssetsRoutes } from "./routes/jobAssets"
@@ -73,6 +74,7 @@ await registerTwilioWebhook(app)
 await registerCustomerRoutes(app)
 await registerDevSettingsRoutes(app)
 await registerAuthRoutes(app)
+await registerWorkforceCrewRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
 await registerJobAssetsRoutes(app)

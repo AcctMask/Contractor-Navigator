@@ -30,12 +30,18 @@ import {
   clearToken,
   getToken,
   isLoggedIn,
+  saveMyPreferredLanguage,
 } from "./lib/auth"
+import {
+  normalizeWorkforceLanguage,
+  type WorkforceLanguage,
+} from "./lib/workforceLanguage"
 import { useTenant } from "./context/TenantContext"
 import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 import { openFinancialOperations } from "./lib/financialOperations"
+import WorkforceAcceptInvite from "./pages/WorkforceAcceptInvite"
 
 function HeaderBar() {
   const location = useLocation()
@@ -49,6 +55,13 @@ function HeaderBar() {
 
   const [currentUser, setCurrentUser] =
     useState<any>(null)
+
+  const [headerPreferredLanguage, setHeaderPreferredLanguage] =
+    useState<WorkforceLanguage>("en")
+  const [savingHeaderLanguage, setSavingHeaderLanguage] =
+    useState(false)
+  const [headerLanguageError, setHeaderLanguageError] =
+    useState("")
 
   const [platformTenants, setPlatformTenants] =
     useState<any[]>([])
@@ -95,6 +108,9 @@ function HeaderBar() {
         }
 
         setCurrentUser(data.user)
+        setHeaderPreferredLanguage(
+          normalizeWorkforceLanguage(data.user?.preferred_language)
+        )
 
         if (
           data.user?.role !==
@@ -176,6 +192,27 @@ function HeaderBar() {
         `${route}/`,
       )
     )
+  }
+
+  async function saveHeaderLanguage(next: WorkforceLanguage) {
+    if (savingHeaderLanguage || next === headerPreferredLanguage) return
+
+    setSavingHeaderLanguage(true)
+    setHeaderLanguageError("")
+
+    try {
+      await saveMyPreferredLanguage(next)
+      setHeaderPreferredLanguage(next)
+      setCurrentUser((current: any) =>
+        current ? { ...current, preferred_language: next } : current
+      )
+    } catch (err: any) {
+      setHeaderLanguageError(
+        err?.message || "Unable to save language preference"
+      )
+    } finally {
+      setSavingHeaderLanguage(false)
+    }
   }
 
   function handleLogout() {
@@ -335,6 +372,36 @@ function HeaderBar() {
               ),
             )}
 
+            <label
+              htmlFor="header-language"
+              style={{ fontSize: "12px", opacity: 0.9 }}
+            >
+              {headerPreferredLanguage === "es" ? "Idioma" : "Language"}
+            </label>
+            <select
+              id="header-language"
+              aria-label="Preferred language"
+              value={headerPreferredLanguage}
+              disabled={!currentUser || savingHeaderLanguage}
+              onChange={(event) =>
+                void saveHeaderLanguage(
+                  event.target.value as WorkforceLanguage
+                )
+              }
+              style={{
+                padding: "7px",
+                borderRadius: "7px",
+              }}
+            >
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </select>
+            {headerLanguageError ? (
+              <span role="alert" style={{ color: "#fecaca", fontSize: "12px" }}>
+                {headerLanguageError}
+              </span>
+            ) : null}
+
             <button
               onClick={handleLogout}
               style={logoutButtonStyle}
@@ -428,6 +495,10 @@ export default function App() {
       <Route path="/timeline" element={<ProtectedPage><TimelinePage /></ProtectedPage>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+          <Route
+            path="/crew/accept-invite/:token"
+            element={<WorkforceAcceptInvite />}
+          />
       <Route path="/sign/:id" element={<SignDocument />} />
       <Route path="/field" element={<FieldProtectedPage><FieldPortalPage /></FieldProtectedPage>} />
       <Route path="*" element={<Navigate to="/" replace />} />
