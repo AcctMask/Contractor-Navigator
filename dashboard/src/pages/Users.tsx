@@ -51,9 +51,6 @@ function getInvitationKey(invite: InvitationRow, index: number) {
 }
 
 function getAppOrigin() {
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return window.location.origin
-  }
   return "https://contractor-navigator.vercel.app"
 }
 
