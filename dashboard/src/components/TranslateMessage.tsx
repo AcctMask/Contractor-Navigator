@@ -14,10 +14,12 @@ type Props = {
 
 export default function TranslateMessage({ text, jobId, language, onUseTranslation }: Props) {
   const [translation, setTranslation] = useState("")
+  const [targetLanguage, setTargetLanguage] = useState<"en" | "es">(language)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
 
-  async function translate() {
+  async function translate(toLanguage: "en" | "es") {
+    setTargetLanguage(toLanguage)
     if (loading || !text.trim()) return
 
     setLoading(true)
@@ -33,7 +35,7 @@ export default function TranslateMessage({ text, jobId, language, onUseTranslati
             "Content-Type": "application/json",
             Authorization: `Bearer ${getToken()}`,
           },
-          body: JSON.stringify({ text, toLanguage: language }),
+          body: JSON.stringify({ text, toLanguage }),
         }
       )
 
@@ -62,24 +64,29 @@ export default function TranslateMessage({ text, jobId, language, onUseTranslati
 
   return (
     <div style={{ marginTop: 8 }}>
-      <button
-        type="button"
-        onClick={translate}
-        disabled={loading}
-        style={{
-          cursor: loading ? "wait" : "pointer",
-          padding: "5px 10px",
-          border: "1px solid #94a3b8",
-          borderRadius: 6,
-          background: "#334155",
-          color: "#ffffff",
-          fontSize: 12,
-        }}
-      >
-        {loading
-          ? language === "es" ? "Traduciendo..." : "Translating..."
-          : language === "es" ? "Traducir al español" : "Translate to English"}
-      </button>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {(["en", "es"] as const).map((target) => (
+          <button
+            key={target}
+            type="button"
+            onClick={() => translate(target)}
+            disabled={loading}
+            style={{
+              cursor: loading ? "wait" : "pointer",
+              padding: "5px 10px",
+              border: "1px solid #94a3b8",
+              borderRadius: 6,
+              background: "#334155",
+              color: "#ffffff",
+              fontSize: 12,
+            }}
+          >
+            {loading && targetLanguage === target
+              ? language === "es" ? "Traduciendo..." : "Translating..."
+              : target === "es" ? "Traducir al español" : "Translate to English"}
+          </button>
+        ))}
+      </div>
 
       {translation && (
         <div style={{ marginTop: 8, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>
