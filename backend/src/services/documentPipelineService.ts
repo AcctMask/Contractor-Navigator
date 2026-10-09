@@ -996,7 +996,7 @@ export async function createDocumentPackageByTenantSlug(
       customer_phone: job.customer_phone || null,
       job_address: address,
       carrier: job.carrier || null,
-      claim_number: details?.claim_number || job.job_claim_number || null,
+      claim_number: job.job_claim_number ?? null,
       date_of_loss: job.date_of_loss || null,
       carrier_approved_amount: details?.carrier_approved_amount || null,
       deductible: details?.deductible || null,
@@ -1008,7 +1008,7 @@ export async function createDocumentPackageByTenantSlug(
       vip_benefits_included: true,
       estimator_remarks: details?.estimator_remarks || null,
       document_display_mode: "insurance_contract",
-      ready_for_signature: !!(details?.claim_number || job.job_claim_number),
+      ready_for_signature: !!String(job.job_claim_number ?? '').trim(),
     }
   } else if (packageType === "change_order" || packageType === "supplement") {
     const isChangeOrder = packageType === "change_order"
@@ -1099,7 +1099,7 @@ export async function createDocumentPackageByTenantSlug(
       job_address: address,
       tpa: isHeritage ? null : details?.tpa || null,
       carrier: job.carrier || null,
-      claim_number: details?.claim_number || job.job_claim_number || null,
+      claim_number: job.job_claim_number ?? null,
       date_of_loss: job.date_of_loss || null,
       emergency_tarp_needed: !!details?.emergency_tarp_needed,
       emergency_tarp_sqft: details?.emergency_tarp_sqft || null,
