@@ -374,33 +374,28 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
            join workforce_crew_job_assignments a
              on a.crew_member_id = m.id
             and a.tenant_id = m.tenant_id
-            and a.subcontractor_company_id =
-                m.subcontractor_company_id
-           join subcontractor_company_users scu
-             on scu.subcontractor_company_id =
-                m.subcontractor_company_id
-           join crew_assignments ca
-             on ca.subcontractor_company_id =
-                m.subcontractor_company_id
-            and ca.job_id = a.job_id
+            and a.subcontractor_company_id = m.subcontractor_company_id
            join jobs j
              on j.id = a.job_id
             and j.tenant_id = a.tenant_id
            where m.id = $1
              and m.tenant_id = $2
              and a.job_id = $3
-             and a.tenant_id = $2
              and a.status = 'active'
              and m.is_active = true
-             and scu.user_id = $4
-             and ca.status in ('active', 'pending')
+             and exists (
+               select 1
+               from subcontractor_company_users scu
+               join crew_assignments ca
+                 on ca.app_user_id = scu.app_user_id
+                and ca.tenant_id = a.tenant_id
+                and ca.job_id = a.job_id
+                and ca.status in ('PENDING', 'active')
+               where scu.app_user_id = $4
+                 and scu.subcontractor_company_id = a.subcontractor_company_id
+             )
            limit 1`,
-          [
-            crewMemberId,
-            Number(actor.tenant_id),
-            jobId,
-            Number(actor.id),
-          ]
+          [crewMemberId, Number(actor.tenant_id), jobId, Number(actor.id)]
         )
 
         if (permission.rowCount !== 1) {
@@ -416,6 +411,7 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
         jobId,
         crewMemberId,
         senderLanguage: actor.preferred_language === "es" ? "es" : "en",
+        senderRole: actor.role === "subcontractor" ? "sub" : "tenant",
         message,
       })
 

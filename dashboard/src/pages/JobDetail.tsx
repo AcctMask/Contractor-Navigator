@@ -2350,6 +2350,19 @@ export default function JobDetail() {
         </section>
       ) : null}
 
+      {currentUser &&
+      ["platform_owner", "tenant_admin", "admin", "manager"].includes(currentUser.role) ? (
+        <section style={card}>
+          <h2>Assigned Crews</h2>
+          <WorkforceAssignedCrew
+            jobId={Number(id)}
+            apiBase={API_BASE}
+            token={getToken() || ""}
+            refreshKey={workforceCrewRefresh}
+          />
+        </section>
+      ) : null}
+
       <section style={card}>
         <h2>Stage / Bot Controls</h2>
 

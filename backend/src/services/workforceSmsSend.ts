@@ -11,6 +11,7 @@ export async function sendJobCrewSms(input: {
   jobId: number
   crewMemberId: number
   senderLanguage: WorkforceLanguage
+  senderRole: "tenant" | "sub"
   message: string
 }) {
   const original = input.message.trim()
@@ -67,7 +68,7 @@ export async function sendJobCrewSms(input: {
   await recordWorkforceSmsNote({
     tenantId: input.tenantId,
     jobId: input.jobId,
-    from: "tenant",
+    from: input.senderRole,
     to: "crew",
     message:
       translation.translatedByAi

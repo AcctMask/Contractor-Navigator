@@ -1249,6 +1249,26 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       return reply.send({ ok: true, dnc: false, action: "opt_in" })
     }
 
+    // Workforce replies go to the assigned job, not customer AI follow-up.
+    // Assignment is authoritative; invitation acceptance is not required.
+    const { resolveInboundCrew } = await import("../services/workforceSmsRouter")
+    const crew = await resolveInboundCrew(tenantId, from)
+
+    if (crew) {
+      const { recordWorkforceSmsNote } = await import("../services/workforceSmsNotes")
+
+      await recordWorkforceSmsNote({
+        tenantId,
+        jobId: Number(crew.job_id),
+        from: "crew",
+        to: "tenant",
+        message,
+        providerMessageSid: body.MessageSid ? String(body.MessageSid) : null,
+      })
+
+      return reply.send({ ok: true, workforce: true, recorded: true })
+    }
+
     if (!latest) {
       return reply.send({ ok: true, skipped: true, reason: "job_not_found_for_phone" })
     }

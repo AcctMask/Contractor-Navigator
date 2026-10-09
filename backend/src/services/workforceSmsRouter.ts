@@ -65,7 +65,6 @@ export async function resolveInboundCrew(
       and right(regexp_replace(m.mobile_phone, '[^0-9]', '', 'g'), 10)
           = right(regexp_replace($2, '[^0-9]', '', 'g'), 10)
       and m.is_active = true
-      and m.invitation_status = 'active'
       and a.status = 'active'
     limit 2
     `,
