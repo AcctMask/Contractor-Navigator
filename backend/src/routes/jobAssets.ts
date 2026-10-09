@@ -6,6 +6,7 @@ import path from "path"
 import { pipeline } from "stream/promises"
 import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
+import { translateIncomingWorkforceMessage } from "../services/workforceTranslation"
 import { getCurrentUserFromToken } from "../services/authService"
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
 import sharp from "sharp"
@@ -1952,6 +1953,53 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || "Send SMS failed" }
+    }
+  })
+
+  // Navi 2.9: On-demand translation for authorized job communications.
+  // Read-only: never changes notes, messages, or SMS delivery.
+  app.post("/assets/:tenantSlug/job/:jobId/translate", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      if (!Number.isSafeInteger(numericJobId) || numericJobId <= 0) {
+        reply.code(400)
+        return { ok: false, error: "Invalid job" }
+      }
+
+      const user = await requireAssignedJobAccess(
+        req, reply, tenantId, numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      await ensureJobExists(tenantId, numericJobId)
+
+      const { text, toLanguage } = req.body || {}
+      const original = typeof text === "string" ? text.trim() : ""
+
+      if (!original || original.length > 5000 ||
+          (toLanguage !== "en" && toLanguage !== "es")) {
+        reply.code(400)
+        return { ok: false, error: "Invalid translation request" }
+      }
+
+      const result = await translateIncomingWorkforceMessage({
+        text: original,
+        toLanguage,
+      })
+
+      return { ok: true, ...result }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || "Translation unavailable",
+      }
     }
   })
 

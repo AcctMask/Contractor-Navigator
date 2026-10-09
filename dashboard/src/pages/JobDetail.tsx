@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
 import { getTenantSlug } from "../lib/tenant"
+import { useLanguage } from "../context/LanguageContext"
+import TranslateMessage from "../components/TranslateMessage"
 import { openFinancialOperations } from "../lib/financialOperations"
 import { stagePresentation } from "../lib/stagePresentation"
 import WorkforceCrewInviteForm, { type CrewInviteDetails } from "../components/WorkforceCrewInviteForm"
@@ -68,6 +70,7 @@ const ACTUAL_ASSISTANT_STAGES = [
 ]
 
 export default function JobDetail() {
+  const { language } = useLanguage()
   const { id } = useParams()
 
   const [job, setJob] = useState<any>(null)
@@ -1868,6 +1871,14 @@ export default function JobDetail() {
                         >
                           {note.message || note.note || ""}
                         </p>
+                        {id && String(note.message || note.note || "").trim() && (
+                          <TranslateMessage
+                            key={`translate-${note.kind || "note"}-${note.id}-${language}`}
+                            text={String(note.message || note.note || "")}
+                            jobId={id}
+                            language={language}
+                          />
+                        )}
                       </div>
                     </div>
                   ))
