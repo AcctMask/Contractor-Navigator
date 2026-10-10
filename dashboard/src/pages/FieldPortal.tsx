@@ -109,6 +109,53 @@ export default function FieldPortalPage() {
     navigate(`/job/${jobId}`)
   }
 
+  const assignedTarps = jobs.filter(
+    (job) => job.stage === "tarp"
+  )
+  const completedTarps = jobs.filter(
+    (job) => job.stage === "tarp_complete"
+  )
+  const otherJobs = jobs.filter(
+    (job) => job.stage !== "tarp" && job.stage !== "tarp_complete"
+  )
+
+  function renderJobGroup(
+    title: string,
+    group: any[]
+  ) {
+    return (
+      <section style={{ marginBottom: 22 }}>
+        <h2 style={{ marginTop: 0 }}>
+          {title} ({group.length})
+        </h2>
+
+        <div style={{ display: "grid", gap: "12px" }}>
+          {group.map((job) => (
+            <button
+              key={job.id}
+              onClick={() => openJob(job.id)}
+              style={jobButton}
+            >
+              <div style={{ fontWeight: 800 }}>
+                Job #{job.id} — {job.customer_name || t("customer")}
+              </div>
+
+              <div style={{ marginTop: 6, opacity: 0.88 }}>
+                {[job.address1, job.city, job.state, job.zip]
+                  .filter(Boolean)
+                  .join(", ") || t("addressUnavailable")}
+              </div>
+
+              <div style={{ marginTop: 6, opacity: 0.72 }}>
+                {t("stage")}: {job.stage || "—"}
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+    )
+  }
+
   return (
     <div style={page}>
       <div style={content}>
@@ -170,33 +217,18 @@ export default function FieldPortalPage() {
             </>
           ) : (
             <>
-              <h2 style={{ marginTop: 0 }}>
-                {t("assignedJobs")} ({jobs.length})
-              </h2>
-
-              <div style={{ display: "grid", gap: "12px" }}>
-                {jobs.map((job) => (
-                  <button
-                    key={job.id}
-                    onClick={() => openJob(job.id)}
-                    style={jobButton}
-                  >
-                    <div style={{ fontWeight: 800 }}>
-                      Job #{job.id} — {job.customer_name || t("customer")}
-                    </div>
-
-                    <div style={{ marginTop: 6, opacity: 0.88 }}>
-                      {[job.address1, job.city, job.state, job.zip]
-                        .filter(Boolean)
-                        .join(", ") || t("addressUnavailable")}
-                    </div>
-
-                    <div style={{ marginTop: 6, opacity: 0.72 }}>
-                      {t("stage")}: {job.stage || "—"}
-                    </div>
-                  </button>
-                ))}
-              </div>
+              {renderJobGroup(
+                language === "es" ? "Lonas asignadas" : "Tarps Assigned",
+                assignedTarps
+              )}
+              {renderJobGroup(
+                language === "es" ? "Lonas completadas" : "Tarps Completed",
+                completedTarps
+              )}
+              {renderJobGroup(
+                language === "es" ? "Otros trabajos asignados" : "Other Assigned Jobs",
+                otherJobs
+              )}
             </>
           )}
         </div>
