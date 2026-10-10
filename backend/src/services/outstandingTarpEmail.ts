@@ -2,15 +2,8 @@ import { pool } from "../db/db"
 import { getTenantIdBySlug } from "./followupEngine"
 import { sendAlertEmail } from "./emailService"
 
-const OFFICE = "info@g2groofing.com"
+const TEST_RECIPIENT = "good2goroofingandconstruction@gmail.com"
 const JOB_URL = "https://contractor-navigator.vercel.app/job/"
-
-function ageDays(value: unknown): number | null {
-  if (!value) return null
-  const date = new Date(String(value))
-  if (!Number.isFinite(date.getTime())) return null
-  return Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000))
-}
 
 type Row = {
   job_id: number
@@ -22,8 +15,120 @@ type Row = {
   days: number | null
 }
 
+type Subcontractor = { id: number; name: string }
+
+function isHarry(name: string): boolean {
+  return ["harry pashoian", "harry"].includes(
+    name.trim().toLowerCase().replace(/\s+/g, " ")
+  )
+}
+
+function ageDays(value: unknown): number | null {
+  if (!value) return null
+  const ms = new Date(String(value)).getTime()
+  if (!Number.isFinite(ms)) return null
+  return Math.max(0, Math.floor((Date.now() - ms) / 86400000))
+}
+
+export async function listTarpSubcontractors(): Promise<Subcontractor[]> {
+  const tenantId = await getTenantIdBySlug("g2g-roofing")
+
+  const result = await pool.query(
+    `select name, user_id
+     from (
+       select
+         sc.company_name as name,
+         null::bigint as user_id
+       from subcontractor_companies sc
+       where sc.tenant_id = $1
+
+       union all
+
+       select
+         coalesce(u.full_name, u.email) as name,
+         u.id as user_id
+       from app_users u
+       where u.tenant_id = $1
+         and u.role = 'subcontractor'
+         and u.is_active = true
+         and not exists (
+           select 1
+           from subcontractor_company_users scu
+           where scu.app_user_id = u.id
+         )
+     ) directory
+     where nullif(trim(name), '') is not null
+     order by lower(name)`,
+    [tenantId]
+  )
+
+  const seen = new Set<string>()
+
+  return result.rows
+    .filter(r => !isHarry(String(r.name)))
+    .filter(r => {
+      const key = String(r.name).trim().toLowerCase()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .map(r => ({
+      id: r.user_id ? Number(r.user_id) : 0,
+      name: String(r.name)
+    }))
+}
 export async function collectOutstandingTarps(): Promise<Row[]> {
   const tenantId = await getTenantIdBySlug("g2g-roofing")
+
+  // Historical production databases may lack this optional
+  // assignment column. Inspection only; no schema changes.
+  const columnResult = await pool.query(
+    `select column_name
+     from information_schema.columns
+     where table_schema = current_schema()
+       and table_name = 'crew_assignments'`
+  )
+  const hasUserId = columnResult.rows.some(
+    r => r.column_name === "app_user_id"
+  )
+
+  const assignmentUser = hasUserId
+    ? "app_user_id"
+    : "NULL::bigint AS app_user_id"
+
+  const subcontractorJoin = hasUserId
+    ? `left join app_users sub
+         on sub.id = ca.app_user_id
+        and sub.tenant_id = j.tenant_id
+        and sub.role = 'subcontractor'
+       left join subcontractor_company_users scu_owner
+         on scu_owner.app_user_id = sub.id
+       left join subcontractor_companies sc_owner
+         on sc_owner.id = scu_owner.subcontractor_company_id
+        and sc_owner.tenant_id = j.tenant_id`
+    : ""
+
+  const subcontractorName = hasUserId
+    ? "coalesce(sc_owner.company_name, sub.full_name, ca.crew_name, 'UNASSIGNED')"
+    : "coalesce(ca.crew_name, 'UNASSIGNED')"
+
+  const crewJoin = hasUserId
+    ? `left join lateral (
+         select string_agg(distinct m.full_name, ', ') as names
+         from workforce_crew_job_assignments a
+         join workforce_crew_members m
+           on m.id = a.crew_member_id
+          and m.tenant_id = a.tenant_id
+          and m.subcontractor_company_id = a.subcontractor_company_id
+          and m.is_active = true
+         join subcontractor_company_users scu
+           on scu.subcontractor_company_id = a.subcontractor_company_id
+          and scu.app_user_id = ca.app_user_id
+         where a.tenant_id = j.tenant_id
+           and a.job_id = j.id
+           and a.status = 'active'
+       ) crew on true`
+    : "left join lateral (select null::text as names) crew on true"
 
   const result = await pool.query(`
     select
@@ -36,13 +141,13 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
       j.current_stage_entered_at,
       ca.app_user_id,
       ca.assigned_at,
-      sub.full_name as subcontractor,
+      ${subcontractorName} as subcontractor,
       completed.completed_at,
       coalesce(photos.photo_count, 0) as photo_count,
       crew.names as crew_names
     from jobs j
     left join lateral (
-      select app_user_id, assigned_at
+      select ${assignmentUser}, assigned_at, crew_name
       from crew_assignments
       where tenant_id = j.tenant_id
         and job_id = j.id
@@ -50,11 +155,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
       order by assigned_at desc nulls last, id desc
       limit 1
     ) ca on true
-    left join app_users sub
-      on sub.id = ca.app_user_id
-     and sub.tenant_id = j.tenant_id
-     and sub.role = 'subcontractor'
-     and sub.is_active = true
+    ${subcontractorJoin}
     left join lateral (
       select max(created_at) as completed_at
       from timeline_events
@@ -67,169 +168,192 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
     ) completed on true
     left join lateral (
       select count(*)::int as photo_count
-      from job_assets
-      where tenant_id = j.tenant_id
-        and job_id = j.id
-        and asset_type = 'photo'
+      from job_assets ja
+      where ja.tenant_id = j.tenant_id
+        and ja.job_id = j.id
+        and ja.asset_type = 'photo'
         and (
-          lower(coalesce(asset_category, '')) = 'tarp'
-          or created_at >= completed.completed_at
+          lower(coalesce(ja.asset_category, '')) = 'tarp'
+          or ja.created_at >= completed.completed_at
         )
     ) photos on true
-    left join lateral (
-      select string_agg(distinct m.full_name, ', ') as names
-      from workforce_crew_job_assignments a
-      join workforce_crew_members m
-        on m.id = a.crew_member_id
-       and m.tenant_id = a.tenant_id
-       and m.subcontractor_company_id =
-           a.subcontractor_company_id
-       and m.is_active = true
-      join subcontractor_company_users scu
-        on scu.subcontractor_company_id =
-           a.subcontractor_company_id
-       and scu.app_user_id = ca.app_user_id
-      where a.tenant_id = j.tenant_id
-        and a.job_id = j.id
-        and a.status = 'active'
-    ) crew on true
+    ${crewJoin}
     where j.tenant_id = $1
       and j.stage in ('tarp', 'tarp_complete')
+    order by j.id
   `, [tenantId])
 
-  const rows: Row[] = []
-
-  for (const job of result.rows) {
-    if (job.stage === "tarp_complete" &&
-        Number(job.photo_count) > 0) continue
-
-    rows.push({
+  return result.rows
+    .filter(job =>
+      job.stage === "tarp" ||
+      (job.stage === "tarp_complete" &&
+       Number(job.photo_count) === 0)
+    )
+    .filter(job => !isHarry(String(job.subcontractor || "")))
+    .map(job => ({
       job_id: Number(job.id),
       location: [
         job.address1, job.city, job.state, job.zip
       ].filter(Boolean).join(", "),
       subcontractor_id: job.app_user_id
         ? Number(job.app_user_id) : null,
-      subcontractor: job.subcontractor || "UNASSIGNED",
+      subcontractor: String(job.subcontractor || "UNASSIGNED"),
       crew: job.crew_names || null,
       section: job.stage === "tarp"
-        ? "not_complete" : "pending_photos",
+        ? "not_complete" as const
+        : "pending_photos" as const,
       days: ageDays(
         job.stage === "tarp"
           ? job.assigned_at || job.current_stage_entered_at
           : job.completed_at
-      ),
-    })
-  }
-
-  return rows
+      )
+    }))
 }
 
-function section(
-  title: string,
-  rows: Row[]
-): string[] {
-  const lines = [title + " (" + rows.length + ")", ""]
+function detail(title: string, rows: Row[]): string[] {
+  const lines = [`${title} (${rows.length})`, ""]
 
   if (!rows.length) return [...lines, "None", ""]
 
   for (const job of [...rows].sort(
-    (a, b) => (b.days ?? -1) - (a.days ?? -1)
+    (a, b) =>
+      (b.days ?? -1) - (a.days ?? -1) ||
+      a.job_id - b.job_id
   )) {
     lines.push(
-      "Job #" + job.job_id,
-      "Location: " + (job.location || "Not recorded"),
-      "Crew: " + (job.crew || "Not recorded"),
-      "Age: " + (job.days ?? "Unknown") + " days",
-      "Navigator: " + JOB_URL + job.job_id,
+      `Job #${job.job_id}`,
+      `Location: ${job.location || "Not recorded"}`,
+      `Crew: ${job.crew || "Not recorded"}`,
+      `Age: ${job.days ?? "Unknown"} days`,
+      `Open job: ${JOB_URL}${job.job_id}`,
       ""
     )
   }
-
   return lines
 }
 
-export function formatOfficeTarpReport(rows: Row[]): string {
+export function formatOfficeTarpReport(
+  rows: Row[],
+  roster: Subcontractor[]
+): string {
   const lines = [
     "GOOD2GO ROOFING & CONSTRUCTION",
     "OUTSTANDING TARP WORK — MASTER REPORT",
     "ONE-TIME TEST",
     "",
-    "TOTAL OUTSTANDING: " + rows.length,
-    "NOT COMPLETE: " +
-      rows.filter(r => r.section === "not_complete").length,
-    "PENDING PHOTOS: " +
-      rows.filter(r => r.section === "pending_photos").length,
+    `SUBCONTRACTORS: ${roster.length}`,
+    `TOTAL OUTSTANDING: ${rows.length}`,
+    `TARP ASSIGNED / NOT COMPLETE: ${
+      rows.filter(r => r.section === "not_complete").length
+    }`,
+    `TARP COMPLETE / PENDING PHOTOS: ${
+      rows.filter(r => r.section === "pending_photos").length
+    }`,
     "",
+    "SUBCONTRACTOR SUMMARY",
+    "Subcontractor | Not Complete | Pending Photos | Total"
   ]
 
-  const groups = new Map<string, Row[]>()
+  const groups = new Map<string, {
+    name: string,
+    jobs: Row[]
+  }>()
+
+  const keyFor = (name: string, id: number | null) =>
+    id ? `id:${id}` : `name:${name.trim().toLowerCase()}`
+
+  for (const sub of roster) {
+    groups.set(keyFor(sub.name, sub.id), {
+      name: sub.name,
+      jobs: []
+    })
+  }
 
   for (const row of rows) {
-    const key = row.subcontractor_id
-      ? String(row.subcontractor_id) : "unassigned"
-
-    groups.set(key, [...(groups.get(key) || []), row])
+    let key = keyFor(row.subcontractor, row.subcontractor_id)
+    if (!groups.has(key)) {
+      const match = [...groups.entries()].find(
+        ([, value]) =>
+          value.name.trim().toLowerCase() ===
+          row.subcontractor.trim().toLowerCase()
+      )
+      if (match) key = match[0]
+    }
+    if (!groups.has(key)) {
+      groups.set(key, {
+        name: row.subcontractor,
+        jobs: []
+      })
+    }
+    groups.get(key)!.jobs.push(row)
   }
 
-  const ordered = [...groups.values()].sort((a, b) => {
-    if (a[0].subcontractor === "UNASSIGNED") return 1
-    if (b[0].subcontractor === "UNASSIGNED") return -1
-    return a[0].subcontractor.localeCompare(b[0].subcontractor)
-  })
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.name === "UNASSIGNED" ? 1 :
+    b.name === "UNASSIGNED" ? -1 :
+    a.name.localeCompare(b.name)
+  )
 
-  for (const group of ordered) {
-    lines.push(
-      "================================",
-      group[0].subcontractor.toUpperCase(),
-      "TOTAL OUTSTANDING: " + group.length,
-      ""
+  for (const group of sorted) {
+    const open = group.jobs.filter(
+      r => r.section === "not_complete"
     )
-
-    lines.push(...section(
-      "1. TARP ASSIGNED / NOT COMPLETE",
-      group.filter(r => r.section === "not_complete")
-    ))
-
-    lines.push(...section(
-      "2. TARP COMPLETE / PENDING PHOTOS",
-      group.filter(r => r.section === "pending_photos")
-    ))
+    const photos = group.jobs.filter(
+      r => r.section === "pending_photos"
+    )
+    lines.push(
+      `${group.name} | ${open.length} | ${photos.length} | ${group.jobs.length}`
+    )
   }
 
-  if (!rows.length) {
-    lines.push("No outstanding tarp work.")
+  for (const group of sorted) {
+    lines.push(
+      "",
+      "================================",
+      group.name.toUpperCase(),
+      `TOTAL OUTSTANDING: ${group.jobs.length}`,
+      ...detail(
+        "1. TARP ASSIGNED / NOT COMPLETE",
+        group.jobs.filter(r => r.section === "not_complete")
+      ),
+      ...detail(
+        "2. TARP COMPLETE / PENDING PHOTOS",
+        group.jobs.filter(r => r.section === "pending_photos")
+      )
+    )
   }
 
   lines.push(
     "",
-    "Photo status is based on Navigator tarp-category " +
-    "photos or photos recorded after tarp completion.",
-    "This report does not indicate carrier submission " +
-    "or office approval."
+    "Photo classification is based on available Navigator records.",
+    "This report does not signify office approval or carrier submission."
   )
 
   return lines.join("\n")
 }
 
 export async function sendOfficeTarpTest() {
-  const rows = await collectOutstandingTarps()
+  const [rows, roster] = await Promise.all([
+    collectOutstandingTarps(),
+    listTarpSubcontractors()
+  ])
 
   const result = await sendAlertEmail(
-    OFFICE,
-    "[TEST] Good2Go Outstanding Tarp Work",
-    formatOfficeTarpReport(rows)
+    TEST_RECIPIENT,
+    "[TEST] Good2Go Outstanding Tarp Work — Master Report",
+    formatOfficeTarpReport(rows, roster)
   )
 
   return {
     ...result,
-    recipient: OFFICE,
+    recipient: TEST_RECIPIENT,
+    subcontractors: roster.length,
     total: rows.length,
     not_complete: rows.filter(
       r => r.section === "not_complete"
     ).length,
     pending_photos: rows.filter(
       r => r.section === "pending_photos"
-    ).length,
+    ).length
   }
 }
