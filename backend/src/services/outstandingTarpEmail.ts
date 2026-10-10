@@ -8,6 +8,7 @@ const JOB_URL = "https://contractor-navigator.vercel.app/job/"
 type Row = {
   job_id: number
   location: string
+  customer_name: string
   subcontractor_id: number | null
   subcontractor: string
   crew: string | null
@@ -133,6 +134,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
   const result = await pool.query(`
     select
       j.id,
+      c.full_name as customer_name,
       j.stage,
       j.address1,
       j.city,
@@ -146,6 +148,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
       coalesce(photos.photo_count, 0) as photo_count,
       crew.names as crew_names
     from jobs j
+    left join customers c on c.id = j.customer_id and c.tenant_id = j.tenant_id
     left join lateral (
       select ${assignmentUser}, assigned_at, crew_name
       from crew_assignments
@@ -180,6 +183,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
     ${crewJoin}
     where j.tenant_id = $1
       and j.stage in ('tarp', 'tarp_complete')
+      and j.id <> 515
     order by j.id
   `, [tenantId])
 
@@ -192,6 +196,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
     .filter(job => !isHarry(String(job.subcontractor || "")))
     .map(job => ({
       job_id: Number(job.id),
+      customer_name: String(job.customer_name || "Not recorded"),
       location: [
         job.address1, job.city, job.state, job.zip
       ].filter(Boolean).join(", "),
@@ -211,21 +216,18 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
 }
 
 function detail(title: string, rows: Row[]): string[] {
-  const lines = [`${title} (${rows.length})`, ""]
-
-  if (!rows.length) return [...lines, "None", ""]
+  const lines = [title + " (" + rows.length + ")", ""]
+  if (!rows.length) return [...lines, "  None", ""]
 
   for (const job of [...rows].sort(
-    (a, b) =>
-      (b.days ?? -1) - (a.days ?? -1) ||
-      a.job_id - b.job_id
+    (a, b) => (b.days ?? -1) - (a.days ?? -1) || a.job_id - b.job_id
   )) {
     lines.push(
-      `Job #${job.job_id}`,
-      `Location: ${job.location || "Not recorded"}`,
-      `Crew: ${job.crew || "Not recorded"}`,
-      `Age: ${job.days ?? "Unknown"} days`,
-      `Open job: ${JOB_URL}${job.job_id}`,
+      "  Job #" + job.job_id + " | " +
+        (job.days === null ? "Age unknown" : job.days + " days"),
+      "  Customer: " + job.customer_name,
+      "  Address: " + (job.location || "Not recorded"),
+      "  Open job: " + JOB_URL + job.job_id,
       ""
     )
   }
@@ -236,55 +238,18 @@ export function formatOfficeTarpReport(
   rows: Row[],
   roster: Subcontractor[]
 ): string {
-  const lines = [
-    "GOOD2GO ROOFING & CONSTRUCTION",
-    "OUTSTANDING TARP WORK — MASTER REPORT",
-    "ONE-TIME TEST",
-    "",
-    `SUBCONTRACTORS: ${roster.length}`,
-    `TOTAL OUTSTANDING: ${rows.length}`,
-    `TARP ASSIGNED / NOT COMPLETE: ${
-      rows.filter(r => r.section === "not_complete").length
-    }`,
-    `TARP COMPLETE / PENDING PHOTOS: ${
-      rows.filter(r => r.section === "pending_photos").length
-    }`,
-    "",
-    "SUBCONTRACTOR SUMMARY",
-    "Subcontractor | Not Complete | Pending Photos | Total"
-  ]
-
-  const groups = new Map<string, {
-    name: string,
-    jobs: Row[]
-  }>()
-
-  const keyFor = (name: string, id: number | null) =>
-    id ? `id:${id}` : `name:${name.trim().toLowerCase()}`
+  const groups = new Map<string, { name: string; jobs: Row[] }>()
+  const normalize = (name: string) => name.trim().toLowerCase()
 
   for (const sub of roster) {
-    groups.set(keyFor(sub.name, sub.id), {
-      name: sub.name,
-      jobs: []
-    })
+    const key = normalize(sub.name)
+    if (!groups.has(key)) groups.set(key, { name: sub.name, jobs: [] })
   }
 
   for (const row of rows) {
-    let key = keyFor(row.subcontractor, row.subcontractor_id)
-    if (!groups.has(key)) {
-      const match = [...groups.entries()].find(
-        ([, value]) =>
-          value.name.trim().toLowerCase() ===
-          row.subcontractor.trim().toLowerCase()
-      )
-      if (match) key = match[0]
-    }
-    if (!groups.has(key)) {
-      groups.set(key, {
-        name: row.subcontractor,
-        jobs: []
-      })
-    }
+    const name = row.subcontractor || "UNASSIGNED"
+    const key = normalize(name)
+    if (!groups.has(key)) groups.set(key, { name, jobs: [] })
     groups.get(key)!.jobs.push(row)
   }
 
@@ -294,36 +259,58 @@ export function formatOfficeTarpReport(
     a.name.localeCompare(b.name)
   )
 
+  const openTotal = rows.filter(r => r.section === "not_complete").length
+  const photoTotal = rows.filter(r => r.section === "pending_photos").length
+
+  const lines = [
+    "GOOD2GO ROOFING & CONSTRUCTION",
+    "OUTSTANDING TARP WORK - MASTER REPORT",
+    "Generated: " + new Date().toLocaleString("en-US", {
+      timeZone: "America/New_York",
+      dateStyle: "medium",
+      timeStyle: "short"
+    }) + " Eastern",
+    "",
+    "SUBCONTRACTOR SUMMARY",
+    "--------------------------------------------------"
+  ]
+
   for (const group of sorted) {
-    const open = group.jobs.filter(
-      r => r.section === "not_complete"
-    )
-    const photos = group.jobs.filter(
-      r => r.section === "pending_photos"
-    )
+    const open = group.jobs.filter(r => r.section === "not_complete").length
+    const photos = group.jobs.filter(r => r.section === "pending_photos").length
     lines.push(
-      `${group.name} | ${open.length} | ${photos.length} | ${group.jobs.length}`
+      group.name,
+      "  Not Complete: " + open +
+      " | Photos Needed: " + photos +
+      " | Total: " + group.jobs.length
     )
   }
 
+  lines.push("", "========================================", "JOB DETAILS")
+
   for (const group of sorted) {
+    const open = group.jobs.filter(r => r.section === "not_complete")
+    const photos = group.jobs.filter(r => r.section === "pending_photos")
+
     lines.push(
       "",
-      "================================",
+      "----------------------------------------",
       group.name.toUpperCase(),
-      `TOTAL OUTSTANDING: ${group.jobs.length}`,
-      ...detail(
-        "1. TARP ASSIGNED / NOT COMPLETE",
-        group.jobs.filter(r => r.section === "not_complete")
-      ),
-      ...detail(
-        "2. TARP COMPLETE / PENDING PHOTOS",
-        group.jobs.filter(r => r.section === "pending_photos")
-      )
+      "TOTAL OUTSTANDING: " + group.jobs.length,
+      "----------------------------------------",
+      ...detail("TARP ASSIGNED / NOT COMPLETE", open),
+      ...detail("TARP COMPLETE / PHOTOS NEEDED", photos)
     )
   }
 
   lines.push(
+    "",
+    "========================================",
+    "GOOD2GO GRAND TOTAL",
+    "Not Complete: " + openTotal,
+    "Photos Needed: " + photoTotal,
+    "TOTAL OUTSTANDING: " + rows.length,
+    "========================================",
     "",
     "Photo classification is based on available Navigator records.",
     "This report does not signify office approval or carrier submission."
