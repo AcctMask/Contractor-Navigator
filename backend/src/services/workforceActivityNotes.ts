@@ -6,6 +6,7 @@ export type WorkforceActivity =
   | "accepted"
   | "revoked"
   | "reassigned"
+  | "account_activated"
 
 export async function recordWorkforceActivity(
   client: PoolClient,
@@ -26,6 +27,7 @@ export async function recordWorkforceActivity(
     accepted: "accepted the invitation for",
     revoked: "revoked the assignment of",
     reassigned: "reassigned",
+    account_activated: "activated the Navigator account of",
   }
 
   const roleText = {

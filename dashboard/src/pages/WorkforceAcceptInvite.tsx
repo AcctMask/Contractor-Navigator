@@ -76,8 +76,8 @@ export default function WorkforceAcceptInvite() {
           </p>
           <p>
             {spanish
-              ? "El acceso al trabajo depende de los permisos de su cuenta."
-              : "Job access is subject to your account permissions."}
+              ? "Su invitación fue aceptada. Para enviar mensajes y acceder a trabajos, necesita iniciar sesión con una cuenta autorizada de Navigator."
+              : "Your invitation has been accepted. To send messages or access jobs, you must sign in with an authorized Navigator account."}
           </p>
         </>
       ) : (

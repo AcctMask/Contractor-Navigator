@@ -23,6 +23,7 @@ export async function ensureWorkforceCrewTables() {
       subcontractor_company_id bigint not null,
       full_name text not null,
       mobile_phone text,
+      app_user_id bigint null references app_users(id),
       crew_role text not null default 'member'
         check (crew_role in ('lead', 'member')),
       invitation_status text not null default 'invited'
@@ -51,7 +52,16 @@ export async function ensureWorkforceCrewTables() {
     alter table workforce_crew_members
       add column if not exists invitation_token_hash text,
       add column if not exists invitation_expires_at timestamptz,
-      add column if not exists invitation_job_id bigint
+      add column if not exists invitation_job_id bigint,
+      add column if not exists app_user_id bigint null
+        references app_users(id)
+  `)
+
+  await pool.query(`
+    create unique index if not exists
+      idx_workforce_crew_app_user_id
+    on workforce_crew_members (app_user_id)
+    where app_user_id is not null
   `)
 
   await pool.query(`

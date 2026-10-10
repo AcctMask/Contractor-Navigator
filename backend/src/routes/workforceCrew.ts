@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify"
+import bcrypt from "bcryptjs"
 import { pool } from "../db/db"
 import { getCurrentUserFromToken } from "../services/authService"
 import { canInviteCrewToJob } from "../services/workforceCrewInvitationAuthorization"
@@ -20,6 +21,21 @@ function getToken(request: any): string {
 export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
   app.post("/workforce/crew/accept-invite", async (request: any, reply) => {
     const token = String(request.body?.token || "")
+    const crewActivationPassword =
+      request.body?.password === undefined
+        ? null
+        : String(request.body.password)
+
+    if (
+      crewActivationPassword !== null &&
+      (crewActivationPassword.length < 10 ||
+       crewActivationPassword.length > 128)
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Password must contain 10 to 128 characters",
+      })
+    }
 
     if (!/^[a-f0-9]{64}$/.test(token)) {
       return reply.code(400).send({
@@ -60,6 +76,7 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
               and a.status = 'active'
           )
         returning m.id, m.tenant_id, m.full_name,
+          m.mobile_phone, m.subcontractor_company_id,
           m.crew_role, m.preferred_language, m.invitation_job_id
         `,
         [tokenHash]
@@ -95,10 +112,47 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           throw new Error("No active job assignment for acceptance")
         }
 
+        let crewAppUserId: number | null = null
+
+        if (crewActivationPassword !== null) {
+          const passwordHash = await bcrypt.hash(
+            crewActivationPassword, 12
+          )
+          const email =
+            `crew-${member.tenant_id}-${member.id}@crew.navigator.invalid`
+
+          const account = await client.query(
+            `insert into app_users
+              (tenant_id, email, full_name, mobile_phone,
+               password_hash, role, is_active,
+               financials_authorized, preferred_language)
+             values ($1,$2,$3,$4,$5,'crew',true,false,$6)
+             returning id`,
+            [
+              member.tenant_id,
+              email,
+              member.full_name,
+              member.mobile_phone,
+              passwordHash,
+              member.preferred_language,
+            ]
+          )
+
+          crewAppUserId = Number(account.rows[0].id)
+
+          await client.query(
+            `update workforce_crew_members
+             set app_user_id = $1, updated_at = now()
+             where id = $2 and tenant_id = $3
+               and app_user_id is null`,
+            [crewAppUserId, member.id, member.tenant_id]
+          )
+        }
+
         await recordWorkforceActivity(client, {
           tenantId: Number(member.tenant_id),
           jobId: Number(assignment.rows[0].job_id),
-          actorUserId: null,
+          actorUserId: crewAppUserId,
           actorName: String(member.full_name),
           subjectName: String(member.full_name),
           subjectRole:
@@ -107,11 +161,27 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           assignmentId: Number(assignment.rows[0].id),
         })
 
+        if (crewAppUserId !== null) {
+          await recordWorkforceActivity(client, {
+            tenantId: Number(member.tenant_id),
+            jobId: Number(assignment.rows[0].job_id),
+            actorUserId: crewAppUserId,
+            actorName: String(member.full_name),
+            subjectName: String(member.full_name),
+            subjectRole:
+              member.crew_role === "lead"
+                ? "crew_lead" : "crew_member",
+            action: "account_activated",
+            assignmentId: Number(assignment.rows[0].id),
+          })
+        }
+
         await client.query("COMMIT")
 
         return {
           ok: true,
           accepted: true,
+          account_activated: crewAppUserId !== null,
           crew_member: member,
         }
       } catch (error) {
