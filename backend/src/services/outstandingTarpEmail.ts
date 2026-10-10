@@ -585,3 +585,153 @@ export async function previewDailyTarpRecipients() {
     emails_sent: 0
   }
 }
+
+
+/**
+ * Controlled daily delivery.
+ * Requires explicit enablement and a database delivery ledger.
+ * Never runs on weekends or outside 7 AM America/New_York.
+ */
+export async function sendDailyOutstandingTarps() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date())
+
+  const part = (type: string) =>
+    parts.find(p => p.type === type)?.value || ""
+
+  if (["Sat", "Sun"].includes(part("weekday")) ||
+      part("hour") !== "07") {
+    return { ok: false, skipped: "Outside weekday 7 AM Eastern" }
+  }
+
+  if (process.env.TARP_DAILY_EMAIL_ENABLED !== "true") {
+    return { ok: false, skipped: "Daily tarp email disabled" }
+  }
+
+  const reportDate =
+    `${part("year")}-${part("month")}-${part("day")}`
+
+  const client = await pool.connect()
+
+  try {
+    await client.query(
+      "select pg_advisory_lock(hashtext($1))",
+      ["g2g-outstanding-tarps-daily-email"]
+    )
+
+    const table = await client.query(
+      "select to_regclass('public.outstanding_tarp_email_deliveries') as name"
+    )
+
+    if (!table.rows[0]?.name) {
+      throw new Error(
+        "Daily tarp delivery ledger missing; no emails sent"
+      )
+    }
+
+    const plan = await previewDailyTarpRecipients()
+
+    const apiKey = process.env.RESEND_API_KEY
+    if (!apiKey) throw new Error("RESEND_API_KEY is required")
+
+    const recipients = [
+      {
+        key: "office",
+        email: plan.office.email,
+        html: plan.office.html,
+        text: plan.office.text
+      },
+      ...plan.subcontractors.map(sub => ({
+        key: `subcontractor:${sub.user_id}`,
+        email: sub.email,
+        html: sub.html,
+        text: sub.text
+      }))
+    ]
+
+    const sent: string[] = []
+    const skipped: string[] = []
+
+    for (const recipient of recipients) {
+      const claim = await client.query(
+        `insert into outstanding_tarp_email_deliveries
+           (report_date, recipient_key, email, status)
+         values ($1, $2, $3, 'claimed')
+         on conflict (report_date, recipient_key) do nothing
+         returning recipient_key`,
+        [reportDate, recipient.key, recipient.email]
+      )
+
+      if (!claim.rowCount) {
+        skipped.push(recipient.key)
+        continue
+      }
+
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: process.env.EMAIL_FROM ||
+            "Contractor Autopilot <info@g2groofing.com>",
+          to: recipient.email,
+          subject: "Good2Go Outstanding Tarp Work — Daily Report",
+          html: recipient.html,
+          text: recipient.text,
+          reply_to: "info@g2groofing.com"
+        })
+      })
+
+      const result = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        await client.query(
+          `update outstanding_tarp_email_deliveries
+              set status = 'failed', provider_response = $3
+            where report_date = $1 and recipient_key = $2`,
+          [
+            reportDate,
+            recipient.key,
+            JSON.stringify(result).slice(0, 1000)
+          ]
+        )
+        throw new Error(
+          `Tarp email failed for ${recipient.key}: ${response.status}`
+        )
+      }
+
+      await client.query(
+        `update outstanding_tarp_email_deliveries
+            set status = 'sent', provider_response = $3
+          where report_date = $1 and recipient_key = $2`,
+        [
+          reportDate,
+          recipient.key,
+          JSON.stringify(result).slice(0, 1000)
+        ]
+      )
+
+      sent.push(recipient.key)
+    }
+
+    return { ok: true, report_date: reportDate, sent, skipped }
+  } finally {
+    try {
+      await client.query(
+        "select pg_advisory_unlock(hashtext($1))",
+        ["g2g-outstanding-tarps-daily-email"]
+      )
+    } finally {
+      client.release()
+    }
+  }
+}
