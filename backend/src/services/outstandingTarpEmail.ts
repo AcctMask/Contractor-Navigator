@@ -539,6 +539,17 @@ export async function previewDailyTarpRecipients() {
     [tenantId]
   )
 
+  const seenEmails = new Set<string>()
+  for (const user of users.rows) {
+    const email = String(user.email).trim().toLowerCase()
+    if (seenEmails.has(email)) {
+      throw new Error(
+        "Duplicate subcontractor recipient email; delivery blocked"
+      )
+    }
+    seenEmails.add(email)
+  }
+
   const recipients = users.rows.flatMap(user => {
     const userId = Number(user.id)
     const assigned = rows.filter(

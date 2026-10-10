@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
 import { getCurrentUserFromToken } from "../services/authService"
-import { sendOfficeTarpTest } from "../services/outstandingTarpEmail"
+import { sendOfficeTarpTest, sendDailyOutstandingTarps } from "../services/outstandingTarpEmail"
 
 const MANAGEMENT = [
   "platform_owner", "tenant_admin", "admin", "manager",
@@ -38,6 +38,32 @@ function ageDays(value: unknown): number | null {
 export async function registerOutstandingTarpReportRoutes(
   app: FastifyInstance
 ) {
+
+  // Private scheduler trigger. No public or management-token bypass.
+  app.post(
+    "/internal/reports/outstanding-tarps-daily-delivery",
+    async (request: any, reply) => {
+      const expected = process.env.TARP_REPORT_CRON_SECRET
+      const provided = String(
+        request.headers["x-tarp-cron-secret"] || ""
+      )
+
+      if (!expected || !provided || provided !== expected) {
+        return reply.code(401).send({
+          ok: false, error: "Unauthorized"
+        })
+      }
+
+      try {
+        return reply.send(await sendDailyOutstandingTarps())
+      } catch (error) {
+        request.log.error(error)
+        return reply.code(500).send({
+          ok: false, error: "Daily tarp delivery failed"
+        })
+      }
+    }
+  )
 
   // Office-only manual email test.
   // No recurring schedule or subcontractor sends.
