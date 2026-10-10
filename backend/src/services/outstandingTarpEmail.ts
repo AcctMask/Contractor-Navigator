@@ -617,9 +617,14 @@ export async function sendDailyOutstandingTarps() {
   const part = (type: string) =>
     parts.find(p => p.type === type)?.value || ""
 
+  const easternHour = Number(part("hour"))
+
   if (["Sat", "Sun"].includes(part("weekday")) ||
-      part("hour") !== "07") {
-    return { ok: false, skipped: "Outside weekday 7 AM Eastern" }
+      easternHour < 7 || easternHour > 8) {
+    return {
+      ok: false,
+      skipped: "Outside weekday 7–9 AM Eastern delivery window"
+    }
   }
 
   if (process.env.TARP_DAILY_EMAIL_ENABLED !== "true") {
