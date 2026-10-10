@@ -1929,7 +1929,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return reply.code(403).send({ok:false})
 
       const job = await pool.query(
-        `select j.id, c.phone as customer_phone, j.adjuster_phone
+        `select j.id, c.phone as customer_phone, j.adjuster_phone, j.adjuster_name
          from jobs j left join customers c
            on c.id=j.customer_id and c.tenant_id=j.tenant_id
          where j.id=$1 and j.tenant_id=$2 limit 1`,
@@ -1953,13 +1953,13 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         if (job.rows[0].customer_phone)
           recipients.push({type:"customer",id:0,label:"Customer"})
         if (job.rows[0].adjuster_phone)
-          recipients.push({type:"adjuster",id:0,label:"Adjuster"})
+          recipients.push({type:"adjuster",id:0,label:"Adjuster: "+String(job.rows[0].adjuster_name||"Unnamed")})
       }
 
       const staff = await pool.query(
         `select id,full_name,email from app_users
          where tenant_id=$1 and is_active=true
-           and role in ('tenant_admin','admin','manager','staff')
+           and role in ('platform_owner','tenant_admin','admin','manager','staff')
            and mobile_phone is not null and trim(mobile_phone)<>''
          order by full_name,id`,[tenantId]
       )
@@ -2041,7 +2041,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return reply.code(403).send({ok:false,error:"Recipient prohibited"})
 
       const job=await pool.query(
-        `select j.id,c.phone as customer_phone,j.adjuster_phone
+        `select j.id,c.phone as customer_phone,j.adjuster_phone,j.adjuster_name
          from jobs j left join customers c
            on c.id=j.customer_id and c.tenant_id=j.tenant_id
          where j.id=$1 and j.tenant_id=$2 limit 1`,
@@ -2068,12 +2068,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         recipientLabel="Customer"
       } else if (isTenant && type==="adjuster") {
         phone=job.rows[0].adjuster_phone
-        recipientLabel="Adjuster"
+        recipientLabel="Adjuster: "+String(job.rows[0].adjuster_name||"Unnamed")
       } else if (type==="staff" && id!==Number(actor.id)) {
         const r=await pool.query(
           `select mobile_phone,full_name,email from app_users
            where id=$1 and tenant_id=$2 and is_active=true
-             and role in ('tenant_admin','admin','manager','staff')
+             and role in ('platform_owner','tenant_admin','admin','manager','staff')
            limit 1`,[id,tenantId]
         )
         if (r.rowCount) {
