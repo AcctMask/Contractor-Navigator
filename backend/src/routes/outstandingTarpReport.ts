@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
 import { getCurrentUserFromToken } from "../services/authService"
-import { sendOfficeTarpTest, sendDailyOutstandingTarps } from "../services/outstandingTarpEmail"
+import { sendOfficeTarpTest, sendDailyOutstandingTarps, previewDailyTarpRecipients } from "../services/outstandingTarpEmail"
 
 const MANAGEMENT = [
   "platform_owner", "tenant_admin", "admin", "manager",
@@ -38,6 +38,48 @@ function ageDays(value: unknown): number | null {
 export async function registerOutstandingTarpReportRoutes(
   app: FastifyInstance
 ) {
+
+  // Protected recipient validation. Read-only; never sends emails.
+  app.get(
+    "/internal/reports/outstanding-tarps-daily-recipients",
+    async (request: any, reply) => {
+      const expected = process.env.TARP_REPORT_CRON_SECRET
+      const provided = String(
+        request.headers["x-tarp-cron-secret"] || ""
+      )
+
+      if (!expected || !provided || provided !== expected) {
+        return reply.code(401).send({
+          ok: false, error: "Unauthorized"
+        })
+      }
+
+      try {
+        const plan = await previewDailyTarpRecipients()
+        return reply.send({
+          ok: true,
+          preview_only: true,
+          emails_sent: 0,
+          office: {
+            email: plan.office.email,
+            total: plan.office.total
+          },
+          subcontractors: plan.subcontractors.map(sub => ({
+            user_id: sub.user_id,
+            email: sub.email,
+            total: sub.total,
+            job_ids: sub.job_ids
+          })),
+          unassigned_job_ids: plan.unassigned_job_ids
+        })
+      } catch (error) {
+        request.log.error(error)
+        return reply.code(500).send({
+          ok: false, error: "Recipient verification failed"
+        })
+      }
+    }
+  )
 
   // Private scheduler trigger. No public or management-token bypass.
   app.post(
