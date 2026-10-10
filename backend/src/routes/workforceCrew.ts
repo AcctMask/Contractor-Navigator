@@ -44,6 +44,9 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           j.city,
           j.state,
           j.zip,
+          j.stage,
+          m.crew_role,
+          (select slug from tenants where id = j.tenant_id) as tenant_slug,
           a.assigned_at
         from workforce_crew_members m
         join workforce_crew_job_assignments a

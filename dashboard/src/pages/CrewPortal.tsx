@@ -13,6 +13,9 @@ type CrewJob = {
   state?: string | null
   zip?: string | null
   assigned_at?: string | null
+  stage?: string | null
+  crew_role?: string | null
+  tenant_slug?: string | null
 }
 
 
@@ -208,13 +211,148 @@ function CrewSmsPanel({
   )
 }
 
+function CrewTarpCompletion({
+  job,
+  spanish,
+  onCompleted,
+}: {
+  job: CrewJob
+  spanish: boolean
+  onCompleted: () => Promise<void>
+}) {
+  const [squareFeet, setSquareFeet] = useState("")
+  const [sandbags, setSandbags] = useState("")
+  const [notes, setNotes] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  async function complete() {
+    const area = Number(squareFeet)
+    const bags = Number(sandbags)
+
+    if (!squareFeet.trim() || !Number.isFinite(area) || area <= 0 ||
+        !sandbags.trim() || !Number.isSafeInteger(bags) || bags < 0) {
+      setError(spanish
+        ? "Ingrese los pies cuadrados y la cantidad de sacos."
+        : "Enter valid square footage and sandbag count.")
+      return
+    }
+
+    if (!job.tenant_slug) {
+      setError(spanish
+        ? "No se encontró la empresa del trabajo."
+        : "Job tenant unavailable.")
+      return
+    }
+
+    const question = spanish
+      ? `¿Marcar la lona como terminada? ${area} pies cuadrados, ${bags} sacos.`
+      : `Mark tarp complete? ${area} square feet, ${bags} sandbags.`
+
+    if (!window.confirm(question)) return
+
+    setSaving(true)
+    setError("")
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${encodeURIComponent(job.tenant_slug)}/${job.id}/complete-tarp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            installed_square_feet: area,
+            sandbags: bags,
+            notes: notes.trim(),
+          }),
+        }
+      )
+
+      const result = await response.json()
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Completion failed")
+      }
+
+      await onCompleted()
+    } catch (err: any) {
+      setError(err?.message || "Completion failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section style={{ marginTop: 16 }}>
+      <h3>{spanish ? "Terminar lona" : "Mark Tarp Complete"}</h3>
+
+      <label style={{ display: "block" }}>
+        {spanish ? "Pies cuadrados instalados" : "Installed square feet"}
+      </label>
+      <input
+        type="number"
+        min="0.01"
+        step="any"
+        value={squareFeet}
+        onChange={e => setSquareFeet(e.target.value)}
+        style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
+      />
+
+      <label style={{ display: "block", marginTop: 10 }}>
+        {spanish ? "Cantidad de sacos de arena" : "Sandbag count"}
+      </label>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        value={sandbags}
+        onChange={e => setSandbags(e.target.value)}
+        style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
+      />
+
+      <label style={{ display: "block", marginTop: 10 }}>
+        {spanish ? "Notas (opcional)" : "Notes (optional)"}
+      </label>
+      <textarea
+        value={notes}
+        maxLength={5000}
+        onChange={e => setNotes(e.target.value)}
+        style={{ width: "100%", padding: 8, boxSizing: "border-box" }}
+      />
+
+      {error && <p role="alert" style={{ color: "#fecaca" }}>{error}</p>}
+
+      <button
+        type="button"
+        disabled={saving}
+        onClick={() => void complete()}
+      >
+        {saving
+          ? (spanish ? "Guardando..." : "Saving...")
+          : (spanish ? "Confirmar terminación" : "Confirm completion")}
+      </button>
+    </section>
+  )
+}
+
 export default function CrewPortal() {
   const [jobs, setJobs] = useState<CrewJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [language, setLanguage] = useState<"en" | "es">("en")
+  const [tarpView, setTarpView] = useState<"all" | "assigned" | "completed">("all")
 
   const spanish = language === "es"
+  const assignedTarps = jobs.filter(job => job.stage === "tarp")
+  const completedTarps = jobs.filter(job => job.stage === "tarp_complete")
+  const visibleJobs = tarpView === "assigned"
+    ? assignedTarps
+    : tarpView === "completed"
+      ? completedTarps
+      : jobs
 
   async function loadJobs() {
     setLoading(true)
@@ -298,6 +436,31 @@ export default function CrewPortal() {
           {spanish ? "Actualizar trabajos" : "Refresh jobs"}
         </button>
 
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+          {([
+            ["all", spanish ? "Todos" : "All Jobs", jobs.length],
+            ["assigned", spanish ? "Lonas asignadas" : "Tarps Assigned", assignedTarps.length],
+            ["completed", spanish ? "Lonas terminadas" : "Tarps Completed", completedTarps.length],
+          ] as const).map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={tarpView === key}
+              onClick={() => setTarpView(key)}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: tarpView === key ? "2px solid #93c5fd" : "1px solid #64748b",
+                background: tarpView === key ? "#2563eb" : "#19375e",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              {label} ({count})
+            </button>
+          ))}
+        </div>
+
         {loading && <p>
           {spanish ? "Cargando..." : "Loading..."}
         </p>}
@@ -319,7 +482,7 @@ export default function CrewPortal() {
           gap: 12,
           marginTop: 20,
         }}>
-          {jobs.map(job => (
+          {visibleJobs.map(job => (
             <article key={job.id} style={{
               background: "#19375e",
               padding: 18,
@@ -337,6 +500,13 @@ export default function CrewPortal() {
                   job.zip,
                 ].filter(Boolean).join(", ")}
               </p>
+              {job.stage === "tarp" && job.crew_role === "lead" && (
+                <CrewTarpCompletion
+                  job={job}
+                  spanish={spanish}
+                  onCompleted={loadJobs}
+                />
+              )}
               <CrewSmsPanel jobId={job.id} spanish={spanish} />\n            </article>
           ))}
         </div>

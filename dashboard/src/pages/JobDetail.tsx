@@ -101,6 +101,12 @@ export default function JobDetail() {
   >([])
   const [smsRecipient, setSmsRecipient] = useState("customer")
   const [stage, setStage] = useState("lead")
+  const [tarpSquareFeet, setTarpSquareFeet] = useState("")
+  const [tarpSandbags, setTarpSandbags] = useState("")
+  const [tarpNotes, setTarpNotes] = useState("")
+  const [completingTarp, setCompletingTarp] = useState(false)
+  const [tarpOverrideReason, setTarpOverrideReason] = useState("")
+  const [closingTarpAdministratively, setClosingTarpAdministratively] = useState(false)
   const [crmSubstatus, setCrmSubstatus] = useState("")
   const [botPaused, setBotPaused] = useState(false)
   const [botPauseReason, setBotPauseReason] = useState("")
@@ -909,8 +915,192 @@ export default function JobDetail() {
     setStatus("")
   }
 
+  async function completeTarp() {
+    if (!id || completingTarp || job?.stage !== "tarp") return
+
+    const installed = Number(tarpSquareFeet)
+    const bags = Number(tarpSandbags)
+
+    if (!tarpSquareFeet.trim() || !Number.isFinite(installed) || installed <= 0 ||
+        !tarpSandbags.trim() || !Number.isSafeInteger(bags) || bags < 0) {
+      errorToast("Enter positive installed square footage and a valid sandbag count")
+      return
+    }
+
+    if (!window.confirm(
+      `Mark this tarp complete?\\n\\nInstalled: ${installed} sq ft\\nSandbags: ${bags}\\n\\nThis action will be recorded in Job Activity.`
+    )) return
+
+    setCompletingTarp(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${getTenantSlug()}/${id}/complete-tarp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            installed_square_feet: installed,
+            sandbags: bags,
+            notes: tarpNotes.trim(),
+          }),
+        }
+      )
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Tarp completion failed")
+      }
+      setTarpSquareFeet("")
+      setTarpSandbags("")
+      setTarpNotes("")
+      successToast("Tarp completion recorded")
+      await loadJob()
+    } catch (err: any) {
+      errorToast(err?.message || "Tarp completion failed")
+    } finally {
+      setCompletingTarp(false)
+    }
+  }
+
+  async function closeTarpAdministratively() {
+    if (!id || closingTarpAdministratively || job?.stage !== "tarp") return
+
+    const reason = tarpOverrideReason.trim()
+    if (reason.length < 10) {
+      errorToast("Provide a reason of at least 10 characters")
+      return
+    }
+
+    if (!window.confirm(
+      "Administratively close this tarp without verified quantities or photos? " +
+      "The exception and your identity will be permanently recorded."
+    )) return
+
+    setClosingTarpAdministratively(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${getTenantSlug()}/${id}/complete-tarp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            administrative_override: true,
+            override_reason: reason,
+          }),
+        }
+      )
+
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Administrative closure failed")
+      }
+
+      setTarpOverrideReason("")
+      successToast("Tarp administratively closed")
+      await loadJob()
+    } catch (err: any) {
+      errorToast(err?.message || "Administrative closure failed")
+    } finally {
+      setClosingTarpAdministratively(false)
+    }
+  }
+
+  function tarpOverrideForm() {
+    if (job?.stage !== "tarp" ||
+        !["tenant_admin", "platform_owner"].includes(String(currentUser?.role))) {
+      return null
+    }
+
+    return (
+      <section style={card}>
+        <h2>Administrative Close Tarp</h2>
+        <p>
+          Use only when work must be closed without complete documentation.
+          This records an exception, not verified quantities or photos.
+          Financial decisions remain in FOM.
+        </p>
+        <label style={label}>Reason for administrative closure *</label>
+        <textarea
+          style={textarea}
+          maxLength={5000}
+          value={tarpOverrideReason}
+          onChange={e => setTarpOverrideReason(e.target.value)}
+          placeholder="Explain why the tarp is being closed without required documentation."
+        />
+        <button
+          type="button"
+          style={button}
+          disabled={closingTarpAdministratively || tarpOverrideReason.trim().length < 10}
+          onClick={() => void closeTarpAdministratively()}
+        >
+          {closingTarpAdministratively
+            ? "Recording administrative closure..."
+            : "Administrative Close Tarp"}
+        </button>
+      </section>
+    )
+  }
+
+  function tarpCompletionForm() {
+    if (job?.stage !== "tarp") return null
+
+    return (
+      <section style={card}>
+        <h2>Mark Tarp Complete</h2>
+        <p>Record installed quantities. Completion will be saved in Job Activity.</p>
+        <div style={grid2}>
+          <div>
+            <label style={label}>Installed Square Feet *</label>
+            <input
+              type="number"
+              min="0.01"
+              step="any"
+              style={input}
+              value={tarpSquareFeet}
+              onChange={e => setTarpSquareFeet(e.target.value)}
+            />
+          </div>
+          <div>
+            <label style={label}>Number of Sandbags *</label>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              style={input}
+              value={tarpSandbags}
+              onChange={e => setTarpSandbags(e.target.value)}
+            />
+          </div>
+        </div>
+        <label style={label}>Completion Notes (optional)</label>
+        <textarea
+          style={textarea}
+          value={tarpNotes}
+          onChange={e => setTarpNotes(e.target.value)}
+        />
+        <button
+          type="button"
+          style={button}
+          disabled={completingTarp}
+          onClick={() => void completeTarp()}
+        >
+          {completingTarp ? "Recording completion..." : "Mark Tarp Complete"}
+        </button>
+      </section>
+    )
+  }
+
   async function saveStage() {
     if (!id) return
+    if (stage === "tarp_complete" && job?.stage === "tarp") {
+      errorToast("Use Mark Tarp Complete to record required quantities")
+      return
+    }
 
     const pauseReason = botPauseReason.trim()
 
@@ -1826,7 +2016,9 @@ export default function JobDetail() {
                 />
               </section>
 
-              <section style={card}>
+              {tarpCompletionForm()}
+
+            <section style={card}>
               <h2>Job Details</h2>
 
               <p>
@@ -2470,6 +2662,9 @@ export default function JobDetail() {
           />
         </section>
       ) : null}
+
+      {tarpCompletionForm()}
+      {tarpOverrideForm()}
 
       <section style={card}>
         <h2>Stage / Bot Controls</h2>

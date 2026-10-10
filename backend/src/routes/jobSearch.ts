@@ -1013,6 +1013,16 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
         return { ok: false, error: "Not authorized" }
       }
 
+      // Reading a job does not grant permission to edit its stage.
+      // Tarp completion has its own assigned-worker authorization.
+      if (!["platform_owner", "tenant_admin", "admin", "manager"]
+        .includes(String(actor.role))) {
+        return reply.code(403).send({
+          ok: false,
+          error: "Stage editing requires management access",
+        })
+      }
+
       const {
         stage,
         crm_substatus,
@@ -1047,6 +1057,17 @@ export async function registerJobSearchRoutes(app: FastifyInstance) {
 
       const nextStage =
         String(stage || previousStage || "").trim()
+
+      // Tarp completion requires the dedicated audited endpoint.
+      // Preserve all other stage transitions and conversion behavior.
+      if (nextStage === "tarp_complete" &&
+          previousStage !== "tarp_complete") {
+        return reply.code(409).send({
+          ok: false,
+          error: "Use the protected tarp completion workflow",
+        })
+      }
+
 
       const realStageTransition =
         Boolean(stage) && nextStage !== previousStage

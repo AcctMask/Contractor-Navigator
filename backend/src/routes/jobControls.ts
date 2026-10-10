@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
+import { getCurrentUserFromToken } from "../services/authService"
 import { clearPhoneDnc, isPhoneDnc, markPhoneAsDnc } from "../services/dncService"
 import { getTenantIdBySlug } from "../services/followupEngine"
 
@@ -81,7 +82,35 @@ export async function registerJobControlsRoutes(app: FastifyInstance) {
     try {
       const { tenantSlug, jobId } = request.params
       const { stage, crm_substatus, bot_paused } = request.body || {}
+      const authorization = String(request.headers.authorization || "")
+      const token = authorization.startsWith("Bearer ")
+        ? authorization.slice(7).trim()
+        : ""
+
+      if (!token) {
+        return reply.code(401).send({ ok: false, error: "Authentication required" })
+      }
+
+      const actor = await getCurrentUserFromToken(token)
+      if (!actor?.is_active) {
+        return reply.code(401).send({ ok: false, error: "Authentication required" })
+      }
+
       const tenantId = await getTenantIdBySlug(tenantSlug)
+      const role = String(actor.role)
+
+      if (!["platform_owner", "tenant_admin", "admin", "manager"].includes(role) ||
+          (role !== "platform_owner" && Number(actor.tenant_id) !== Number(tenantId))) {
+        return reply.code(403).send({ ok: false, error: "Stage change not permitted" })
+      }
+
+      const existing = await getJobRow(tenantId, Number(jobId))
+      if (stage === "tarp_complete") {
+        return reply.code(409).send({
+          ok: false,
+          error: "Use the protected tarp completion action"
+        })
+      }
 
       await pool.query(
         `

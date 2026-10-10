@@ -35,6 +35,9 @@ type DashboardJob = {
   updated_at?: string | null
   customer_name?: string | null
   has_buying_signal?: boolean | null
+  has_active_subcontractor_assignment?: boolean
+  has_job_photos?: boolean
+  has_tarp_administrative_override?: boolean
 }
 
 type RecentActivitySummary = {
@@ -117,6 +120,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
+  const [tarpFilter, setTarpFilter] = useState<
+    "unassigned" | "assigned" | "photos_needed" | null
+  >(null)
 
   useEffect(() => {
     void loadDashboard()
@@ -246,7 +252,28 @@ export default function DashboardPage() {
         )
       : sortedJobs
 
-  const newestJobs = filteredJobs.slice(0, 10)
+  const tarpJobs = sortedJobs.filter((job) => job.stage === "tarp")
+  const unassignedTarps = tarpJobs.filter(
+    (job) => !job.has_active_subcontractor_assignment
+  )
+  const assignedTarps = tarpJobs.filter(
+    (job) => job.has_active_subcontractor_assignment
+  )
+  const photosNeeded = sortedJobs.filter(
+    (job) => job.stage === "tarp_complete" && !job.has_job_photos && !job.has_tarp_administrative_override
+  )
+
+  const displayedJobs = tarpFilter === "unassigned"
+    ? unassignedTarps
+    : tarpFilter === "assigned"
+      ? assignedTarps
+      : tarpFilter === "photos_needed"
+        ? photosNeeded
+        : selectedStage === "tarp"
+          ? [...unassignedTarps, ...assignedTarps]
+          : filteredJobs
+
+  const newestJobs = displayedJobs.slice(0, 10)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const startOfToday = today.getTime()
@@ -624,13 +651,14 @@ export default function DashboardPage() {
                 return (
                   <button
                     key={id}
-                    onClick={() =>
+                    onClick={() => {
+                      setTarpFilter(null)
                       setSelectedStage(
                         selectedStage === id
                           ? null
                           : id,
                       )
-                    }
+                    }}
                     style={{
                       ...statCard,
                       ...(stageColors || {}),
@@ -692,9 +720,34 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <Link to="/job-admin" style={panelSearchButton}>
-                  {language === "es" ? "Abrir búsqueda" : "Open Search"}
-                </Link>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {([
+                    ["unassigned", language === "es" ? "Lonas sin asignar" : "Unassigned Tarps", unassignedTarps.length],
+                    ["assigned", language === "es" ? "Lonas asignadas" : "Assigned Tarps", assignedTarps.length],
+                    ["photos_needed", language === "es" ? "Fotos pendientes" : "Photos Needed", photosNeeded.length],
+                  ] as const).map(([key, label, count]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={tarpFilter === key}
+                      onClick={() => {
+                        setTarpFilter(tarpFilter === key ? null : key)
+                        setSelectedStage(null)
+                      }}
+                      style={{
+                        ...panelSearchButton,
+                        cursor: "pointer",
+                        border: tarpFilter === key ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                        fontWeight: tarpFilter === key ? 700 : 500,
+                      }}
+                    >
+                      {label} ({count})
+                    </button>
+                  ))}
+                  <Link to="/job-admin" style={panelSearchButton}>
+                    {language === "es" ? "Abrir búsqueda" : "Open Search"}
+                  </Link>
+                </div>
               </div>
 
               {error ? (

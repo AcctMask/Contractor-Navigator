@@ -104,6 +104,213 @@ async function ensureCrewAssignmentUserColumn() {
 }
 
 export async function registerAdminRoutes(app: FastifyInstance) {
+
+  // Tarp completion: stage and immutable completion activity are atomic.
+  // Does not modify assignments, SMS, photos or downstream job stages.
+  app.post("/admin/job/:tenant_slug/:job_id/complete-tarp", async (req: any, reply) => {
+    const token = getBearerToken(req);
+    if (!token) {
+      return reply.code(401).send({ ok: false, error: "Authentication required" });
+    }
+
+    const actor = await getCurrentUserFromToken(token);
+    if (!actor?.is_active) {
+      return reply.code(401).send({ ok: false, error: "Authentication required" });
+    }
+
+    const tenantSlug = String(req.params.tenant_slug || "");
+    const jobId = Number(req.params.job_id);
+    const hasSquareFeet =
+      req.body?.installed_square_feet !== undefined &&
+      req.body?.installed_square_feet !== null &&
+      String(req.body.installed_square_feet).trim() !== "";
+    const hasSandbags =
+      req.body?.sandbags !== undefined &&
+      req.body?.sandbags !== null &&
+      String(req.body.sandbags).trim() !== "";
+    const squareFeet = Number(req.body?.installed_square_feet);
+    const sandbags = Number(req.body?.sandbags);
+    const notes = String(req.body?.notes || "").trim();
+    const override = req.body?.administrative_override === true;
+    const overrideReason = String(req.body?.override_reason || "").trim();
+
+    if (!Number.isSafeInteger(jobId) || jobId <= 0 ||
+        (!override && (!hasSquareFeet || !hasSandbags ||
+                      !Number.isFinite(squareFeet) || squareFeet <= 0 ||
+                       !Number.isSafeInteger(sandbags) || sandbags < 0)) ||
+        notes.length > 5000 ||
+        (override && (overrideReason.length < 10 || overrideReason.length > 5000))) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Valid installed square footage, sandbag count and notes are required"
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const tenant = await client.query(
+        "select id from tenants where slug = $1",
+        [tenantSlug]
+      );
+      if (!tenant.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ ok: false, error: "Tenant not found" });
+      }
+      const tenantId = Number(tenant.rows[0].id);
+
+      if (String(actor.role) !== "platform_owner" &&
+          Number(actor.tenant_id) !== tenantId) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ ok: false, error: "Tenant access denied" });
+      }
+
+      const job = await client.query(
+        "select id, stage from jobs where tenant_id = $1 and id = $2 for update",
+        [tenantId, jobId]
+      );
+      if (!job.rowCount) {
+        await client.query("ROLLBACK");
+        return reply.code(404).send({ ok: false, error: "Job not found" });
+      }
+
+      const role = String(actor.role);
+      if (override && !["platform_owner", "tenant_admin"].includes(role)) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({
+          ok: false,
+          error: "Administrative closure requires tenant admin or platform owner"
+        });
+      }
+
+      let authorized = [
+        "platform_owner", "tenant_admin", "admin", "manager"
+      ].includes(role);
+
+      if (role === "subcontractor") {
+        const assignment = await client.query(
+          `select 1 from crew_assignments
+           where tenant_id = $1 and job_id = $2
+             and app_user_id = $3
+             and status in ('PENDING', 'active')
+           limit 1`,
+          [tenantId, jobId, Number(actor.id)]
+        );
+        authorized = Boolean(assignment.rowCount);
+      }
+
+      if (role === "crew") {
+        const assignment = await client.query(
+          `select 1
+           from workforce_crew_members m
+           join workforce_crew_job_assignments a
+             on a.crew_member_id = m.id
+            and a.tenant_id = m.tenant_id
+            and a.subcontractor_company_id = m.subcontractor_company_id
+            and a.status = 'active'
+           join crew_assignments ca
+             on ca.tenant_id = a.tenant_id
+            and ca.job_id = a.job_id
+            and ca.status in ('PENDING', 'active')
+           join subcontractor_company_users scu
+             on scu.app_user_id = ca.app_user_id
+            and scu.subcontractor_company_id = m.subcontractor_company_id
+           join app_users sub
+             on sub.id = ca.app_user_id
+            and sub.tenant_id = ca.tenant_id
+            and sub.role = 'subcontractor'
+            and sub.is_active = true
+           where m.app_user_id = $1
+             and m.tenant_id = $2
+             and a.job_id = $3
+             and m.crew_role = 'lead'
+             and m.is_active = true
+             and m.invitation_status = 'active'
+           limit 1`,
+          [Number(actor.id), tenantId, jobId]
+        );
+        authorized = Boolean(assignment.rowCount);
+      }
+
+      if (!authorized) {
+        await client.query("ROLLBACK");
+        return reply.code(403).send({ ok: false, error: "Completion not permitted" });
+      }
+
+      if (job.rows[0].stage !== "tarp") {
+        await client.query("ROLLBACK");
+        return reply.code(409).send({
+          ok: false,
+          error: "Only a job currently in Tarp can be marked Tarp Complete"
+        });
+      }
+
+      await client.query(
+        `update jobs
+         set stage = 'tarp_complete',
+             current_stage_entered_at = now(),
+             updated_at = now()
+         where tenant_id = $1 and id = $2`,
+        [tenantId, jobId]
+      );
+
+      const actorName = String(
+        actor.full_name || actor.email || `User ${actor.id}`
+      );
+      const message = override
+        ? `Tarp administratively closed by ${actorName}. Reason: ${overrideReason}`
+        : `Tarp completed by ${actorName}: ${squareFeet} sq ft installed, ` +
+          `${sandbags} sandbags` +
+          (notes ? `. Notes: ${notes}` : "");
+
+      await client.query(
+        `insert into timeline_events
+           (tenant_id, job_id, kind, message, meta, created_at)
+         values ($1, $2, 'manual_stage_updated', $3, $4::jsonb, now())`,
+        [
+          tenantId,
+          jobId,
+          message,
+          JSON.stringify({
+            stage: "tarp_complete",
+            previous_stage: "tarp",
+            action: override ? "tarp_administratively_closed" : "tarp_completed",
+            administrative_override: override,
+            override_reason: override ? overrideReason : null,
+            documentation_exception: override,
+            installed_square_feet: override ? null : squareFeet,
+            sandbags: override ? null : sandbags,
+            notes,
+            actor_app_user_id: Number(actor.id),
+            actor_role: role,
+            actor_name: actorName,
+            source: "navigator_tarp_completion"
+          })
+        ]
+      );
+
+      await client.query("COMMIT");
+      return reply.send({
+        ok: true,
+        job_id: jobId,
+        stage: "tarp_complete",
+        administrative_override: override,
+        installed_square_feet: override ? null : squareFeet,
+        sandbags: override ? null : sandbags
+      });
+    } catch (error) {
+      await client.query("ROLLBACK");
+      req.log.error(error);
+      return reply.code(500).send({
+        ok: false,
+        error: "Tarp completion could not be saved"
+      });
+    } finally {
+      client.release();
+    }
+  });
+
   app.post("/admin/scheduler/tick", async (req, reply) => {
     const body: any = (req as any).body || {};
     const limit = Number(body.limit || 25);
@@ -644,6 +851,33 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         j.updated_at,
         exists (
           select 1
+          from crew_assignments ca
+          join app_users sub
+            on sub.id = ca.app_user_id
+           and sub.tenant_id = ca.tenant_id
+           and sub.role = 'subcontractor'
+           and sub.is_active = true
+          where ca.tenant_id = j.tenant_id
+            and ca.job_id = j.id
+            and ca.status in ('PENDING', 'active')
+        ) as has_active_subcontractor_assignment,
+        exists (
+          select 1
+          from job_assets ja
+          where ja.tenant_id = j.tenant_id
+            and ja.job_id = j.id
+            and ja.asset_type = 'photo'
+        ) as has_job_photos,
+        exists (
+          select 1
+          from timeline_events tarp_exception
+          where tarp_exception.tenant_id = j.tenant_id
+            and tarp_exception.job_id = j.id
+            and tarp_exception.kind = 'manual_stage_updated'
+            and tarp_exception.meta->>'action' = 'tarp_administratively_closed'
+        ) as has_tarp_administrative_override,
+        exists (
+          select 1
           from timeline_events te
           where te.tenant_id = j.tenant_id
             and te.job_id = j.id
@@ -793,6 +1027,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
                and job_id = $2
                and (
              kind = 'workforce_activity'
+             or (
+               kind = 'manual_stage_updated'
+               and meta->>'action' in (
+                 'tarp_completed',
+                 'tarp_administratively_closed'
+               )
+             )
              or (
                kind = 'staff_note'
                and (
@@ -964,6 +1205,39 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const tenantId = await getTenantIdBySlug(tenant_slug);
     const jobId = Number((req.params as any).job_id);
     const body: any = (req as any).body || {};
+
+    // General job editing is restricted to authenticated tenant management.
+    const editor = await getCurrentUserFromToken(getBearerToken(req));
+    if (!editor?.is_active) {
+      return reply.code(401).send({
+        ok: false,
+        error: "Authentication required"
+      });
+    }
+    if (!["platform_owner", "tenant_admin", "admin", "manager"]
+      .includes(String(editor.role))) {
+      return reply.code(403).send({
+        ok: false,
+        error: "Job editing not permitted"
+      });
+    }
+    if (String(editor.role) !== "platform_owner" &&
+        Number(editor.tenant_id) !== tenantId) {
+      return reply.code(403).send({
+        ok: false,
+        error: "Tenant access denied"
+      });
+    }
+
+    // Tarp completion requires the dedicated, audited completion endpoint.
+    // General job editing must never bypass quantities or role validation.
+    if (String(body.stage || "").trim().toLowerCase() === "tarp_complete") {
+      return reply.code(403).send({
+        ok: false,
+        error: "Use the authorized tarp completion workflow"
+      });
+    }
+
 
     const jobRow = await pool.query(
       `
