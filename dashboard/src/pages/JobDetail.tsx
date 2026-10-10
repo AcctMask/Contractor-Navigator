@@ -986,10 +986,12 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/send-sms`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({
         message: smsText,
-        author: currentUser?.full_name || currentUser?.email || "Team",
       }),
     })
 

@@ -1885,12 +1885,24 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     }
   })
 
+  // Navi 2.9: manual SMS is tenant-staff only.
+  // Subcontractors and crew must use separately authorized workforce SMS routes.
   app.post("/assets/:tenantSlug/job/:jobId/send-sms", async (req: any, reply) => {
     try {
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
-      const { message, author } = req.body || {}
-      const smsAuthor = String(author || "Team").trim() || "Team"
+      const actor = await getCurrentUserFromToken(getBearerToken(req))
+      if (!actor?.is_active) {
+        return reply.code(401).send({ ok: false, error: "Unauthorized" })
+      }
+      if (
+        !["platform_owner", "tenant_admin", "admin", "manager"].includes(String(actor.role)) ||
+        (actor.role !== "platform_owner" && Number(actor.tenant_id) !== tenantId)
+      ) {
+        return reply.code(403).send({ ok: false, error: "SMS permission denied" })
+      }
+      const { message } = req.body || {}
+      const smsAuthor = String(actor.full_name || actor.email || "Team")
       const smsMessage = String(message || "").trim()
 
       if (!smsMessage) {
