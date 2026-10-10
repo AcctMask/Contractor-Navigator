@@ -985,7 +985,13 @@ export default function JobDetail() {
     fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/sms-recipients`, {
       headers: {Authorization: `Bearer ${getToken()}`}
     })
-      .then(r => r.json())
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok || !data.ok) {
+          throw new Error(data.error || "Unable to load SMS recipients")
+        }
+        return data
+      })
       .then(data => {
         if (cancelled) return
         const recipients = Array.isArray(data.recipients) ? data.recipients : []
@@ -998,7 +1004,13 @@ export default function JobDetail() {
               : ""
         )
       })
-      .catch(() => {})
+      .catch(err => {
+        if (!cancelled) {
+          setSmsRecipients([])
+          setSmsRecipient("")
+          console.error("SMS recipient lookup:", err)
+        }
+      })
     return () => {cancelled = true}
   }, [id])
 
@@ -2911,6 +2923,9 @@ export default function JobDetail() {
           onChange={e => setSmsRecipient(e.target.value)}
           style={{width:"100%",padding:10,marginBottom:12}}
         >
+          {smsRecipients.length === 0 && (
+            <option value="">No authorized SMS recipients available</option>
+          )}
           {smsRecipients.map(r => (
             <option key={`${r.type}:${r.id}`} value={`${r.type}:${r.id}`}>
               {r.label}
@@ -2920,7 +2935,7 @@ export default function JobDetail() {
         <textarea
           value={smsText}
           onChange={(e) => setSmsText(e.target.value)}
-          placeholder="Type a text message to the customer..."
+
           style={textarea}
         />
         {id && smsText.trim() && (
