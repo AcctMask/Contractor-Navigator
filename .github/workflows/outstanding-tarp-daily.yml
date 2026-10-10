@@ -1,0 +1,36 @@
+name: Good2Go Daily Outstanding Tarps
+
+on:
+  schedule:
+    # 7 AM Eastern: 11 UTC during EDT, 12 UTC during EST.
+    - cron: '0 11 * * 1-5'
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: good2go-daily-outstanding-tarps
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call protected tarp report endpoint
+        env:
+          TARP_ENDPOINT: ${{ secrets.TARP_REPORT_ENDPOINT }}
+          TARP_SECRET: ${{ secrets.TARP_REPORT_CRON_SECRET }}
+        run: |
+          if [ -z "$TARP_ENDPOINT" ] || [ -z "$TARP_SECRET" ]; then
+            echo "Missing scheduler configuration; no request sent."
+            exit 1
+          fi
+
+          curl --fail-with-body --silent --show-error \
+            --retry 2 \
+            --max-time 180 \
+            -X POST \
+            -H "x-tarp-cron-secret: $TARP_SECRET" \
+            "$TARP_ENDPOINT"
