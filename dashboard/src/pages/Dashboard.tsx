@@ -8,6 +8,7 @@ import {
 import { useCompanyDna } from "../context/CompanyDnaContext"
 import { stagePresentation } from "../lib/stagePresentation"
 import { useLanguage } from "../context/LanguageContext"
+import { getToken } from "../lib/auth"
 
 const API_BASE = import.meta.env.VITE_API_BASE
 type DashboardJob = {
@@ -111,6 +112,7 @@ export default function DashboardPage() {
 
   const [jobs, setJobs] = useState<DashboardJob[]>([])
   const [events, setEvents] = useState<CalendarEventSummary[]>([])
+  const [calendarError, setCalendarError] = useState("")
   const [recentActivity, setRecentActivity] = useState<RecentActivitySummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -124,10 +126,13 @@ export default function DashboardPage() {
     try {
       setLoading(true)
       setError("")
+      setCalendarError("")
 
       const [jobsRes, eventsRes, recentActivityRes] = await Promise.all([
         fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=250`),
-        fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`),
+        fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        }),
         fetch(`${API_BASE}/admin/recent-activity/${getTenantSlug()}?limit=10`)
       ])
 
@@ -140,7 +145,12 @@ export default function DashboardPage() {
       }
 
       setJobs(Array.isArray(jobsData.jobs) ? jobsData.jobs : [])
-      setEvents(Array.isArray(eventsData?.events) ? eventsData.events : [])
+      if (!eventsRes.ok || !eventsData?.ok) {
+        setEvents([])
+        setCalendarError("Calendar events could not be loaded. Open Calendar to retry.")
+      } else {
+        setEvents(Array.isArray(eventsData.events) ? eventsData.events : [])
+      }
       setRecentActivity(Array.isArray(recentActivityData?.rows) ? recentActivityData.rows : [])
     } catch (err: any) {
       setError(err?.message || "Dashboard load failed")
@@ -741,6 +751,8 @@ export default function DashboardPage() {
               <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
                 {loading ? (
                   <div style={selectedEmpty}>Loading calendar…</div>
+                ) : calendarError ? (
+                  <div style={selectedEmpty}>{calendarError}</div>
                 ) : upcomingEvents.length === 0 ? (
                   <div style={selectedEmpty}>
                     No calendar events yet. Add one from the Calendar page.
