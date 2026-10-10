@@ -1870,6 +1870,50 @@ export default function JobDetail() {
             </section>
 
             <section style={card}>
+              <h2>Send SMS</h2>
+              <label htmlFor="sub-sms-recipient">Send To</label>
+              <select
+                id="sub-sms-recipient"
+                value={smsRecipient}
+                onChange={e => setSmsRecipient(e.target.value)}
+                style={input}
+              >
+                {smsRecipients.length === 0 && (
+                  <option value="">No authorized SMS recipients available</option>
+                )}
+                {smsRecipients.map(r => (
+                  <option
+                    key={`${r.type}:${r.id}`}
+                    value={`${r.type}:${r.id}`}
+                  >
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                value={smsText}
+                onChange={e => setSmsText(e.target.value)}
+                style={textarea}
+              />
+              {id && smsText.trim() && (
+                <TranslateMessage
+                  key={`sub-sms-${language}-${smsText}`}
+                  text={smsText}
+                  jobId={id}
+                  language={language}
+                  onUseTranslation={setSmsText}
+                />
+              )}
+              <button
+                onClick={sendManualSms}
+                disabled={!smsRecipient || !smsText.trim()}
+                style={button}
+              >
+                Send Text
+              </button>
+            </section>
+
+            <section style={card}>
               <h2>Add Job Note</h2>
 
               <textarea
