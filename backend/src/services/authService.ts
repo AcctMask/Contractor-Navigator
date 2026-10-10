@@ -873,13 +873,15 @@ export async function getCurrentUserFromToken(token: string) {
            preferred_language
     from app_users
     where id = $1
+      and tenant_id = $2
+      and is_active = true
     limit 1
     `,
-    [decoded.sub]
+    [decoded.sub, decoded.tenant_id]
   )
 
   if (!result.rowCount) {
-    throw new Error("User not found")
+    throw new Error("User not found or account inactive")
   }
 
   return result.rows[0]
