@@ -861,7 +861,10 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/update`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
       body: JSON.stringify(form),
     })
 
@@ -1148,7 +1151,10 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/update`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken()}`,
+      },
       body: JSON.stringify({
         stage: nextStage,
         note,
