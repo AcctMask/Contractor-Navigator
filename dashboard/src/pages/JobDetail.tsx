@@ -2016,8 +2016,6 @@ export default function JobDetail() {
                 />
               </section>
 
-              {tarpCompletionForm()}
-
             <section style={card}>
               <h2>Job Details</h2>
 
@@ -2060,6 +2058,8 @@ export default function JobDetail() {
                 {job.damage_summary || "—"}
               </p>
             </section>
+
+            {tarpCompletionForm()}
 
             <section style={card}>
               <h2>Send SMS</h2>
