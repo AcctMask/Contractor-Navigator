@@ -6,6 +6,7 @@ import rawBody from "fastify-raw-body"
 import dotenv from "dotenv"
 
 import { registerAdminRoutes } from "./routes/admin"
+import { registerOutstandingTarpReportRoutes } from "./routes/outstandingTarpReport"
 import { registerEventsRoutes } from "./routes/events"
 import registerLeadRoutes from "./routes/leads"
 import { registerAiRoutes } from "./routes/ai"
@@ -67,6 +68,7 @@ app.get("/", async () => {
 })
 
 await registerAdminRoutes(app)
+await registerOutstandingTarpReportRoutes(app)
 await registerEventsRoutes(app)
 await registerLeadRoutes(app)
 await registerAiRoutes(app)
