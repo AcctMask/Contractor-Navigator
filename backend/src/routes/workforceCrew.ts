@@ -631,8 +631,12 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
                  or (
                    $6::boolean
                    and (
-                     (te.meta->>'crew_member_id') = $7::text
+                     (
+                       (te.meta->>'crew_member_id') = $7::text
+                       and (te.meta->>'to_role') = 'crew'
+                     )
                      or (te.meta->>'sender_app_user_id') = $5::text
+                     or (te.meta->>'recipient_app_user_id') = $5::text
                    )
                  )
                )
@@ -688,6 +692,124 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
       return reply.code(500).send({
         ok: false,
         error: "Could not load workforce conversations",
+      })
+    }
+  })
+
+
+  // Authorized crew SMS recipients for one assigned job.
+  app.get("/workforce/crew/:jobId/sms-recipients", async (request: any, reply) => {
+    try {
+      const actor = await getCurrentUserFromToken(getToken(request))
+
+      if (!actor?.is_active || actor.role !== "crew") {
+        return reply.code(403).send({
+          ok: false,
+          error: "Crew access required",
+        })
+      }
+
+      const jobId = Number(request.params.jobId)
+
+      if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Invalid job",
+        })
+      }
+
+      const membership = await pool.query(
+        `select m.subcontractor_company_id
+         from workforce_crew_members m
+         join workforce_crew_job_assignments a
+           on a.crew_member_id = m.id
+          and a.tenant_id = m.tenant_id
+          and a.subcontractor_company_id = m.subcontractor_company_id
+         join jobs j
+           on j.id = a.job_id
+          and j.tenant_id = a.tenant_id
+         where m.app_user_id = $1
+           and m.tenant_id = $2
+           and m.is_active = true
+           and m.invitation_status = 'active'
+           and a.job_id = $3
+           and a.status = 'active'
+           and exists (
+             select 1
+             from crew_assignments ca
+             join subcontractor_company_users scu
+               on scu.app_user_id = ca.app_user_id
+              and scu.subcontractor_company_id =
+                  m.subcontractor_company_id
+             join app_users sub
+               on sub.id = ca.app_user_id
+              and sub.tenant_id = ca.tenant_id
+              and sub.role = 'subcontractor'
+              and sub.is_active = true
+             where ca.tenant_id = a.tenant_id
+               and ca.job_id = a.job_id
+               and ca.status in ('PENDING', 'active')
+           )
+         limit 1`,
+        [Number(actor.id), Number(actor.tenant_id), jobId]
+      )
+
+      if (membership.rowCount !== 1) {
+        return reply.code(403).send({
+          ok: false,
+          error: "Job not assigned",
+        })
+      }
+
+      const result = await pool.query(
+        `select
+           u.id,
+           u.role,
+           u.email,
+           case
+             when u.role = 'subcontractor' then 'sub'
+             else 'staff'
+           end as recipient_type
+         from app_users u
+         where u.tenant_id = $1
+           and u.is_active = true
+           and u.mobile_phone is not null
+           and length(trim(u.mobile_phone)) > 0
+           and (
+             u.role in ('tenant_admin', 'admin', 'manager', 'staff')
+             or (
+               u.role = 'subcontractor'
+               and exists (
+                 select 1
+                 from subcontractor_company_users scu
+                 join crew_assignments ca
+                   on ca.app_user_id = scu.app_user_id
+                  and ca.tenant_id = u.tenant_id
+                  and ca.job_id = $2
+                  and ca.status in ('PENDING', 'active')
+                 where scu.app_user_id = u.id
+                   and scu.subcontractor_company_id = $3
+               )
+             )
+           )
+         order by recipient_type, u.email`,
+        [
+          Number(actor.tenant_id),
+          jobId,
+          Number(membership.rows[0].subcontractor_company_id),
+        ]
+      )
+
+      return reply.send({
+        ok: true,
+        job_id: jobId,
+        recipients: result.rows,
+      })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false,
+        error: "Could not load SMS recipients",
       })
     }
   })
@@ -820,6 +942,7 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           : translated.original,
         providerMessageSid: sent.sid,
         senderAppUserId: Number(actor.id),
+        recipientAppUserId: Number(recipient.rows[0].id),
         crewMemberId: Number(membership.rows[0].id),
         subcontractorCompanyId:
           Number(membership.rows[0].subcontractor_company_id),
@@ -852,6 +975,7 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
         "tenant_admin",
         "admin",
         "manager",
+        "staff",
       ]
 
       const isManagement = allowedRoles.includes(String(actor.role))

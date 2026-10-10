@@ -15,6 +15,199 @@ type CrewJob = {
   assigned_at?: string | null
 }
 
+
+type SmsRecipient = {
+  id: number
+  email: string
+  role: string
+  recipient_type: "sub" | "staff"
+}
+
+type SmsMessage = {
+  id: number
+  message: string
+  created_at: string
+}
+
+function CrewSmsPanel({
+  jobId,
+  spanish,
+}: {
+  jobId: number
+  spanish: boolean
+}) {
+  const [recipients, setRecipients] = useState<SmsRecipient[]>([])
+  const [messages, setMessages] = useState<SmsMessage[]>([])
+  const [selected, setSelected] = useState("")
+  const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
+  const [status, setStatus] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [sending, setSending] = useState(false)
+
+  async function api(path: string, options: RequestInit = {}) {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${getToken()}`,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...options.headers,
+      },
+      cache: "no-store",
+    })
+
+    const result = await response.json()
+
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "SMS request failed")
+    }
+
+    return result
+  }
+
+  async function refresh() {
+    setLoading(true)
+    setError("")
+
+    try {
+      const [recipientData, historyData] = await Promise.all([
+        api(`/workforce/crew/${jobId}/sms-recipients`),
+        api(`/workforce/crew/${jobId}/conversations`),
+      ])
+
+      setRecipients(
+        Array.isArray(recipientData.recipients)
+          ? recipientData.recipients
+          : []
+      )
+
+      setMessages(
+        Array.isArray(historyData.messages)
+          ? historyData.messages
+          : []
+      )
+    } catch (err: any) {
+      setError(err?.message || "Unable to load SMS")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [jobId])
+
+  async function send() {
+    if (!selected || !message.trim() || sending) return
+
+    const [recipient_type, recipient_id] = selected.split(":")
+
+    setSending(true)
+    setError("")
+    setStatus("")
+
+    try {
+      await api(`/workforce/crew/${jobId}/reply-sms`, {
+        method: "POST",
+        body: JSON.stringify({
+          recipient_type,
+          recipient_id: Number(recipient_id),
+          message: message.trim(),
+        }),
+      })
+
+      setMessage("")
+      setStatus(spanish ? "SMS enviado." : "SMS sent.")
+      await refresh()
+    } catch (err: any) {
+      setError(err?.message || "SMS could not be sent")
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <section style={{ marginTop: 20 }}>
+      <h3>{spanish ? "Mensajes SMS" : "SMS messages"}</h3>
+
+      <button type="button" onClick={() => void refresh()} disabled={loading}>
+        {spanish ? "Actualizar mensajes" : "Refresh messages"}
+      </button>
+
+      {error && <p role="alert" style={{ color: "#fecaca" }}>{error}</p>}
+      {status && <p role="status">{status}</p>}
+
+      <label style={{ display: "block", marginTop: 12 }}>
+        {spanish ? "Destinatario" : "Recipient"}
+      </label>
+
+      <select
+        value={selected}
+        onChange={event => setSelected(event.target.value)}
+        style={{ width: "100%", padding: 10, marginTop: 6 }}
+      >
+        <option value="">
+          {spanish ? "Seleccione un destinatario" : "Select recipient"}
+        </option>
+
+        {recipients.map(recipient => (
+          <option
+            key={`${recipient.recipient_type}:${recipient.id}`}
+            value={`${recipient.recipient_type}:${recipient.id}`}
+          >
+            {recipient.email} ({recipient.role})
+          </option>
+        ))}
+      </select>
+
+      <label style={{ display: "block", marginTop: 12 }}>
+        {spanish ? "Mensaje" : "Message"}
+      </label>
+
+      <textarea
+        value={message}
+        onChange={event => setMessage(event.target.value)}
+        maxLength={1500}
+        rows={3}
+        style={{ width: "100%", padding: 10, marginTop: 6 }}
+      />
+
+      <button
+        type="button"
+        onClick={() => void send()}
+        disabled={!selected || !message.trim() || sending}
+        style={{ marginTop: 10, padding: 10 }}
+      >
+        {sending
+          ? (spanish ? "Enviando..." : "Sending...")
+          : (spanish ? "Enviar SMS" : "Send SMS")}
+      </button>
+
+      <h4>{spanish ? "Historial" : "Message history"}</h4>
+
+      {messages.length === 0 && (
+        <p>{spanish ? "Sin mensajes." : "No messages."}</p>
+      )}
+
+      {messages.map(item => (
+        <div
+          key={item.id}
+          style={{
+            padding: 10,
+            marginBottom: 8,
+            background: "#24456e",
+            borderRadius: 8,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          <small>{new Date(item.created_at).toLocaleString()}</small>
+          <p>{item.message}</p>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export default function CrewPortal() {
   const [jobs, setJobs] = useState<CrewJob[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,7 +337,7 @@ export default function CrewPortal() {
                   job.zip,
                 ].filter(Boolean).join(", ")}
               </p>
-            </article>
+              <CrewSmsPanel jobId={job.id} spanish={spanish} />\n            </article>
           ))}
         </div>
       </div>

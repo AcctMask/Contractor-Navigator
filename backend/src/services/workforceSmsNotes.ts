@@ -13,6 +13,7 @@ export async function recordWorkforceSmsNote(input: {
   message: string
   providerMessageSid?: string | null
   senderAppUserId?: number | null
+  recipientAppUserId?: number | null
   crewMemberId?: number | null
   subcontractorCompanyId?: number | null
 }) {
@@ -63,6 +64,7 @@ export async function recordWorkforceSmsNote(input: {
         to_role: input.to,
         provider_message_sid: input.providerMessageSid || null,
         sender_app_user_id: input.senderAppUserId ?? null,
+        recipient_app_user_id: input.recipientAppUserId ?? null,
         crew_member_id: input.crewMemberId ?? null,
         subcontractor_company_id: input.subcontractorCompanyId ?? null,
       }),
