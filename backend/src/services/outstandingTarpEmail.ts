@@ -319,20 +319,189 @@ export function formatOfficeTarpReport(
   return lines.join("\n")
 }
 
+
+function escapeReportHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+}
+
+export function formatOfficeTarpHtml(
+  rows: Row[],
+  roster: Subcontractor[]
+): string {
+  const groups = new Map<string, { name: string; jobs: Row[] }>()
+  const normalize = (name: string) => name.trim().toLowerCase()
+
+  for (const sub of roster) {
+    const key = normalize(sub.name)
+    if (!groups.has(key)) groups.set(key, { name: sub.name, jobs: [] })
+  }
+
+  for (const job of rows) {
+    const name = job.subcontractor || "UNASSIGNED"
+    const key = normalize(name)
+    if (!groups.has(key)) groups.set(key, { name, jobs: [] })
+    groups.get(key)!.jobs.push(job)
+  }
+
+  const sorted = [...groups.values()].sort((a, b) =>
+    a.name === "UNASSIGNED" ? 1 :
+    b.name === "UNASSIGNED" ? -1 :
+    a.name.localeCompare(b.name)
+  )
+
+  const e = escapeReportHtml
+  const cell = 'padding:9px 7px;border-bottom:1px solid #e5e7eb;vertical-align:top;'
+  const num = cell + 'text-align:right;white-space:nowrap;'
+  const numeric = (n: number) => `<td style="${num}">${n}</td>`
+  const empty = () => numeric(0)
+  const tr: string[] = []
+
+  const details = (jobs: Row[], title: string) => {
+    if (!jobs.length) return
+
+    tr.push(
+      `<tr><td colspan="5" style="padding:9px 7px;background:#f3f4f6;` +
+      `font-size:11px;font-weight:700;">${e(title)}</td></tr>`
+    )
+
+    for (const job of [...jobs].sort(
+      (a, b) => (b.days ?? -1) - (a.days ?? -1) || a.job_id - b.job_id
+    )) {
+      const url = JOB_URL + job.job_id
+      tr.push(
+        `<tr>` +
+        `<td style="${cell}">` +
+        `<strong>${e(job.customer_name)}</strong> — ` +
+        `<a href="${e(url)}">#${job.job_id}</a>` +
+        `<div style="font-size:11px;color:#6b7280;">${e(job.location || "Address not recorded")}</div>` +
+        (job.crew ? `<div style="font-size:11px;">Crew: ${e(job.crew)}</div>` : "") +
+        `</td>` +
+        empty() + empty() + empty() +
+        numeric(job.days ?? 0) +
+        `</tr>`
+      )
+    }
+  }
+
+  for (const group of sorted) {
+    const open = group.jobs.filter(j => j.section === "not_complete")
+    const photos = group.jobs.filter(j => j.section === "pending_photos")
+
+    tr.push(
+      `<tr style="background:#e8eef8;font-weight:700;">` +
+      `<td style="${cell}">${e(group.name)}</td>` +
+      numeric(open.length) +
+      numeric(photos.length) +
+      numeric(group.jobs.length) +
+      empty() +
+      `</tr>`
+    )
+
+    details(open, "TARP ASSIGNED / NOT COMPLETE")
+    details(photos, "TARP COMPLETE / PHOTOS NEEDED")
+
+    if (!group.jobs.length) {
+      tr.push(
+        `<tr><td style="${cell}color:#6b7280;">No outstanding tarp jobs</td>` +
+        empty() + empty() + empty() + empty() + `</tr>`
+      )
+    }
+  }
+
+  const openTotal = rows.filter(j => j.section === "not_complete").length
+  const photoTotal = rows.filter(j => j.section === "pending_photos").length
+
+  tr.push(
+    `<tr style="background:#dbeafe;font-weight:800;">` +
+    `<td style="${cell}">GRAND TOTAL</td>` +
+    numeric(openTotal) +
+    numeric(photoTotal) +
+    numeric(rows.length) +
+    empty() +
+    `</tr>`
+  )
+
+  const generated = new Date().toLocaleString("en-US", {
+    timeZone: "America/New_York",
+    dateStyle: "medium",
+    timeStyle: "short"
+  })
+
+  return `<!DOCTYPE html>
+<html><body style="margin:0;padding:18px;background:#ffffff;
+font-family:Arial,sans-serif;color:#111827;">
+<div style="max-width:850px;margin:auto;">
+<h2 style="margin:0 0 5px;">GOOD2GO ROOFING &amp; CONSTRUCTION</h2>
+<h3 style="margin:0 0 8px;">Outstanding Tarp Report</h3>
+<p style="font-size:12px;color:#6b7280;">
+Generated: ${e(generated)} Eastern
+</p>
+<table cellpadding="0" cellspacing="0" width="100%"
+style="border-collapse:collapse;font-size:12px;table-layout:auto;">
+<thead><tr style="background:#14294b;color:#ffffff;">
+<th style="padding:10px 7px;text-align:left;">Subcontractor / Customer</th>
+<th style="padding:10px 7px;text-align:right;">Not Complete</th>
+<th style="padding:10px 7px;text-align:right;">Photos Needed</th>
+<th style="padding:10px 7px;text-align:right;">Total</th>
+<th style="padding:10px 7px;text-align:right;">Days</th>
+</tr></thead>
+<tbody>${tr.join("\n")}</tbody>
+</table>
+<p style="font-size:11px;color:#6b7280;margin-top:16px;">
+Operational notification. Photo classification is based on available
+Navigator records. This report does not signify office approval
+or carrier submission.
+</p>
+</div></body></html>`
+}
+
 export async function sendOfficeTarpTest() {
   const [rows, roster] = await Promise.all([
     collectOutstandingTarps(),
     listTarpSubcontractors()
   ])
 
-  const result = await sendAlertEmail(
-    TEST_RECIPIENT,
-    "[TEST] Good2Go Outstanding Tarp Work — Master Report",
-    formatOfficeTarpReport(rows, roster)
-  )
+  const subject = "[TEST] Good2Go Outstanding Tarp Work — Master Report"
+  const html = formatOfficeTarpHtml(rows, roster)
+  const text = formatOfficeTarpReport(rows, roster)
+
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) throw new Error("RESEND_API_KEY is required")
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM ||
+        "Contractor Autopilot <info@g2groofing.com>",
+      to: TEST_RECIPIENT,
+      subject,
+      text,
+      html,
+      reply_to: "info@g2groofing.com"
+    })
+  })
+
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(
+      (result as any)?.message ||
+      `Resend failed with status ${response.status}`
+    )
+  }
 
   return {
-    ...result,
+    ok: true,
+    error: null as string | null,
+    result,
     recipient: TEST_RECIPIENT,
     subcontractors: roster.length,
     total: rows.length,
@@ -341,6 +510,8 @@ export async function sendOfficeTarpTest() {
     ).length,
     pending_photos: rows.filter(
       r => r.section === "pending_photos"
-    ).length
+    ).length,
+    subcontractor_emails_sent: 0,
+    daily_sending_enabled: false
   }
 }
