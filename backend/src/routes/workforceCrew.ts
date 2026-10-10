@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import bcrypt from "bcryptjs"
 import { pool } from "../db/db"
-import { getCurrentUserFromToken } from "../services/authService"
+import { getCurrentUserFromToken, signToken } from "../services/authService"
 import { canInviteCrewToJob } from "../services/workforceCrewInvitationAuthorization"
 import { sendJobCrewSms } from "../services/workforceSmsSend"
 import { sendWorkforceInvitationSms } from "../services/workforceInvitationSms"
@@ -19,6 +19,82 @@ function getToken(request: any): string {
 }
 
 export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
+
+  // Crew-only job list. Authorization is enforced in SQL on every request.
+  app.get("/workforce/crew/my-jobs", async (request: any, reply) => {
+    try {
+      const actor = await getCurrentUserFromToken(getToken(request))
+
+      if (!actor?.is_active || actor.role !== "crew") {
+        return reply.code(403).send({
+          ok: false,
+          error: "Crew account required",
+        })
+      }
+
+      const result = await pool.query(
+        `
+        select distinct
+          j.id,
+          j.external_job_id,
+          j.address1,
+          j.city,
+          j.state,
+          j.zip,
+          a.assigned_at
+        from workforce_crew_members m
+        join workforce_crew_job_assignments a
+          on a.crew_member_id = m.id
+         and a.tenant_id = m.tenant_id
+         and a.subcontractor_company_id =
+             m.subcontractor_company_id
+         and a.status = 'active'
+        join jobs j
+          on j.id = a.job_id
+         and j.tenant_id = a.tenant_id
+        join app_users u
+          on u.id = m.app_user_id
+         and u.tenant_id = m.tenant_id
+         and u.role = 'crew'
+         and u.is_active = true
+        where m.app_user_id = $1
+          and m.tenant_id = $2
+          and m.is_active = true
+          and m.invitation_status = 'active'
+          and exists (
+            select 1
+            from crew_assignments ca
+            join subcontractor_company_users scu
+              on scu.app_user_id = ca.app_user_id
+             and scu.subcontractor_company_id =
+                 m.subcontractor_company_id
+            join app_users sub
+              on sub.id = ca.app_user_id
+             and sub.tenant_id = ca.tenant_id
+             and sub.role = 'subcontractor'
+             and sub.is_active = true
+            where ca.tenant_id = a.tenant_id
+              and ca.job_id = a.job_id
+              and ca.status in ('PENDING', 'active')
+          )
+        order by a.assigned_at desc
+        `,
+        [Number(actor.id), Number(actor.tenant_id)]
+      )
+
+      return reply.send({
+        ok: true,
+        jobs: result.rows,
+      })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false,
+        error: "Could not load crew assignments",
+      })
+    }
+  })
+
   app.post("/workforce/crew/accept-invite", async (request: any, reply) => {
     const token = String(request.body?.token || "")
     const crewActivationPassword =
@@ -178,11 +254,23 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
 
         await client.query("COMMIT")
 
+        const crewUser = crewAppUserId === null ? null : {
+          id: crewAppUserId,
+          tenant_id: Number(member.tenant_id),
+          email: `crew-${member.tenant_id}-${member.id}@crew.navigator.invalid`,
+          full_name: String(member.full_name),
+          mobile_phone: member.mobile_phone,
+          role: "crew",
+          is_active: true,
+          financials_authorized: false,
+        }
+
         return {
           ok: true,
           accepted: true,
-          account_activated: crewAppUserId !== null,
+          account_activated: crewUser !== null,
           crew_member: member,
+          token: crewUser ? signToken(crewUser) : null,
         }
       } catch (error) {
         await client.query("ROLLBACK")

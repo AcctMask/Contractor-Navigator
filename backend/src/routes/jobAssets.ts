@@ -58,8 +58,32 @@ async function requireAssignedJobAccess(
       return null
     }
 
-    if (String(user.role) !== "subcontractor") {
+    // Crew accounts must use separately authorized crew endpoints.
+    // Never inherit tenant-level asset, note, or file permissions.
+    if (String(user.role) === "crew") {
+      reply.code(403)
+      return null
+    }
+
+    // Tenant roles retain their existing job-assets authority.
+    // Subcontractors are restricted to assigned jobs below.
+    // Crew accounts remain denied until participant-scoped
+    // visibility is enforced across notes, SMS and downloads.
+    const tenantRoles = new Set([
+      "platform_owner",
+      "tenant_admin",
+      "admin",
+      "manager",
+      "staff",
+    ])
+
+    if (tenantRoles.has(String(user.role))) {
       return user
+    }
+
+    if (String(user.role) !== "subcontractor") {
+      reply.code(403)
+      return null
     }
 
     await ensureCrewAssignmentUserColumn()

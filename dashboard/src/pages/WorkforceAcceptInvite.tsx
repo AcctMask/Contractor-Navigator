@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { useParams } from "react-router-dom"
+import { useNavigate, useParams } from "react-router-dom"
+import { setToken } from "../lib/auth"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -7,16 +8,27 @@ const API_BASE =
 
 export default function WorkforceAcceptInvite() {
   const { token } = useParams<{ token: string }>()
+  const navigate = useNavigate()
   const [language, setLanguage] = useState<"en" | "es">("en")
   const [loading, setLoading] = useState(false)
   const [accepted, setAccepted] = useState(false)
   const [error, setError] = useState("")
+  const [password, setPassword] = useState("")
 
   const spanish = language === "es"
 
   async function accept() {
     if (!token || !/^[a-f0-9]{64}$/.test(token)) {
       setError(spanish ? "Invitación no válida." : "Invalid invitation.")
+      return
+    }
+
+    if (password.length < 10 || password.length > 128) {
+      setError(
+        spanish
+          ? "La contraseña debe tener entre 10 y 128 caracteres."
+          : "Password must contain 10 to 128 characters."
+      )
       return
     }
 
@@ -29,7 +41,7 @@ export default function WorkforceAcceptInvite() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token }),
+          body: JSON.stringify({ token, password }),
         }
       )
 
@@ -39,7 +51,13 @@ export default function WorkforceAcceptInvite() {
         throw new Error("Invitation could not be accepted")
       }
 
+      if (!result.account_activated || !result.token) {
+        throw new Error("Crew account activation failed")
+      }
+
+      setToken(result.token)
       setAccepted(true)
+      navigate("/crew", { replace: true })
     } catch {
       setError(
         spanish
@@ -76,8 +94,8 @@ export default function WorkforceAcceptInvite() {
           </p>
           <p>
             {spanish
-              ? "Su invitación fue aceptada. Para enviar mensajes y acceder a trabajos, necesita iniciar sesión con una cuenta autorizada de Navigator."
-              : "Your invitation has been accepted. To send messages or access jobs, you must sign in with an authorized Navigator account."}
+              ? "Su cuenta personal fue creada. El acceso a trabajos estará disponible cuando se complete el inicio de sesión."
+              : "Your personal account was created. Job access will be available when sign-in integration is completed."}
           </p>
         </>
       ) : (
@@ -90,7 +108,30 @@ export default function WorkforceAcceptInvite() {
               ? "Su asignación no depende de aceptar esta invitación. Confirmarla es un paso para obtener acceso personal."
               : "Your assignment does not depend on accepting this invitation. Confirmation is a step toward personal access."}
           </p>
-          <button onClick={accept} disabled={loading}>
+          <label style={{ display: "block", marginBottom: 16 }}>
+            {spanish
+              ? "Crear contraseña (mínimo 10 caracteres)"
+              : "Create password (at least 10 characters)"}
+            <input
+              type="password"
+              autoComplete="new-password"
+              minLength={10}
+              maxLength={128}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              style={{
+                display: "block",
+                width: "100%",
+                boxSizing: "border-box",
+                padding: 12,
+                marginTop: 8,
+              }}
+            />
+          </label>
+          <button
+            onClick={accept}
+            disabled={loading || password.length < 10}
+          >
             {loading
               ? (spanish ? "Procesando..." : "Processing...")
               : (spanish ? "Aceptar invitación" : "Accept invitation")}

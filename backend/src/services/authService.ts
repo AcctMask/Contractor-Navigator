@@ -134,7 +134,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-function signToken(user: AppUser) {
+export function signToken(user: AppUser) {
   return jwt.sign(
     {
       sub: user.id,

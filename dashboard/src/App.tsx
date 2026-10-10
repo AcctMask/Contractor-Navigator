@@ -44,6 +44,7 @@ import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 import { openFinancialOperations } from "./lib/financialOperations"
 import WorkforceAcceptInvite from "./pages/WorkforceAcceptInvite"
+import CrewPortal from "./pages/CrewPortal"
 
 function HeaderBar() {
   const location = useLocation()
@@ -504,6 +505,14 @@ export default function App() {
             element={<WorkforceAcceptInvite />}
           />
       <Route path="/sign/:id" element={<SignDocument />} />
+      <Route
+        path="/crew"
+        element={
+          <ProtectedRoute roles={["crew"]} unauthorizedTo="/login">
+            <CrewPortal />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/field" element={<FieldProtectedPage><FieldPortalPage /></FieldProtectedPage>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
