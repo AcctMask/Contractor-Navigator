@@ -720,6 +720,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
+                {selectedStage === "tarp" ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                   {([
                     ["unassigned", language === "es" ? "Lonas sin asignar" : "Unassigned Tarps", unassignedTarps.length],
@@ -732,7 +733,7 @@ export default function DashboardPage() {
                       aria-pressed={tarpFilter === key}
                       onClick={() => {
                         setTarpFilter(tarpFilter === key ? null : key)
-                        setSelectedStage(null)
+                        setSelectedStage("tarp")
                       }}
                       style={{
                         ...panelSearchButton,
@@ -744,10 +745,11 @@ export default function DashboardPage() {
                       {label} ({count})
                     </button>
                   ))}
-                  <Link to="/job-admin" style={panelSearchButton}>
-                    {language === "es" ? "Abrir búsqueda" : "Open Search"}
-                  </Link>
                 </div>
+                ) : null}
+                <Link to="/job-admin" style={panelSearchButton}>
+                  {language === "es" ? "Abrir búsqueda" : "Open Search"}
+                </Link>
               </div>
 
               {error ? (

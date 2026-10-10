@@ -2663,8 +2663,10 @@ export default function JobDetail() {
         </section>
       ) : null}
 
-      {tarpCompletionForm()}
-      {tarpOverrideForm()}
+      <div id="tarp-completion-options">
+        {tarpCompletionForm()}
+        {tarpOverrideForm()}
+      </div>
 
       <section style={card}>
         <h2>Stage / Bot Controls</h2>
@@ -2672,7 +2674,34 @@ export default function JobDetail() {
         <div style={grid2}>
           <div>
             <label style={label}>Stage</label>
-            <select value={stage} onChange={(e) => setStage(e.target.value)} style={input}>
+            <select
+              value={stage}
+              onChange={(e) => {
+                const next = e.target.value
+
+                if (next === "tarp_complete" &&
+                    job?.stage !== "tarp_complete") {
+                  if (job?.stage === "tarp") {
+                    setStage("tarp")
+                    document
+                      .getElementById("tarp-completion-options")
+                      ?.scrollIntoView({
+                        behavior: "smooth",
+                        block: "start",
+                      })
+                    return
+                  }
+
+                  errorToast(
+                    "A job must be in Tarp before using the protected completion workflow"
+                  )
+                  return
+                }
+
+                setStage(next)
+              }}
+              style={input}
+            >
               {getTenantSlug() === "actual-assistant-llc"
                 ? ACTUAL_ASSISTANT_STAGES.map((item) => (
                     <option key={item.value} value={item.value}>
