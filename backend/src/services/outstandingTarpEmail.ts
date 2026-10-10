@@ -515,3 +515,73 @@ export async function sendOfficeTarpTest() {
     daily_sending_enabled: false
   }
 }
+
+
+/**
+ * Daily tarp delivery recipient plan.
+ * Read-only: no emails, database mutations, or scheduling.
+ * All recipients use the existing universal report renderers.
+ */
+export async function previewDailyTarpRecipients() {
+  const tenantId = await getTenantIdBySlug("g2g-roofing")
+  const [rows, roster] = await Promise.all([
+    collectOutstandingTarps(),
+    listTarpSubcontractors()
+  ])
+
+  const users = await pool.query(
+    `select id, email, full_name
+       from app_users
+      where tenant_id = $1
+        and role = 'subcontractor'
+        and is_active = true
+        and nullif(trim(email), '') is not null`,
+    [tenantId]
+  )
+
+  const recipients = users.rows.flatMap(user => {
+    const userId = Number(user.id)
+    const assigned = rows.filter(
+      row => row.subcontractor_id === userId
+    )
+
+    if (!assigned.length) return []
+
+    const name = String(user.full_name || user.email)
+    if (isHarry(name)) return []
+
+    // Same universal layout; permissions restrict input rows.
+    // Use the assigned job's existing display name so company
+    // names remain consistent with the office report.
+    const recipientRoster = [...new Map(
+      assigned.map(row => [
+        row.subcontractor.trim().toLowerCase(),
+        { id: userId, name: row.subcontractor }
+      ])
+    ).values()]
+
+    return [{
+      user_id: userId,
+      email: String(user.email).trim(),
+      job_ids: assigned.map(row => row.job_id),
+      total: assigned.length,
+      html: formatOfficeTarpHtml(assigned, recipientRoster),
+      text: formatOfficeTarpReport(assigned, recipientRoster)
+    }]
+  })
+
+  return {
+    office: {
+      email: TEST_RECIPIENT,
+      total: rows.length,
+      html: formatOfficeTarpHtml(rows, roster),
+      text: formatOfficeTarpReport(rows, roster)
+    },
+    subcontractors: recipients,
+    unassigned_job_ids: rows
+      .filter(row => row.subcontractor_id === null)
+      .map(row => row.job_id),
+    preview_only: true,
+    emails_sent: 0
+  }
+}
