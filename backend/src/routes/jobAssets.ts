@@ -1887,84 +1887,234 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
   // Navi 2.9: manual SMS is tenant-staff only.
   // Subcontractors and crew must use separately authorized workforce SMS routes.
+
+  // SMS-only recipient lookup. Phone numbers remain server-side.
+  app.get("/assets/:tenantSlug/job/:jobId/sms-recipients", async (req: any, reply) => {
+    try {
+      const tenantId = await getTenantIdBySlug(req.params.tenantSlug)
+      const jobId = Number(req.params.jobId)
+      const actor = await getCurrentUserFromToken(getBearerToken(req))
+      if (!actor?.is_active) return reply.code(401).send({ok:false})
+      if (actor.role !== "platform_owner" && Number(actor.tenant_id) !== tenantId)
+        return reply.code(403).send({ok:false})
+
+      const tenantRoles = ["platform_owner","tenant_admin","admin","manager","staff"]
+      const isTenant = tenantRoles.includes(String(actor.role))
+      const isSub = actor.role === "subcontractor"
+      if ((!isTenant && !isSub) || !Number.isSafeInteger(jobId) || jobId <= 0)
+        return reply.code(403).send({ok:false})
+
+      const job = await pool.query(
+        `select j.id, c.phone as customer_phone, j.adjuster_phone
+         from jobs j left join customers c
+           on c.id=j.customer_id and c.tenant_id=j.tenant_id
+         where j.id=$1 and j.tenant_id=$2 limit 1`,
+        [jobId,tenantId]
+      )
+      if (!job.rowCount) return reply.code(404).send({ok:false})
+
+      if (isSub) {
+        const access = await pool.query(
+          `select 1 from crew_assignments
+           where tenant_id=$1 and job_id=$2 and app_user_id=$3
+             and status in ('PENDING','active') limit 1`,
+          [tenantId,jobId,Number(actor.id)]
+        )
+        if (!access.rowCount) return reply.code(403).send({ok:false})
+      }
+
+      const recipients: {type:string;id:number;label:string}[] = []
+
+      if (isTenant) {
+        if (job.rows[0].customer_phone)
+          recipients.push({type:"customer",id:0,label:"Customer"})
+        if (job.rows[0].adjuster_phone)
+          recipients.push({type:"adjuster",id:0,label:"Adjuster"})
+      }
+
+      const staff = await pool.query(
+        `select id,full_name,email from app_users
+         where tenant_id=$1 and is_active=true
+           and role in ('tenant_admin','admin','manager','staff')
+           and mobile_phone is not null and trim(mobile_phone)<>''
+         order by full_name,id`,[tenantId]
+      )
+      for (const u of staff.rows)
+        if (Number(u.id)!==Number(actor.id))
+          recipients.push({type:"staff",id:Number(u.id),
+            label:"Staff: "+String(u.full_name||u.email)})
+
+      if (isTenant) {
+        const subs = await pool.query(
+          `select distinct u.id,u.full_name,u.email
+           from crew_assignments ca
+           join app_users u on u.id=ca.app_user_id
+             and u.tenant_id=ca.tenant_id
+           where ca.tenant_id=$1 and ca.job_id=$2
+             and ca.status in ('PENDING','active')
+             and u.role='subcontractor' and u.is_active=true
+             and nullif(trim(u.mobile_phone),'') is not null`,
+          [tenantId,jobId]
+        )
+        for (const u of subs.rows)
+          recipients.push({type:"sub",id:Number(u.id),
+            label:"Subcontractor: "+String(u.full_name||u.email)})
+
+        const crew = await pool.query(
+          `select distinct m.id,m.full_name
+           from workforce_crew_members m
+           join workforce_crew_job_assignments a
+             on a.crew_member_id=m.id and a.tenant_id=m.tenant_id
+             and a.subcontractor_company_id=m.subcontractor_company_id
+           where a.tenant_id=$1 and a.job_id=$2
+             and a.status='active' and m.is_active=true
+             and nullif(trim(m.mobile_phone),'') is not null`,
+          [tenantId,jobId]
+        )
+        for (const m of crew.rows)
+          recipients.push({type:"crew",id:Number(m.id),
+            label:"Crew: "+String(m.full_name)})
+      }
+
+      return {ok:true,recipients}
+    } catch (err) {
+      req.log.error(err)
+      return reply.code(500).send({ok:false,error:"Recipient lookup failed"})
+    }
+  })
+
   app.post("/assets/:tenantSlug/job/:jobId/send-sms", async (req: any, reply) => {
     try {
-      const { tenantSlug, jobId } = req.params
-      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const tenantId = await getTenantIdBySlug(req.params.tenantSlug)
+      const jobId = Number(req.params.jobId)
       const actor = await getCurrentUserFromToken(getBearerToken(req))
-      if (!actor?.is_active) {
-        return reply.code(401).send({ ok: false, error: "Unauthorized" })
-      }
-      if (
-        !["platform_owner", "tenant_admin", "admin", "manager"].includes(String(actor.role)) ||
-        (actor.role !== "platform_owner" && Number(actor.tenant_id) !== tenantId)
-      ) {
-        return reply.code(403).send({ ok: false, error: "SMS permission denied" })
-      }
-      const { message } = req.body || {}
-      const smsAuthor = String(actor.full_name || actor.email || "Team")
-      const smsMessage = String(message || "").trim()
+      if (!actor?.is_active) return reply.code(401).send({ok:false})
 
-      if (!smsMessage) {
-        throw new Error("SMS message is required")
-      }
+      if (actor.role !== "platform_owner" && Number(actor.tenant_id)!==tenantId)
+        return reply.code(403).send({ok:false,error:"Forbidden"})
 
-      const jobResult = await pool.query(
-        `
-        select
-          j.id,
-          c.phone as customer_phone
-        from jobs j
-        left join customers c on c.id = j.customer_id
-        where j.tenant_id = $1
-          and j.id = $2
-        limit 1
-        `,
-        [tenantId, Number(jobId)]
+      const tenantRoles=["platform_owner","tenant_admin","admin","manager","staff"]
+      const isTenant=tenantRoles.includes(String(actor.role))
+      const isSub=actor.role==="subcontractor"
+      if (!isTenant && !isSub)
+        return reply.code(403).send({ok:false,error:"Forbidden"})
+
+      const message=String(req.body?.message||"").trim()
+      const type=String(req.body?.recipient_type||"customer")
+      const id=Number(req.body?.recipient_id||0)
+
+      if (!Number.isSafeInteger(jobId)||jobId<=0||
+          !message||message.length>1500)
+        return reply.code(400).send({ok:false,error:"Invalid SMS"})
+
+      if (!["customer","adjuster","staff","sub","crew"].includes(type) ||
+          ((type==="customer"||type==="adjuster") && id!==0) ||
+          (!["customer","adjuster"].includes(type) &&
+           (!Number.isSafeInteger(id)||id<=0)))
+        return reply.code(400).send({ok:false,error:"Invalid recipient"})
+
+      if (isSub && type!=="staff")
+        return reply.code(403).send({ok:false,error:"Recipient prohibited"})
+
+      const job=await pool.query(
+        `select j.id,c.phone as customer_phone,j.adjuster_phone
+         from jobs j left join customers c
+           on c.id=j.customer_id and c.tenant_id=j.tenant_id
+         where j.id=$1 and j.tenant_id=$2 limit 1`,
+        [jobId,tenantId]
       )
+      if (!job.rowCount) return reply.code(404).send({ok:false})
 
-      if (!jobResult.rowCount) {
-        throw new Error("Job not found")
+      if (isSub) {
+        const access=await pool.query(
+          `select 1 from crew_assignments
+           where tenant_id=$1 and job_id=$2 and app_user_id=$3
+             and status in ('PENDING','active') limit 1`,
+          [tenantId,jobId,Number(actor.id)]
+        )
+        if (!access.rowCount)
+          return reply.code(403).send({ok:false,error:"Job not assigned"})
       }
 
-      const customerPhone = jobResult.rows[0].customer_phone
+      let phone:string|null=null
+      let recipientLabel=""
 
-      if (!customerPhone) {
-        throw new Error("Customer phone is missing")
+      if (isTenant && type==="customer") {
+        phone=job.rows[0].customer_phone
+        recipientLabel="Customer"
+      } else if (isTenant && type==="adjuster") {
+        phone=job.rows[0].adjuster_phone
+        recipientLabel="Adjuster"
+      } else if (type==="staff" && id!==Number(actor.id)) {
+        const r=await pool.query(
+          `select mobile_phone,full_name,email from app_users
+           where id=$1 and tenant_id=$2 and is_active=true
+             and role in ('tenant_admin','admin','manager','staff')
+           limit 1`,[id,tenantId]
+        )
+        if (r.rowCount) {
+          phone=r.rows[0].mobile_phone
+          recipientLabel=r.rows[0].full_name||r.rows[0].email
+        }
+      } else if (isTenant && type==="sub") {
+        const r=await pool.query(
+          `select u.mobile_phone,u.full_name,u.email
+           from crew_assignments ca
+           join app_users u on u.id=ca.app_user_id
+             and u.tenant_id=ca.tenant_id
+           where ca.tenant_id=$1 and ca.job_id=$2
+             and ca.app_user_id=$3 and ca.status in ('PENDING','active')
+             and u.is_active=true and u.role='subcontractor'
+           limit 1`,[tenantId,jobId,id]
+        )
+        if (r.rowCount) {
+          phone=r.rows[0].mobile_phone
+          recipientLabel=r.rows[0].full_name||r.rows[0].email
+        }
+      } else if (isTenant && type==="crew") {
+        const r=await pool.query(
+          `select m.mobile_phone,m.full_name
+           from workforce_crew_members m
+           join workforce_crew_job_assignments a
+             on a.crew_member_id=m.id and a.tenant_id=m.tenant_id
+             and a.subcontractor_company_id=m.subcontractor_company_id
+           where a.tenant_id=$1 and a.job_id=$2 and m.id=$3
+             and a.status='active' and m.is_active=true limit 1`,
+          [tenantId,jobId,id]
+        )
+        if (r.rowCount) {
+          phone=r.rows[0].mobile_phone
+          recipientLabel=r.rows[0].full_name
+        }
       }
 
-      const smsResult = await sendSMS(String(customerPhone), smsMessage)
+      if (!phone)
+        return reply.code(403).send({
+          ok:false,error:"Recipient not authorized or phone unavailable"
+        })
 
-      const result = await pool.query(
-        `
-        insert into timeline_events
-          (tenant_id, job_id, kind, message, meta, created_at)
-        values
-          ($1,$2,'staff_note',$3,$4::jsonb,now())
-        returning
-          id,
-          message,
-          meta,
-          created_at
-        `,
-        [
-          tenantId,
-          Number(jobId),
-          smsMessage,
-          JSON.stringify({
-            author: smsAuthor,
-            note_type: "manual_sms_sent",
-            channel: "sms",
-            to: customerPhone,
-            sms_result: smsResult,
-          }),
-        ]
+      const sms=await sendSMS(String(phone),message)
+      const note=await pool.query(
+        `insert into timeline_events
+          (tenant_id,job_id,kind,message,meta,created_at)
+         values ($1,$2,'staff_note',$3,$4::jsonb,now())
+         returning id,message,meta,created_at`,
+        [tenantId,jobId,message,JSON.stringify({
+          author:actor.full_name||actor.email||"Team",
+          author_app_user_id:Number(actor.id),
+          note_type:"manual_sms_sent",
+          channel:"sms",
+          recipient_type:type,
+          recipient_id:id,
+          recipient_label:recipientLabel,
+          to:phone,
+          sms_result:sms
+        })]
       )
-
-      return { ok: true, sms: smsResult, note: result.rows[0] }
-    } catch (err: any) {
-      reply.code(400)
-      return { ok: false, error: err?.message || "Send SMS failed" }
+      return {ok:true,sms,note:note.rows[0]}
+    } catch (err) {
+      req.log.error(err)
+      return reply.code(500).send({ok:false,error:"SMS failed"})
     }
   })
 

@@ -96,6 +96,10 @@ export default function JobDetail() {
   const [downloadingPhotos, setDownloadingPhotos] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [smsText, setSmsText] = useState("")
+  const [smsRecipients, setSmsRecipients] = useState<
+    {type:string;id:number;label:string}[]
+  >([])
+  const [smsRecipient, setSmsRecipient] = useState("customer")
   const [stage, setStage] = useState("lead")
   const [crmSubstatus, setCrmSubstatus] = useState("")
   const [botPaused, setBotPaused] = useState(false)
@@ -974,6 +978,30 @@ export default function JobDetail() {
     await loadJob()
   }
 
+
+  useEffect(() => {
+    if (!id || !getToken()) return
+    let cancelled = false
+    fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/sms-recipients`, {
+      headers: {Authorization: `Bearer ${getToken()}`}
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return
+        const recipients = Array.isArray(data.recipients) ? data.recipients : []
+        setSmsRecipients(recipients)
+        setSmsRecipient(
+          recipients.some((r: {type:string}) => r.type === "customer")
+            ? "customer:0"
+            : recipients.length
+              ? `${recipients[0].type}:${recipients[0].id}`
+              : ""
+        )
+      })
+      .catch(() => {})
+    return () => {cancelled = true}
+  }, [id])
+
   async function sendManualSms() {
     if (!id) return
     if (!smsText.trim()) {
@@ -992,6 +1020,8 @@ export default function JobDetail() {
       },
       body: JSON.stringify({
         message: smsText,
+        recipient_type: smsRecipient.split(":")[0],
+        recipient_id: Number(smsRecipient.split(":")[1] || 0),
       }),
     })
 
@@ -2874,6 +2904,19 @@ export default function JobDetail() {
 
       <section style={card}>
         <h2>Send SMS</h2>
+        <label htmlFor="sms-recipient">Send To</label>
+        <select
+          id="sms-recipient"
+          value={smsRecipient}
+          onChange={e => setSmsRecipient(e.target.value)}
+          style={{width:"100%",padding:10,marginBottom:12}}
+        >
+          {smsRecipients.map(r => (
+            <option key={`${r.type}:${r.id}`} value={`${r.type}:${r.id}`}>
+              {r.label}
+            </option>
+          ))}
+        </select>
         <textarea
           value={smsText}
           onChange={(e) => setSmsText(e.target.value)}
@@ -2891,7 +2934,7 @@ export default function JobDetail() {
             />
           </div>
         )}
-        <button onClick={sendManualSms} style={button}>Send Text</button>
+        <button onClick={sendManualSms} disabled={!smsRecipient} style={button}>Send Text</button>
       </section>
 
       <section style={card}>
