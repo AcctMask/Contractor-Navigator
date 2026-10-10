@@ -4,6 +4,9 @@ import { pool } from "../db/db"
 import { getCurrentUserFromToken, signToken } from "../services/authService"
 import { canInviteCrewToJob } from "../services/workforceCrewInvitationAuthorization"
 import { sendJobCrewSms } from "../services/workforceSmsSend"
+import { sendSMS } from "../services/twilioService"
+import { recordWorkforceSmsNote } from "../services/workforceSmsNotes"
+import { translateWorkforceMessage } from "../services/workforceTranslation"
 import { sendWorkforceInvitationSms } from "../services/workforceInvitationSms"
 import { createWorkforceInvitationToken, hashWorkforceInvitationToken } from "../services/workforceInvitationTokens"
 import { recordWorkforceActivity } from "../services/workforceActivityNotes"
@@ -481,6 +484,357 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
       return reply.code(500).send({
         ok: false,
         error: "Could not list assigned crew",
+      })
+    }
+  })
+
+
+  // Existing workforce SMS infrastructure: crew may contact their
+  // assigned subcontractor supervisor or authorized tenant staff.
+  // Customer and adjuster recipients are intentionally unsupported.
+
+  // Participant-scoped workforce SMS history.
+  // Tenant staff: all workforce SMS for their tenant's job.
+  // Subcontractor: only messages they sent or received.
+  // Crew: only messages addressed to or sent by that crew member.
+  app.get("/workforce/crew/:jobId/conversations", async (request: any, reply) => {
+    try {
+      const actor = await getCurrentUserFromToken(getToken(request))
+
+      if (!actor?.is_active) {
+        return reply.code(401).send({ ok: false, error: "Unauthorized" })
+      }
+
+      const jobId = Number(request.params.jobId)
+      const tenantId = Number(actor.tenant_id)
+      const userId = Number(actor.id)
+
+      if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+        return reply.code(400).send({ ok: false, error: "Invalid job" })
+      }
+
+      const tenantRoles = [
+        "platform_owner",
+        "tenant_admin",
+        "admin",
+        "manager",
+        "staff",
+      ]
+
+      const isTenant = tenantRoles.includes(String(actor.role))
+      const isSub = actor.role === "subcontractor"
+      const isCrew = actor.role === "crew"
+
+      if (!isTenant && !isSub && !isCrew) {
+        return reply.code(403).send({ ok: false, error: "Forbidden" })
+      }
+
+      const job = await pool.query(
+        "select id from jobs where id = $1 and tenant_id = $2 limit 1",
+        [jobId, tenantId]
+      )
+
+      if (job.rowCount !== 1) {
+        return reply.code(404).send({ ok: false, error: "Job not found" })
+      }
+
+      let crewMemberId: number | null = null
+
+      if (isCrew) {
+        const membership = await pool.query(
+          `select m.id
+           from workforce_crew_members m
+           join workforce_crew_job_assignments a
+             on a.crew_member_id = m.id
+            and a.tenant_id = m.tenant_id
+            and a.subcontractor_company_id = m.subcontractor_company_id
+           where m.app_user_id = $1
+             and m.tenant_id = $2
+             and m.is_active = true
+             and m.invitation_status = 'active'
+             and a.job_id = $3
+             and a.status = 'active'
+             and exists (
+               select 1
+               from crew_assignments ca
+               join subcontractor_company_users scu
+                 on scu.app_user_id = ca.app_user_id
+                and scu.subcontractor_company_id =
+                    m.subcontractor_company_id
+               join app_users sub
+                 on sub.id = ca.app_user_id
+                and sub.tenant_id = ca.tenant_id
+                and sub.role = 'subcontractor'
+                and sub.is_active = true
+               where ca.tenant_id = a.tenant_id
+                 and ca.job_id = a.job_id
+                 and ca.status in ('PENDING', 'active')
+             )
+           limit 1`,
+          [userId, tenantId, jobId]
+        )
+
+        if (membership.rowCount !== 1) {
+          return reply.code(403).send({
+            ok: false,
+            error: "Crew job assignment required",
+          })
+        }
+
+        crewMemberId = Number(membership.rows[0].id)
+      }
+
+      if (isSub) {
+        const assignment = await pool.query(
+          `select 1
+           from crew_assignments ca
+           join subcontractor_company_users scu
+             on scu.app_user_id = ca.app_user_id
+           where ca.tenant_id = $1
+             and ca.job_id = $2
+             and ca.app_user_id = $3
+             and ca.status in ('PENDING', 'active')
+           limit 1`,
+          [tenantId, jobId, userId]
+        )
+
+        if (assignment.rowCount !== 1) {
+          return reply.code(403).send({
+            ok: false,
+            error: "Subcontractor job assignment required",
+          })
+        }
+      }
+
+      const result = await pool.query(
+        `select
+           te.id,
+           te.kind,
+           te.created_at,
+           te.message,
+           te.meta
+         from timeline_events te
+         where te.tenant_id = $1
+           and te.job_id = $2
+           and (
+             (
+               te.kind = 'workforce_sms'
+               and (
+                 $3::boolean
+                 or (
+                   $4::boolean
+                   and (
+                     (te.meta->>'sender_app_user_id') = $5::text
+                     or (te.meta->>'recipient_app_user_id') = $5::text
+                   )
+                 )
+                 or (
+                   $6::boolean
+                   and (
+                     (te.meta->>'crew_member_id') = $7::text
+                     or (te.meta->>'sender_app_user_id') = $5::text
+                   )
+                 )
+               )
+             )
+             or (
+               te.kind = 'staff_note'
+               and te.meta->>'note_type' = 'manual_sms_sent'
+               and (
+                 $3::boolean
+                 or (
+                   $4::boolean
+                   and (
+                     (te.meta->>'author_app_user_id') = $5::text
+                     or (
+                       te.meta->>'recipient_type' = 'subcontractor'
+                       and (te.meta->>'recipient_id') = $5::text
+                     )
+                   )
+                 )
+                 or (
+                   $6::boolean
+                   and (
+                     (te.meta->>'author_app_user_id') = $5::text
+                     or (
+                       te.meta->>'recipient_type' = 'crew'
+                       and (te.meta->>'recipient_id') = $7::text
+                     )
+                   )
+                 )
+               )
+             )
+           )
+         order by te.created_at asc, te.id asc
+         limit 500`,
+        [
+          tenantId,
+          jobId,
+          isTenant,
+          isSub,
+          String(userId),
+          isCrew,
+          crewMemberId === null ? "" : String(crewMemberId),
+        ]
+      )
+
+      return reply.send({
+        ok: true,
+        job_id: jobId,
+        messages: result.rows,
+      })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false,
+        error: "Could not load workforce conversations",
+      })
+    }
+  })
+
+  app.post("/workforce/crew/:jobId/reply-sms", async (request: any, reply) => {
+    try {
+      const actor = await getCurrentUserFromToken(getToken(request))
+      if (!actor?.is_active || actor.role !== "crew") {
+        return reply.code(403).send({ ok: false, error: "Crew access required" })
+      }
+
+      const jobId = Number(request.params.jobId)
+      const recipientType = String(request.body?.recipient_type || "")
+      const recipientId = Number(request.body?.recipient_id)
+      const message = String(request.body?.message || "").trim()
+
+      if (
+        !Number.isSafeInteger(jobId) || jobId <= 0 ||
+        !Number.isSafeInteger(recipientId) || recipientId <= 0 ||
+        !message || message.length > 1500 ||
+        !["sub", "staff"].includes(recipientType)
+      ) {
+        return reply.code(400).send({ ok: false, error: "Invalid workforce SMS" })
+      }
+
+      const membership = await pool.query(
+        `select m.id, m.subcontractor_company_id
+         from workforce_crew_members m
+         join workforce_crew_job_assignments a
+           on a.crew_member_id = m.id
+          and a.tenant_id = m.tenant_id
+          and a.subcontractor_company_id = m.subcontractor_company_id
+         join jobs j on j.id = a.job_id and j.tenant_id = a.tenant_id
+         where m.app_user_id = $1
+           and m.tenant_id = $2
+           and a.job_id = $3
+           and a.status = 'active'
+           and m.is_active = true
+           and m.invitation_status = 'active'
+           and exists (
+             select 1 from crew_assignments ca
+             join subcontractor_company_users scu
+               on scu.app_user_id = ca.app_user_id
+              and scu.subcontractor_company_id = m.subcontractor_company_id
+             join app_users sub
+               on sub.id = ca.app_user_id
+              and sub.tenant_id = ca.tenant_id
+              and sub.role = 'subcontractor'
+              and sub.is_active = true
+             where ca.tenant_id = a.tenant_id
+               and ca.job_id = a.job_id
+               and ca.status in ('PENDING','active')
+           )
+         limit 1`,
+        [Number(actor.id), Number(actor.tenant_id), jobId]
+      )
+
+      if (membership.rowCount !== 1) {
+        return reply.code(403).send({ ok: false, error: "Job not assigned" })
+      }
+
+      let recipient
+
+      if (recipientType === "sub") {
+        recipient = await pool.query(
+          `select u.id, u.mobile_phone, u.preferred_language
+           from app_users u
+           join subcontractor_company_users scu
+             on scu.app_user_id = u.id
+           join crew_assignments ca
+             on ca.app_user_id = u.id
+            and ca.tenant_id = u.tenant_id
+           where u.id = $1
+             and u.tenant_id = $2
+             and u.role = 'subcontractor'
+             and u.is_active = true
+             and scu.subcontractor_company_id = $3
+             and ca.job_id = $4
+             and ca.status in ('PENDING','active')
+           limit 1`,
+          [
+            recipientId,
+            Number(actor.tenant_id),
+            Number(membership.rows[0].subcontractor_company_id),
+            jobId,
+          ]
+        )
+      } else {
+        recipient = await pool.query(
+          `select id, mobile_phone, preferred_language
+           from app_users
+           where id = $1
+             and tenant_id = $2
+             and is_active = true
+             and role in ('tenant_admin','admin','manager','staff')
+           limit 1`,
+          [recipientId, Number(actor.tenant_id)]
+        )
+      }
+
+      if (
+        recipient.rowCount !== 1 ||
+        !String(recipient.rows[0].mobile_phone || "").trim()
+      ) {
+        return reply.code(403).send({
+          ok: false,
+          error: "Recipient not authorized or unavailable",
+        })
+      }
+
+      const translated = await translateWorkforceMessage({
+        text: message,
+        fromLanguage: actor.preferred_language === "es" ? "es" : "en",
+        toLanguage:
+          recipient.rows[0].preferred_language === "es" ? "es" : "en",
+      })
+
+      const sent = await sendSMS(
+        String(recipient.rows[0].mobile_phone),
+        translated.translated
+      )
+
+      await recordWorkforceSmsNote({
+        tenantId: Number(actor.tenant_id),
+        jobId,
+        from: "crew",
+        to: recipientType === "sub" ? "sub" : "tenant",
+        message: translated.translatedByAi
+          ? `Original: ${translated.original}\nTranslation: ${translated.translated}`
+          : translated.original,
+        providerMessageSid: sent.sid,
+        senderAppUserId: Number(actor.id),
+        crewMemberId: Number(membership.rows[0].id),
+        subcontractorCompanyId:
+          Number(membership.rows[0].subcontractor_company_id),
+      })
+
+      return reply.send({
+        ok: true,
+        messageSid: sent.sid,
+        translated: translated.translatedByAi,
+      })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false,
+        error: "Crew SMS could not be sent",
       })
     }
   })
