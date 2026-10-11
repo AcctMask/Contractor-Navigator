@@ -1338,23 +1338,8 @@ async function runAction(action: ScheduledActionRow) {
 export async function schedulerTickEms(
   limit = 25
 ) {
-  if (isQuietHours()) {
-    const delayed =
-      await pushDueEmsActionsToQuietHoursEnd(limit)
-
-    if (delayed > 0) {
-      console.log(
-        `Quiet hours active — delayed ${delayed} EMS scheduled actions until 7 AM Eastern`
-      )
-    }
-
-    return {
-      ok: true,
-      delayed,
-      quiet_hours: true,
-      lane: "ems_claims",
-    }
-  }
+  // EMS tarp authorizations operate 24/7.
+  // The existing five-minute grace period remains enforced by run_at.
 
   const actions =
     await claimDueEmsActions(limit)
