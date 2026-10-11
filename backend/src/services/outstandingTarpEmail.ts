@@ -393,8 +393,8 @@ export function formatOfficeTarpHtml(
     const photos = group.jobs.filter(j => j.section === "pending_photos")
 
     tr.push(
-      `<tr style="background:#e8eef8;font-weight:700;">` +
-      `<td style="${cell}">${e(group.name)}</td>` +
+      `<tr style="background:#14294b;color:#ffffff;font-weight:800;">` +
+      `<td style="padding:15px 10px;border-top:5px solid #ffffff;font-size:15px;letter-spacing:0.3px;color:#ffffff;"><strong>${e(group.name)}</strong></td>` +
       numeric(open.length) +
       numeric(photos.length) +
       numeric(group.jobs.length) +
