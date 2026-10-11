@@ -83,6 +83,11 @@ async function pushDueActionsToQuietHoursEnd(limit = 250) {
            payload = coalesce(payload,'{}'::jsonb) || $2::jsonb
      where status = 'pending'
        and run_at <= now()
+       and not (
+         action_key = 'initial_external_response'
+         and payload->>'kind' = 'ems_document_package'
+         and payload->>'source' = 'claims_email_intake'
+       )
      returning id, tenant_id, job_id, action_key
     `,
     [
