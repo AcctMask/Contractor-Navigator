@@ -619,8 +619,13 @@ export async function sendDailyOutstandingTarps() {
 
   const easternHour = Number(part("hour"))
 
-  if (["Sat", "Sun"].includes(part("weekday")) ||
-      easternHour < 7 || easternHour > 8) {
+  const catchUpAuthorized =
+  process.env.TARP_CATCHUP_DATE === "2026-10-12" &&
+  `${part("year")}-${part("month")}-${part("day")}` === "2026-10-12"
+
+if (!catchUpAuthorized &&
+    (["Sat", "Sun"].includes(part("weekday")) ||
+     easternHour < 7 || easternHour > 8)) {
     return {
       ok: false,
       skipped: "Outside weekday 7–9 AM Eastern delivery window"
