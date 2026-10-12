@@ -515,6 +515,49 @@ export async function registerBusinessPerformanceV2Routes(
           [tenant.id]
         );
 
+
+        // Navi 3.3: reporting-only lookup; never changes assignments.
+        const directoryResult = await pool.query(`
+          select
+            to_regclass('subcontractor_companies') is not null
+            and to_regclass('subcontractor_company_users') is not null
+            as available
+        `);
+        const hasDirectory = directoryResult.rows[0]?.available === true;
+
+        const navi33ReportAssignments = await pool.query(`
+          select distinct on (ca.job_id)
+            ca.job_id,
+            coalesce(
+              ${hasDirectory ? "sc.company_name," : ""}
+              sub.full_name,
+              ca.crew_name,
+              'Unassigned'
+            ) as assigned_company
+          from crew_assignments ca
+          left join app_users sub
+            on sub.id = ca.app_user_id
+           and sub.tenant_id = ca.tenant_id
+           and sub.role = 'subcontractor'
+           and sub.is_active = true
+          ${hasDirectory ? `
+          left join subcontractor_company_users scu
+            on scu.app_user_id = sub.id
+          left join subcontractor_companies sc
+            on sc.id = scu.subcontractor_company_id
+           and sc.tenant_id = ca.tenant_id
+          ` : ""}
+          where ca.tenant_id = $1
+            and ca.status in ('PENDING', 'active')
+          order by ca.job_id, ca.assigned_at desc nulls last, ca.id desc
+        `, [tenant.id]);
+
+        const assignedCompanyByJob = new Map(
+          navi33ReportAssignments.rows.map((row: any) => [
+            Number(row.job_id), String(row.assigned_company)
+          ])
+        );
+
         const jobs = result.rows.map((row: any) => {
           const firstAA =
             row.first_aa_engagement_at
@@ -560,6 +603,8 @@ export async function registerBusinessPerformanceV2Routes(
             created_at: row.created_at,
             current_stage: row.stage || "unknown",
             job_type: row.job_type || null,
+            assigned_subcontractor:
+              assignedCompanyByJob.get(Number(row.id)) || "Unassigned",
 
             acquisition: {
               source: row.acquisition_source || "Unknown",

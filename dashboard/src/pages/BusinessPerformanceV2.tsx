@@ -17,6 +17,7 @@ type JobRecord = {
   created_at: string;
   current_stage: string;
   job_type: string | null;
+  assigned_subcontractor?: string;
 
   acquisition: {
     source: string;
@@ -452,6 +453,14 @@ export default function BusinessPerformanceV2() {
   const tenant = getTenantSlug();
 
   const [range, setRange] = useState("30d");
+  const [showReportFilters, setShowReportFilters] = useState(false);
+  const [reportJobType, setReportJobType] = useState("");
+  const [reportSource, setReportSource] = useState("");
+  const [reportStage, setReportStage] = useState("");
+  const [reportSubcontractor, setReportSubcontractor] = useState("");
+  const [reportSort, setReportSort] = useState("newest");
+  const [reportCopyStatus, setReportCopyStatus] = useState("");
+
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -553,6 +562,30 @@ export default function BusinessPerformanceV2() {
     }
   }, [data, drilldown, selectedJobIds]);
 
+
+  const reportOptions = (field: (job: JobRecord) => string) =>
+    [...new Set([
+      ...(data?.supporting_jobs.reportable || []),
+      ...(data?.supporting_jobs.activity_only || [])
+    ].map(field))].filter(Boolean).sort();
+
+  const reportJobs = [...visibleJobs].filter(job =>
+    (!reportJobType || (job.job_type || "Unknown") === reportJobType) &&
+    (!reportSource || job.acquisition.source === reportSource) &&
+    (!reportStage || job.current_stage === reportStage) &&
+    (!reportSubcontractor || (job.assigned_subcontractor || "Unassigned") === reportSubcontractor)
+  ).sort((a, b) => {
+    if (reportSort === "oldest")
+      return Date.parse(a.created_at) - Date.parse(b.created_at);
+    if (reportSort === "newest")
+      return Date.parse(b.created_at) - Date.parse(a.created_at);
+    const value = (job: JobRecord) =>
+      reportSort === "source" ? job.acquisition.source :
+      reportSort === "type" ? (job.job_type || "") :
+      job.current_stage;
+    return value(a).localeCompare(value(b));
+  });
+
   if (loading) {
     return <div style={{ padding: 24 }}>Loading report…</div>;
   }
@@ -577,6 +610,9 @@ export default function BusinessPerformanceV2() {
   ) => {
     if (!workScheduledOnly) {
       setSelectedJobIds(jobIds);
+      setTimeout(() =>
+        document.getElementById("navi33-supporting-jobs")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
       return;
     }
 
@@ -623,6 +659,143 @@ export default function BusinessPerformanceV2() {
           <option value="all">All time</option>
         </select>
       </div>
+
+      <section data-report-filter-controls style={{ marginTop: 24 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <h2 style={{ margin: 0, marginRight: 12 }}>Summary Report</h2>
+          <button type="button" onClick={() => setShowReportFilters(!showReportFilters)}>
+            Sort / Filter
+          </button>
+          <button type="button" onClick={async () => {
+            const lines = [
+              `Business Performance — ${data.tenant.name} — ${range}`,
+              `Supporting jobs: ${reportJobs.length}`,
+              `Job Type: ${reportJobType || "All"} | Source: ${reportSource || "All"} | Stage: ${reportStage || "All"}`,
+              "",
+              "Job | Created | Type | Source | Stage | Assigned To | Carrier | Scheduled | Signed | Paid",
+              ...reportJobs.map(j => [
+                j.navigator_job_id, formatDate(j.created_at),
+                j.job_type || "Unknown", j.acquisition.source,
+                j.current_stage, j.assigned_subcontractor || "Unassigned", j.insurance.carrier || "—",
+                j.outcomes.work_scheduled ? "Yes" : "No",
+                j.outcomes.signed ? "Yes" : "No",
+                j.outcomes.paid ? "Yes" : "No"
+              ].join(" | "))
+            ];
+            try {
+              await navigator.clipboard.writeText(lines.join("\n"));
+              setReportCopyStatus("Copied");
+            } catch {
+              setReportCopyStatus("Clipboard unavailable");
+            }
+          }}>Copy</button>
+          <button type="button" onClick={() => {
+            const rows = [
+              ["Job ID", "Customer", "Created", "Job Type", "Source", "Stage", "Assigned To", "Carrier", "Scheduled", "Signed", "Paid"],
+              ...reportJobs.map(j => [
+                j.navigator_job_id, j.job_label || "", j.created_at,
+                j.job_type || "", j.acquisition.source, j.current_stage,
+                j.assigned_subcontractor || "Unassigned", j.insurance.carrier || "", j.outcomes.work_scheduled,
+                j.outcomes.signed, j.outcomes.paid
+              ])
+            ];
+            const csv = rows.map(row =>
+              row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")
+            ).join("\r\n");
+            const url = URL.createObjectURL(
+              new Blob([csv], { type: "text/csv;charset=utf-8" })
+            );
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `business-performance-${range}.csv`;
+            link.click();
+            URL.revokeObjectURL(url);
+          }}>Download CSV</button>
+          <button type="button" onClick={() => {
+            const rows = reportJobs.map(j =>
+              `<tr><td>${j.navigator_job_id}</td><td>${[
+                j.created_at, j.job_type || "", j.acquisition.source,
+                j.current_stage, j.assigned_subcontractor || "Unassigned",
+                j.insurance.carrier || ""
+              ].map(v => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")).join("</td><td>")}</td></tr>`
+            ).join("");
+            const win = window.open("", "_blank");
+            if (!win) return;
+            win.document.write(`<html><head><title>Business Performance</title>
+              <style>body{font-family:Arial;padding:24px}table{border-collapse:collapse;width:100%}
+              td,th{border:1px solid #aaa;padding:6px;text-align:left;font-size:11px}</style>
+              </head><body><h1>Business Performance</h1>
+              <p>${data.tenant.name} — ${range} — ${reportJobs.length} supporting jobs</p>
+              <p>Job Type: ${reportJobType || "All"} |
+              Source: ${reportSource || "All"} |
+              Stage: ${reportStage || "All"} |
+              Assigned To: ${reportSubcontractor || "All"}</p>
+              <table><thead><tr><th>Job</th><th>Created</th><th>Type</th>
+              <th>Source</th><th>Stage</th><th>Assigned To</th><th>Carrier</th>
+              </tr></thead><tbody>${rows}</tbody></table></body></html>`);
+            win.document.close();
+            win.focus();
+            win.print();
+          }}>Print</button>
+          <span role="status">{reportCopyStatus}</span>
+        </div>
+        {showReportFilters && (
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+            <label>Job Type
+              <select value={reportJobType} onChange={e => setReportJobType(e.target.value)}>
+                <option value="">All</option>
+                {reportOptions(j => j.job_type || "Unknown").map(v =>
+                  <option key={v} value={v}>{v}</option>
+                )}
+              </select>
+            </label>
+            <label>Acquisition Source
+              <select value={reportSource} onChange={e => setReportSource(e.target.value)}>
+                <option value="">All</option>
+                {reportOptions(j => j.acquisition.source).map(v =>
+                  <option key={v} value={v}>{v}</option>
+                )}
+              </select>
+            </label>
+            <label>Assigned Subcontractor
+              <select value={reportSubcontractor}
+                onChange={e => setReportSubcontractor(e.target.value)}>
+                <option value="">All</option>
+                {reportOptions(j => j.assigned_subcontractor || "Unassigned").map(v =>
+                  <option key={v} value={v}>{v}</option>
+                )}
+              </select>
+            </label>
+            <label>Stage
+              <select value={reportStage} onChange={e => setReportStage(e.target.value)}>
+                <option value="">All</option>
+                {reportOptions(j => j.current_stage).map(v =>
+                  <option key={v} value={v}>{v}</option>
+                )}
+              </select>
+            </label>
+            <label>Sort
+              <select value={reportSort} onChange={e => setReportSort(e.target.value)}>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="source">Source</option>
+                <option value="type">Job Type</option>
+                <option value="stage">Stage</option>
+              </select>
+            </label>
+            <button type="button" onClick={() => {
+              setReportJobType("");
+              setReportSource("");
+              setReportStage("");
+              setReportSubcontractor("");
+              setReportSort("newest");
+            }}>Clear Filters</button>
+            <div style={{ width: "100%", fontSize: 12, color: "#666" }}>
+              {reportJobs.length} supporting jobs match. Executive totals remain unchanged.
+            </div>
+          </div>
+        )}
+      </section>
 
       <Section
         title="Business Funnel"
@@ -1031,10 +1204,11 @@ export default function BusinessPerformanceV2() {
         </div>
       </Section>
 
+      <div id="navi33-supporting-jobs" />
       <Section
         title="Supporting Jobs"
-        subtitle={`${visibleJobs.length} job${
-          visibleJobs.length === 1 ? "" : "s"
+        subtitle={`${reportJobs.length} job${
+          reportJobs.length === 1 ? "" : "s"
         } support the selected reporting view.`}
       >
         <div style={{ overflowX: "auto" }}>
@@ -1052,6 +1226,7 @@ export default function BusinessPerformanceV2() {
                   "Created",
                   "Stage",
                   "Job Type",
+                  "Assigned To",
                   "Acquisition",
                   "Acquisition Evidence",
                   "Entry",
@@ -1086,7 +1261,7 @@ export default function BusinessPerformanceV2() {
             </thead>
 
             <tbody>
-              {visibleJobs.map((job) => (
+              {reportJobs.map((job) => (
                 <tr key={job.navigator_job_id}>
                   <td style={{ padding: 8 }}>
                     <a
@@ -1106,6 +1281,7 @@ export default function BusinessPerformanceV2() {
                   </td>
                   <td style={{ padding: 8 }}>{job.current_stage}</td>
                   <td style={{ padding: 8 }}>{job.job_type || "—"}</td>
+                  <td style={{ padding: 8 }}>{job.assigned_subcontractor || "Unassigned"}</td>
                   <td style={{ padding: 8 }}>
                     {job.acquisition.source}
                   </td>
@@ -1157,7 +1333,7 @@ export default function BusinessPerformanceV2() {
                 </tr>
               ))}
 
-              {visibleJobs.length === 0 && (
+              {reportJobs.length === 0 && (
                 <tr>
                   <td
                     colSpan={19}
