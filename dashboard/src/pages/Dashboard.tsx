@@ -35,6 +35,7 @@ type DashboardJob = {
   updated_at?: string | null
   customer_name?: string | null
   has_buying_signal?: boolean | null
+  assigned_subcontractor?: { id: number; name: string } | null
   has_active_subcontractor_assignment?: boolean
   has_job_photos?: boolean
   has_tarp_administrative_override?: boolean
@@ -123,6 +124,7 @@ export default function DashboardPage() {
   const [tarpFilter, setTarpFilter] = useState<
     "unassigned" | "assigned" | "photos_needed" | null
   >(null)
+  const [selectedTarpSub, setSelectedTarpSub] = useState<string | null>(null)
 
   useEffect(() => {
     void loadDashboard()
@@ -135,7 +137,7 @@ export default function DashboardPage() {
       setCalendarError("")
 
       const [jobsRes, eventsRes, recentActivityRes] = await Promise.all([
-        fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=250`),
+        fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=5000`),
         fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
@@ -253,17 +255,38 @@ export default function DashboardPage() {
       : sortedJobs
 
   const tarpJobs = sortedJobs.filter((job) => job.stage === "tarp")
-  const unassignedTarps = tarpJobs.filter(
-    (job) => !job.has_active_subcontractor_assignment
-  )
-  const assignedTarps = tarpJobs.filter(
-    (job) => job.has_active_subcontractor_assignment
-  )
+  const hasTarpAssignee = (job: DashboardJob) => {
+    const name = job.assigned_subcontractor?.name?.trim()
+    return Boolean(name && name.toUpperCase() !== "UNASSIGNED")
+  }
+  const unassignedTarps = tarpJobs.filter((job) => !hasTarpAssignee(job))
+  const assignedTarps = tarpJobs.filter(hasTarpAssignee)
   const photosNeeded = sortedJobs.filter(
     (job) => job.stage === "tarp_complete" && !job.has_job_photos && !job.has_tarp_administrative_override
   )
 
-  const displayedJobs = tarpFilter === "unassigned"
+  const tarpSubGroups = (() => {
+    const groups = new Map<string, { label: string; jobs: DashboardJob[] }>()
+    for (const job of assignedTarps) {
+      const sub = job.assigned_subcontractor
+      const name = (sub?.name || "").trim()
+      if (!name || name.toUpperCase() === "UNASSIGNED") continue
+      const label = /posso/i.test(name) ? "Posso"
+        : /davia/i.test(name) ? "Davia"
+        : /good2go|good 2 go|g2g/i.test(name) ? "G2G"
+        : name
+      const key = label.toLowerCase()
+      const group = groups.get(key) || { label, jobs: [] }
+      group.jobs.push(job)
+      groups.set(key, group)
+    }
+    return [...groups.entries()].map(([key, group]) => ({ key, ...group }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  })()
+
+  const displayedJobs = selectedTarpSub !== null
+    ? (tarpSubGroups.find((group) => group.key === selectedTarpSub)?.jobs || [])
+    : tarpFilter === "unassigned"
     ? unassignedTarps
     : tarpFilter === "assigned"
       ? assignedTarps
@@ -273,7 +296,7 @@ export default function DashboardPage() {
           ? [...unassignedTarps, ...assignedTarps]
           : filteredJobs
 
-  const newestJobs = displayedJobs.slice(0, 10)
+  const newestJobs = displayedJobs
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const startOfToday = today.getTime()
@@ -653,6 +676,7 @@ export default function DashboardPage() {
                     key={id}
                     onClick={() => {
                       setTarpFilter(null)
+                      setSelectedTarpSub(null)
                       setSelectedStage(
                         selectedStage === id
                           ? null
@@ -732,6 +756,7 @@ export default function DashboardPage() {
                       type="button"
                       aria-pressed={tarpFilter === key}
                       onClick={() => {
+                        setSelectedTarpSub(null)
                         setTarpFilter(tarpFilter === key ? null : key)
                         setSelectedStage("tarp")
                       }}
@@ -743,6 +768,26 @@ export default function DashboardPage() {
                       }}
                     >
                       {label} ({count})
+                    </button>
+                  ))}
+                  {tarpSubGroups.map((group) => (
+                    <button
+                      key={group.key}
+                      type="button"
+                      aria-pressed={selectedTarpSub === group.key}
+                      onClick={() => {
+                        setTarpFilter(null)
+                        setSelectedTarpSub(selectedTarpSub === group.key ? null : group.key)
+                        setSelectedStage("tarp")
+                      }}
+                      style={{
+                        ...panelSearchButton,
+                        cursor: "pointer",
+                        border: selectedTarpSub === group.key ? "2px solid #2563eb" : "1px solid #cbd5e1",
+                        fontWeight: selectedTarpSub === group.key ? 700 : 500,
+                      }}
+                    >
+                      {group.label} ({group.jobs.length})
                     </button>
                   ))}
                 </div>

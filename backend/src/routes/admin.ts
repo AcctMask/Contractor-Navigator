@@ -823,7 +823,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const from = asNullableString(q.from);
     const to = asNullableString(q.to);
     const lead_source = asNullableString(q.lead_source);
-    const limit = Number(q.limit || 250);
+    const limit = Math.min(Math.max(Number(q.limit || 250), 1), 5000);
 
     const jobs = await pool.query(
       `
@@ -849,10 +849,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         j.marketing_campaign,
         j.created_at,
         j.updated_at,
-        exists (
-          select 1
+        coalesce((
+          select sub.id is not null
           from crew_assignments ca
-          join app_users sub
+          left join app_users sub
             on sub.id = ca.app_user_id
            and sub.tenant_id = ca.tenant_id
            and sub.role = 'subcontractor'
@@ -860,7 +860,36 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           where ca.tenant_id = j.tenant_id
             and ca.job_id = j.id
             and ca.status in ('PENDING', 'active')
-        ) as has_active_subcontractor_assignment,
+          order by ca.assigned_at desc nulls last, ca.id desc
+          limit 1
+        ), false) as has_active_subcontractor_assignment,
+        (
+          select json_build_object(
+            'id', ca.app_user_id,
+            'name', coalesce(sc.company_name, sub.full_name, ca.crew_name, 'UNASSIGNED')
+          )
+          from (
+            select app_user_id, crew_name
+            from crew_assignments
+            where tenant_id = j.tenant_id
+              and job_id = j.id
+              and status in ('PENDING', 'active')
+            order by assigned_at desc nulls last, id desc
+            limit 1
+          ) ca
+          left join app_users sub
+            on sub.id = ca.app_user_id
+           and sub.tenant_id = j.tenant_id
+           and sub.role = 'subcontractor'
+           and sub.is_active = true
+          left join subcontractor_company_users scu
+            on scu.app_user_id = sub.id
+          left join subcontractor_companies sc
+            on sc.id = scu.subcontractor_company_id
+           and sc.tenant_id = j.tenant_id
+          order by sc.id nulls last
+          limit 1
+        ) as assigned_subcontractor,
         exists (
           select 1
           from job_assets ja
