@@ -548,43 +548,71 @@ export async function registerBusinessPerformanceV2Routes(
 
 
         // Navi 3.3: historical subcontractor reporting.
-        // Report the latest recorded assignment without changing records.
+        // Match the existing tarp-report schema compatibility.
+        const assignmentColumns = await pool.query(`
+          select column_name
+          from information_schema.columns
+          where table_schema = current_schema()
+            and table_name = 'crew_assignments'
+        `);
+        const hasAssignmentUserId = assignmentColumns.rows.some(
+          (row: any) => row.column_name === "app_user_id"
+        );
+
         const directoryResult = await pool.query(`
           select
             to_regclass('subcontractor_companies') is not null
             and to_regclass('subcontractor_company_users') is not null
             as available
         `);
-        const hasDirectory = directoryResult.rows[0]?.available === true;
+        const hasDirectory =
+          hasAssignmentUserId &&
+          directoryResult.rows[0]?.available === true;
+
+        const userJoin = hasAssignmentUserId
+          ? `left join app_users sub
+               on sub.id = ca.app_user_id
+              and sub.tenant_id = ca.tenant_id
+              and sub.role = 'subcontractor'`
+          : "";
+
+        const directoryJoin = hasDirectory
+          ? `left join subcontractor_company_users scu
+               on scu.app_user_id = sub.id
+             left join subcontractor_companies sc
+               on sc.id = scu.subcontractor_company_id
+              and sc.tenant_id = ca.tenant_id`
+          : "";
+
+        const nameParts = [
+          ...(hasDirectory
+            ? ["nullif(trim(sc.company_name), '')"]
+            : []),
+          ...(hasAssignmentUserId
+            ? ["nullif(trim(sub.full_name), '')"]
+            : []),
+          "nullif(trim(ca.crew_name), '')",
+          "'Unknown Subcontractor'"
+        ];
 
         const navi33ReportAssignments = await pool.query(`
           select distinct on (ca.job_id)
             ca.job_id,
-            coalesce(
-              ${hasDirectory ? "nullif(trim(sc.company_name), '')," : ""}
-              nullif(trim(sub.full_name), ''),
-              nullif(trim(ca.crew_name), ''),
-              'Unknown Subcontractor'
-            ) as assigned_company
+            coalesce(${nameParts.join(", ")})
+              as assigned_company
           from crew_assignments ca
-          left join app_users sub
-            on sub.id = ca.app_user_id
-           and sub.tenant_id = ca.tenant_id
-           and sub.role = 'subcontractor'
-          ${hasDirectory ? `
-          left join subcontractor_company_users scu
-            on scu.app_user_id = ca.app_user_id
-          left join subcontractor_companies sc
-            on sc.id = scu.subcontractor_company_id
-           and sc.tenant_id = ca.tenant_id
-          ` : ""}
+          ${userJoin}
+          ${directoryJoin}
           where ca.tenant_id = $1
-          order by ca.job_id, ca.assigned_at desc nulls last, ca.id desc
+          order by ca.job_id,
+                   ca.assigned_at desc nulls last,
+                   ca.id desc
         `, [tenant.id]);
 
         const assignedCompanyByJob = new Map(
           navi33ReportAssignments.rows.map((row: any) => [
-            Number(row.job_id), String(row.assigned_company)
+            Number(row.job_id),
+            String(row.assigned_company)
           ])
         );
 
