@@ -547,6 +547,113 @@ export async function registerBusinessPerformanceV2Routes(
         );
 
 
+
+        // Navi 3.3 temporary production assignment investigation.
+        // Remove after the evidence has been collected.
+        if (String((req.query as any)?.assignment_diagnostic || "") ===
+            "navi33-heritage-20261012") {
+          const diagnosticIds = [741, 740, 704, 696, 643, 629];
+
+          const tableNames = [
+            "crew_assignments",
+            "workforce_crew_job_assignments",
+            "subcontractor_companies",
+            "timeline_events"
+          ];
+
+          const schema = await pool.query(`
+            select table_name, column_name
+            from information_schema.columns
+            where table_schema = current_schema()
+              and table_name = any($1::text[])
+            order by table_name, ordinal_position
+          `, [tableNames]);
+
+          const has = (table: string, column: string) =>
+            schema.rows.some((r: any) =>
+              r.table_name === table && r.column_name === column
+            );
+
+          const diagnosticJobs = await pool.query(`
+            select id, stage, created_at
+            from jobs
+            where tenant_id = $1
+              and id = any($2::bigint[])
+            order by id desc
+          `, [tenant.id, diagnosticIds]);
+
+          const crew = await pool.query(`
+            select job_id, id, status, crew_name, assigned_at
+            from crew_assignments
+            where tenant_id = $1
+              and job_id = any($2::bigint[])
+            order by job_id desc, assigned_at desc, id desc
+          `, [tenant.id, diagnosticIds]);
+
+          let workforce: any[] = [];
+          if (has("workforce_crew_job_assignments", "job_id") &&
+              has("workforce_crew_job_assignments",
+                  "subcontractor_company_id")) {
+            const companyJoin =
+              has("subcontractor_companies", "company_name")
+                ? `left join subcontractor_companies sc
+                     on sc.id = a.subcontractor_company_id
+                    and sc.tenant_id = a.tenant_id`
+                : "";
+
+            const companyName =
+              has("subcontractor_companies", "company_name")
+                ? "sc.company_name"
+                : "NULL::text";
+
+            const result = await pool.query(`
+              select a.job_id,
+                     a.subcontractor_company_id,
+                     ${companyName} as company_name,
+                     count(*)::int as assignment_records
+              from workforce_crew_job_assignments a
+              ${companyJoin}
+              where a.tenant_id = $1
+                and a.job_id = any($2::bigint[])
+              group by a.job_id,
+                       a.subcontractor_company_id,
+                       ${companyName}
+              order by a.job_id desc
+            `, [tenant.id, diagnosticIds]);
+
+            workforce = result.rows;
+          }
+
+          const history = await pool.query(`
+            select job_id, kind, created_at,
+                   left(coalesce(message, ''), 180) as message,
+                   meta
+            from timeline_events
+            where tenant_id = $1
+              and job_id = any($2::bigint[])
+              and (
+                kind ilike '%assign%'
+                or kind ilike '%workforce%'
+                or message ilike '%subcontract%'
+                or message ilike '%assign%'
+                or message ilike '%crew%'
+              )
+            order by job_id desc, created_at desc
+            limit 120
+          `, [tenant.id, diagnosticIds]);
+
+          return reply.send({
+            ok: true,
+            investigation: "navi33-heritage-assignment",
+            job_ids: diagnosticIds,
+            jobs: diagnosticJobs.rows,
+            crew_assignments: crew.rows,
+            workforce_company_assignments: workforce,
+            assignment_history: history.rows,
+            schema_columns: schema.rows
+          });
+        }
+
         // Navi 3.3: historical subcontractor reporting.
         // Match the existing tarp-report schema compatibility.
         const assignmentColumns = await pool.query(`
