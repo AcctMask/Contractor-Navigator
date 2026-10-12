@@ -2,9 +2,9 @@ name: Good2Go Daily Outstanding Tarps
 
 on:
   schedule:
-    # 7 AM Eastern: 11 UTC during EDT, 12 UTC during EST.
-    - cron: '0 11 * * 1-5'
-    - cron: '0 12 * * 1-5'
+    # 7:20 AM Eastern: 11:20 UTC during EDT, 12:20 UTC during EST.
+    - cron: '20 11 * * 1-5'
+    - cron: '20 12 * * 1-5'
   workflow_dispatch:
 
 permissions:
