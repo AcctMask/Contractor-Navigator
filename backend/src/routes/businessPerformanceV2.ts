@@ -95,46 +95,77 @@ export async function registerBusinessPerformanceV2Routes(
          * Unknown evidence is preserved as Unknown.
          */
 
+        // Tarp -> Roof: documented tarp stage followed by a signed
+        // non-EMS contract. Never infer conversion from invoicing,
+        // payment, or a roof stage alone.
         const tarpRoofConversionResult = await pool.query(
           `
+            with tarp_entries as (
+              select
+                te.tenant_id,
+                te.job_id,
+                min(te.created_at) as tarp_at
+              from timeline_events te
+              where te.tenant_id = $1
+                and te.kind = 'manual_stage_updated'
+                and coalesce(te.meta->>'stage', '') in (
+                  'tarp',
+                  'tarp_complete'
+                )
+              group by te.tenant_id, te.job_id
+            ),
+            signed_events as (
+              select
+                dp.tenant_id,
+                dp.job_id,
+                dp.signed_at as signed_at
+              from job_document_packages dp
+              where dp.tenant_id = $1
+                and dp.signed_at is not null
+                and dp.package_type <> 'ems_tarp'
+
+              union all
+
+              select
+                te.tenant_id,
+                te.job_id,
+                te.created_at as signed_at
+              from timeline_events te
+              where te.tenant_id = $1
+                and (
+                  (
+                    te.kind = 'document_package_signed'
+                    and coalesce(
+                      te.meta->>'package_type', ''
+                    ) <> 'ems_tarp'
+                  )
+                  or (
+                    te.kind = 'manual_stage_updated'
+                    and coalesce(
+                      te.meta->>'stage', ''
+                    ) = 'contract_signed'
+                  )
+                )
+            ),
+            conversions as (
+              select
+                t.job_id as id,
+                min(s.signed_at) as qualifying_at
+              from tarp_entries t
+              join signed_events s
+                on s.tenant_id = t.tenant_id
+               and s.job_id = t.job_id
+               and s.signed_at > t.tarp_at
+              group by t.job_id
+            )
             select
               count(*)::int as tarp_roof_conversions,
               coalesce(
-                array_agg(conversions.id order by conversions.id),
+                array_agg(id order by id),
                 '{}'::int[]
               ) as tarp_roof_conversion_job_ids
-            from (
-              select
-                j.id,
-                min(qualifying_event.created_at) as qualifying_at
-              from jobs j
-              join lateral (
-                select min(te.created_at) as tarp_at
-                from timeline_events te
-                where te.tenant_id = j.tenant_id
-                  and te.job_id = j.id
-                  and te.kind = 'manual_stage_updated'
-                  and coalesce(te.meta->>'stage', '') = 'tarp_complete'
-              ) tarp_event on tarp_event.tarp_at is not null
-              join lateral (
-                select min(te.created_at) as created_at
-                from timeline_events te
-                where te.tenant_id = j.tenant_id
-                  and te.job_id = j.id
-                  and te.kind = 'manual_stage_updated'
-                  and coalesce(te.meta->>'stage', '') in (
-                    'roof_repair',
-                    'roof_replacement',
-                    'completed',
-                    'invoiced',
-                    'paid'
-                  )
-                  and te.created_at > tarp_event.tarp_at
-              ) qualifying_event on qualifying_event.created_at is not null
-              where j.tenant_id = $1
-              group by j.id
-            ) conversions
-            where conversions.qualifying_at >=
+            from conversions
+            where qualifying_at >=
               case
                 when $2 = '7d' then now() - interval '7 days'
                 when $2 = '30d' then now() - interval '30 days'

@@ -583,6 +583,7 @@ export default function BusinessPerformanceV2() {
     const value = (job: JobRecord) =>
       reportSort === "source" ? job.acquisition.source :
       reportSort === "type" ? (job.job_type || "") :
+      reportSort === "subcontractor" ? (job.assigned_subcontractor || "Unassigned") :
       job.current_stage;
     return value(a).localeCompare(value(b));
   });
@@ -852,6 +853,7 @@ export default function BusinessPerformanceV2() {
                 <option value="source">Source</option>
                 <option value="type">Job Type</option>
                 <option value="stage">Stage</option>
+                <option value="subcontractor">Assigned Subcontractor</option>
               </select>
             </label>
             <button type="button" onClick={() => {
