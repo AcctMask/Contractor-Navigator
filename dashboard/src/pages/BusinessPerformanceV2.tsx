@@ -594,9 +594,29 @@ export default function BusinessPerformanceV2() {
 
   const reportIsReady = generatedReportSignature === currentReportSignature;
 
+  // Job-level evidence; do not infer AA engagement from a signed WA.
+  const navi33AaEvidence = (j: JobRecord) =>
+    j.actual_assistant.engaged ? "Yes" : "No";
+
+  const navi33AaSigned = (j: JobRecord) =>
+    j.actual_assistant.signed_after_engagement ? "Yes" : "No";
+
+  const navi33TarpRoof = (j: JobRecord) => {
+    const ids = data?.funnel.tarp_roof_conversion_job_ids;
+    if (!ids) return "—";
+    return ids.includes(j.navigator_job_id) ? "Yes" : "No";
+  };
+
+  const navi33EvidenceCells = (j: JobRecord) => [
+    navi33AaEvidence(j),
+    navi33AaSigned(j),
+    navi33TarpRoof(j)
+  ];
+
   const reportSummary = [
     `Business Performance — ${data?.tenant.name || tenant} — ${range}`,
     `Supporting jobs: ${reportJobs.length}`,
+    `AA Engaged: ${reportJobs.filter(j => navi33AaEvidence(j) === "Yes").length} | AA Signed After Engagement: ${reportJobs.filter(j => navi33AaSigned(j) === "Yes").length} | Tarp to Roof: ${reportJobs.filter(j => navi33TarpRoof(j) === "Yes").length}`,
     `Job Type: ${reportJobType || "All"} | Source: ${reportSource || "All"} | Stage: ${reportStage || "All"} | Assigned To: ${reportSubcontractor || "All"}`,
     `Estimates: ${reportJobs.filter(j => j.outcomes.estimate).length} | Contracts: ${reportJobs.filter(j => j.outcomes.contract).length} | Signed: ${reportJobs.filter(j => j.outcomes.signed).length} | Production: ${reportJobs.filter(j => j.outcomes.production).length} | Paid: ${reportJobs.filter(j => j.outcomes.paid).length}`
   ].join("\n");
@@ -712,14 +732,15 @@ export default function BusinessPerformanceV2() {
               `Supporting jobs: ${reportJobs.length}`,
               `Job Type: ${reportJobType || "All"} | Source: ${reportSource || "All"} | Stage: ${reportStage || "All"}`,
               "",
-              "Job | Created | Type | Source | Stage | Assigned To | Carrier | Scheduled | Signed | Paid",
+              "Job | Created | Type | Source | Stage | Assigned To | Carrier | Scheduled | Signed | Paid | AA Engaged | AA Signed After Engagement | Tarp to Roof",
               ...reportJobs.map(j => [
                 j.navigator_job_id, formatDate(j.created_at),
                 j.job_type || "Unknown", j.acquisition.source,
                 j.current_stage, j.assigned_subcontractor || "Unassigned", j.insurance.carrier || "—",
                 j.outcomes.work_scheduled ? "Yes" : "No",
                 j.outcomes.signed ? "Yes" : "No",
-                j.outcomes.paid ? "Yes" : "No"
+                j.outcomes.paid ? "Yes" : "No",
+                ...navi33EvidenceCells(j)
               ].join(" | "))
             ];
             try {
@@ -731,12 +752,13 @@ export default function BusinessPerformanceV2() {
           }}>Copy</button>
           <button type="button" onClick={() => {
             const rows = [
-              ["Job ID", "Customer", "Created", "Job Type", "Source", "Stage", "Assigned To", "Carrier", "Scheduled", "Signed", "Paid"],
+              ["Job ID", "Customer", "Created", "Job Type", "Source", "Stage", "Assigned To", "Carrier", "Scheduled", "Signed", "Paid", "AA Engaged", "AA Signed After Engagement", "Tarp to Roof"],
               ...reportJobs.map(j => [
                 j.navigator_job_id, j.job_label || "", j.created_at,
                 j.job_type || "", j.acquisition.source, j.current_stage,
                 j.assigned_subcontractor || "Unassigned", j.insurance.carrier || "", j.outcomes.work_scheduled,
-                j.outcomes.signed, j.outcomes.paid
+                j.outcomes.signed, j.outcomes.paid,
+                ...navi33EvidenceCells(j)
               ])
             ];
             const csv = rows.map(row =>
@@ -756,7 +778,8 @@ export default function BusinessPerformanceV2() {
               `<tr><td>${j.navigator_job_id}</td><td>${[
                 j.created_at, j.job_type || "", j.acquisition.source,
                 j.current_stage, j.assigned_subcontractor || "Unassigned",
-                j.insurance.carrier || ""
+                j.insurance.carrier || "",
+                ...navi33EvidenceCells(j)
               ].map(v => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")).join("</td><td>")}</td></tr>`
             ).join("");
             const win = window.open("", "_blank");
@@ -772,6 +795,7 @@ export default function BusinessPerformanceV2() {
               Assigned To: ${reportSubcontractor || "All"}</p>
               <table><thead><tr><th>Job</th><th>Created</th><th>Type</th>
               <th>Source</th><th>Stage</th><th>Assigned To</th><th>Carrier</th>
+              <th>AA Engaged</th><th>AA Signed After Engagement</th><th>Tarp to Roof</th>
               </tr></thead><tbody>${rows}</tbody></table></body></html>`);
             win.document.close();
             win.focus();
