@@ -547,7 +547,8 @@ export async function registerBusinessPerformanceV2Routes(
         );
 
 
-        // Navi 3.3: reporting-only lookup; never changes assignments.
+        // Navi 3.3: historical subcontractor reporting.
+        // Report the latest recorded assignment without changing records.
         const directoryResult = await pool.query(`
           select
             to_regclass('subcontractor_companies') is not null
@@ -560,26 +561,24 @@ export async function registerBusinessPerformanceV2Routes(
           select distinct on (ca.job_id)
             ca.job_id,
             coalesce(
-              ${hasDirectory ? "sc.company_name," : ""}
-              sub.full_name,
-              ca.crew_name,
-              'Unassigned'
+              ${hasDirectory ? "nullif(trim(sc.company_name), '')," : ""}
+              nullif(trim(sub.full_name), ''),
+              nullif(trim(ca.crew_name), ''),
+              'Unknown Subcontractor'
             ) as assigned_company
           from crew_assignments ca
           left join app_users sub
             on sub.id = ca.app_user_id
            and sub.tenant_id = ca.tenant_id
            and sub.role = 'subcontractor'
-           and sub.is_active = true
           ${hasDirectory ? `
           left join subcontractor_company_users scu
-            on scu.app_user_id = sub.id
+            on scu.app_user_id = ca.app_user_id
           left join subcontractor_companies sc
             on sc.id = scu.subcontractor_company_id
            and sc.tenant_id = ca.tenant_id
           ` : ""}
           where ca.tenant_id = $1
-            and ca.status in ('PENDING', 'active')
           order by ca.job_id, ca.assigned_at desc nulls last, ca.id desc
         `, [tenant.id]);
 
@@ -635,7 +634,7 @@ export async function registerBusinessPerformanceV2Routes(
             current_stage: row.stage || "unknown",
             job_type: row.job_type || null,
             assigned_subcontractor:
-              assignedCompanyByJob.get(Number(row.id)) || "Unassigned",
+              assignedCompanyByJob.get(Number(row.id)) || "No Assignment Record",
 
             acquisition: {
               source: row.acquisition_source || "Unknown",
