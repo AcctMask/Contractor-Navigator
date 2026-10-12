@@ -272,7 +272,7 @@ export default function DashboardPage() {
       const name = (sub?.name || "").trim()
       if (!name || name.toUpperCase() === "UNASSIGNED") continue
       const label = /posso/i.test(name) ? "Posso"
-        : /davia/i.test(name) ? "Davia"
+        : /davi(?:a|la)/i.test(name) ? "Davia"
         : /good2go|good 2 go|g2g/i.test(name) ? "G2G"
         : name
       const key = label.toLowerCase()

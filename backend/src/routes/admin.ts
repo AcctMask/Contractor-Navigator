@@ -825,6 +825,27 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const lead_source = asNullableString(q.lead_source);
     const limit = Math.min(Math.max(Number(q.limit || 250), 1), 5000);
 
+    // Follow the daily tarp email's compatibility approach.
+    // Inspection only: no database/schema changes.
+    const directoryCheck = await pool.query(`
+      select
+        to_regclass('subcontractor_companies') is not null
+        and to_regclass('subcontractor_company_users') is not null
+        as has_directory
+    `);
+    const hasDirectory = directoryCheck.rows[0]?.has_directory === true;
+    const assignmentNameSql = hasDirectory
+      ? "coalesce(sc.company_name, sub.full_name, ca.crew_name, 'UNASSIGNED')"
+      : "coalesce(sub.full_name, ca.crew_name, 'UNASSIGNED')";
+    const assignmentDirectorySql = hasDirectory
+      ? `left join subcontractor_company_users scu
+           on scu.app_user_id = sub.id
+         left join subcontractor_companies sc
+           on sc.id = scu.subcontractor_company_id
+          and sc.tenant_id = j.tenant_id
+         order by sc.id nulls last`
+      : "";
+
     const jobs = await pool.query(
       `
       select
@@ -866,7 +887,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         (
           select json_build_object(
             'id', ca.app_user_id,
-            'name', coalesce(sc.company_name, sub.full_name, ca.crew_name, 'UNASSIGNED')
+            'name', ${assignmentNameSql}
           )
           from (
             select app_user_id, crew_name
@@ -882,12 +903,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
            and sub.tenant_id = j.tenant_id
            and sub.role = 'subcontractor'
            and sub.is_active = true
-          left join subcontractor_company_users scu
-            on scu.app_user_id = sub.id
-          left join subcontractor_companies sc
-            on sc.id = scu.subcontractor_company_id
-           and sc.tenant_id = j.tenant_id
-          order by sc.id nulls last
+${assignmentDirectorySql}
           limit 1
         ) as assigned_subcontractor,
         exists (
