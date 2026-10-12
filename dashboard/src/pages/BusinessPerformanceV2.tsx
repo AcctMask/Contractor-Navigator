@@ -460,6 +460,7 @@ export default function BusinessPerformanceV2() {
   const [reportSubcontractor, setReportSubcontractor] = useState("");
   const [reportSort, setReportSort] = useState("newest");
   const [reportCopyStatus, setReportCopyStatus] = useState("");
+  const [generatedReportSignature, setGeneratedReportSignature] = useState<string | null>(null);
 
   const [data, setData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -586,6 +587,20 @@ export default function BusinessPerformanceV2() {
     return value(a).localeCompare(value(b));
   });
 
+  const currentReportSignature = JSON.stringify({
+    range, drilldown, selectedJobIds, reportJobType, reportSource,
+    reportStage, reportSubcontractor, reportSort
+  });
+
+  const reportIsReady = generatedReportSignature === currentReportSignature;
+
+  const reportSummary = [
+    `Business Performance — ${data?.tenant.name || tenant} — ${range}`,
+    `Supporting jobs: ${reportJobs.length}`,
+    `Job Type: ${reportJobType || "All"} | Source: ${reportSource || "All"} | Stage: ${reportStage || "All"} | Assigned To: ${reportSubcontractor || "All"}`,
+    `Estimates: ${reportJobs.filter(j => j.outcomes.estimate).length} | Contracts: ${reportJobs.filter(j => j.outcomes.contract).length} | Signed: ${reportJobs.filter(j => j.outcomes.signed).length} | Production: ${reportJobs.filter(j => j.outcomes.production).length} | Paid: ${reportJobs.filter(j => j.outcomes.paid).length}`
+  ].join("\n");
+
   if (loading) {
     return <div style={{ padding: 24 }}>Loading report…</div>;
   }
@@ -666,6 +681,31 @@ export default function BusinessPerformanceV2() {
           <button type="button" onClick={() => setShowReportFilters(!showReportFilters)}>
             Sort / Filter
           </button>
+          <button type="button"
+            onClick={() => {
+              setGeneratedReportSignature(currentReportSignature);
+              setReportCopyStatus("");
+            }}
+            style={{
+              background: "#2563eb",
+              color: "white",
+              border: "1px solid #2563eb",
+              borderRadius: 6,
+              padding: "8px 14px",
+              fontWeight: 700
+            }}>
+            Create Report
+          </button>
+          {reportIsReady && (
+            <div style={{
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
+              alignItems: "center",
+              width: "100%",
+              marginTop: 8
+            }}>
+              <strong>Report ready — {reportJobs.length} supporting jobs</strong>
           <button type="button" onClick={async () => {
             const lines = [
               `Business Performance — ${data.tenant.name} — ${range}`,
@@ -736,7 +776,14 @@ export default function BusinessPerformanceV2() {
             win.document.close();
             win.focus();
             win.print();
-          }}>Print</button>
+          }}>Print / Save PDF</button>
+          <button type="button" onClick={() => {
+            window.location.href = `mailto:?subject=${encodeURIComponent(
+              "Business Performance Report — " + (data?.tenant.name || tenant)
+            )}&body=${encodeURIComponent(reportSummary)}`;
+          }}>Send Email</button>
+            </div>
+          )}
           <span role="status">{reportCopyStatus}</span>
         </div>
         {showReportFilters && (
@@ -791,7 +838,7 @@ export default function BusinessPerformanceV2() {
               setReportSort("newest");
             }}>Clear Filters</button>
             <div style={{ width: "100%", fontSize: 12, color: "#666" }}>
-              {reportJobs.length} supporting jobs match. Executive totals remain unchanged.
+              {reportJobs.length} supporting jobs match. Executive dashboard totals remain unchanged; report actions use selected supporting jobs.
             </div>
           </div>
         )}
