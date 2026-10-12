@@ -1,0 +1,14 @@
+name: Scheduler Diagnostic - No Emails
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm GitHub Actions execution
+        run: echo 'GitHub Actions runner started successfully. No emails sent.'
