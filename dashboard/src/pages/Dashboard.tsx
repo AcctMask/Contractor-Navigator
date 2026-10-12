@@ -837,11 +837,6 @@ export default function DashboardPage() {
                 </div>
               )}
 
-              <div style={{ marginTop: 18 }}>
-                <Link to="/job-admin" style={primaryAction}>
-                  {language === "es" ? "Ir al centro de control" : "Go to Command Center"}
-                </Link>
-              </div>
             </div>
 
             <div style={panelCardSide}>
