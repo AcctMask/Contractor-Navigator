@@ -315,7 +315,34 @@ export async function registerBusinessPerformanceV2Routes(
                   'customer'
                 ) <> 'owner'
 
-                ${rangeClause}
+                and (
+                  ${rangeClause.replace("and j.created_at", "j.created_at") || "true"}
+                  or exists (
+                    select 1
+                    from crew_assignments ca
+                    where ca.tenant_id = j.tenant_id
+                      and ca.job_id = j.id
+                      and ${CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL}
+                      and ca.id = (
+                        select latest.id
+                        from crew_assignments latest
+                        where latest.tenant_id = j.tenant_id
+                          and latest.job_id = j.id
+                          and ${CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL.replaceAll("ca.", "latest.")}
+                        order by latest.assigned_at desc nulls last,
+                                 latest.id desc
+                        limit 1
+                      )
+                      and ca.assigned_at >=
+                        case
+                          when $2 = '7d' then now() - interval '7 days'
+                          when $2 = '30d' then now() - interval '30 days'
+                          when $2 = '90d' then now() - interval '90 days'
+                          when $2 = '365d' then now() - interval '365 days'
+                          else '-infinity'::timestamptz
+                        end
+                  )
+                )
             ),
 
             interpreted as (
@@ -543,7 +570,7 @@ export async function registerBusinessPerformanceV2Routes(
             from qualified
             order by created_at desc, id desc
           `,
-          [tenant.id]
+          [tenant.id, range]
         );
 
 
@@ -599,6 +626,7 @@ export async function registerBusinessPerformanceV2Routes(
         const navi33ReportAssignments = await pool.query(`
           select distinct on (ca.job_id)
             ca.job_id,
+            ca.assigned_at,
             coalesce(${nameParts.join(", ")})
               as assigned_company
           from crew_assignments ca
@@ -611,6 +639,14 @@ export async function registerBusinessPerformanceV2Routes(
                    ca.id desc
         `, [tenant.id]);
 
+        const assignedDateByJob = new Map(
+          navi33ReportAssignments.rows.map((row: any) => [
+            Number(row.job_id),
+            row.assigned_at
+          ])
+        );
+
+        const assignedDateByJob = new Map(navi33ReportAssignments.rows.map((r: any) => [Number(r.job_id), r.assigned_at]));
         const assignedCompanyByJob = new Map(
           navi33ReportAssignments.rows.map((row: any) => [
             Number(row.job_id),
@@ -623,6 +659,7 @@ export async function registerBusinessPerformanceV2Routes(
         const historicalAssignments = await pool.query(`
           select distinct on (ca.job_id)
             ca.job_id,
+            ca.assigned_at,
             coalesce(${nameParts.join(", ")})
               as assigned_company
           from crew_assignments ca
@@ -641,7 +678,7 @@ export async function registerBusinessPerformanceV2Routes(
           ])
         );
 
-        const jobs = result.rows.map((row: any) => {
+        const allEvidenceJobs = result.rows.map((row: any) => {
           const firstAA =
             row.first_aa_engagement_at
               ? new Date(row.first_aa_engagement_at)
@@ -684,6 +721,8 @@ export async function registerBusinessPerformanceV2Routes(
             navigator_job_id: numberValue(row.id),
             job_label: row.job_label,
             created_at: row.created_at,
+            assigned_at: assignedDateByJob.get(Number(row.id)) || null,
+            assigned_at: assignedDateByJob.get(Number(row.id)) || null,
             current_stage: row.stage || "unknown",
             job_type: row.job_type || null,
             // Reporting classification only. Never infer a contractor.
@@ -788,7 +827,12 @@ export async function registerBusinessPerformanceV2Routes(
          * it does not manufacture an acquisition source.
          */
 
-        const reportableJobs = jobs.filter((job: any) => {
+        const days = { "7d": 7, "30d": 30, "90d": 90, "365d": 365 } as Record<string, number>;
+        const cutoff = days[range] ? Date.now() - days[range] * 86400000 : -Infinity;
+        const inPeriod = (v: any) => Boolean(v) && new Date(v).getTime() >= cutoff;
+        const jobs = allEvidenceJobs.filter((j: any) => range === "all" || inPeriod(j.created_at));
+        const assignmentJobs = allEvidenceJobs.filter((j: any) => j.assigned_at && (range === "all" || inPeriod(j.assigned_at)));
+        const isReportable = (job: any) => {
           const hasAcquisition =
             job.acquisition.source !== "Unknown";
 
@@ -816,7 +860,8 @@ export async function registerBusinessPerformanceV2Routes(
             hasOutcome ||
             hasBuyingSignal
           );
-        });
+        };
+        const reportableJobs = jobs.filter(isReportable);
 
         const activityOnlyJobs = jobs.filter(
           (job: any) =>
@@ -1145,7 +1190,8 @@ export async function registerBusinessPerformanceV2Routes(
 
           supporting_jobs: {
             reportable: reportableJobs,
-            activity_only: activityOnlyJobs
+            activity_only: activityOnlyJobs,
+            assignment_reportable: assignmentJobs
           }
         });
       } catch (error: any) {

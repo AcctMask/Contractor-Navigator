@@ -18,6 +18,7 @@ type JobRecord = {
   current_stage: string;
   job_type: string | null;
   assigned_subcontractor?: string;
+  assigned_at?: string | null;
 
   acquisition: {
     source: string;
@@ -120,6 +121,7 @@ type ReportData = {
   supporting_jobs: {
     reportable: JobRecord[];
     activity_only: JobRecord[];
+    assignment_reportable?: JobRecord[];
   };
 };
 
@@ -459,6 +461,7 @@ export default function BusinessPerformanceV2() {
   const [reportStage, setReportStage] = useState("");
   const [reportSubcontractor, setReportSubcontractor] = useState("");
   const [reportSort, setReportSort] = useState("newest");
+  const [reportBasis, setReportBasis] = useState("created");
   const [reportCopyStatus, setReportCopyStatus] = useState("");
   const [generatedReportSignature, setGeneratedReportSignature] = useState<string | null>(null);
 
@@ -564,22 +567,24 @@ export default function BusinessPerformanceV2() {
   }, [data, drilldown, selectedJobIds]);
 
 
+  const reportPopulation = reportBasis === "assigned" ? (data?.supporting_jobs.assignment_reportable || []) : visibleJobs;
+
   const reportOptions = (field: (job: JobRecord) => string) =>
     [...new Set([
       ...(data?.supporting_jobs.reportable || []),
       ...(data?.supporting_jobs.activity_only || [])
     ].map(field))].filter(Boolean).sort();
 
-  const reportJobs = [...visibleJobs].filter(job =>
+  const reportJobs = [...reportPopulation].filter(job =>
     (!reportJobType || (job.job_type || "Unknown") === reportJobType) &&
     (!reportSource || job.acquisition.source === reportSource) &&
     (!reportStage || job.current_stage === reportStage) &&
     (!reportSubcontractor || (job.assigned_subcontractor || "Unassigned") === reportSubcontractor)
   ).sort((a, b) => {
-    if (reportSort === "oldest")
-      return Date.parse(a.created_at) - Date.parse(b.created_at);
-    if (reportSort === "newest")
-      return Date.parse(b.created_at) - Date.parse(a.created_at);
+    const dateOf = (job: JobRecord) =>
+      Date.parse((reportBasis === "assigned" ? job.assigned_at : job.created_at) || job.created_at);
+    if (reportSort === "oldest") return dateOf(a) - dateOf(b);
+    if (reportSort === "newest") return dateOf(b) - dateOf(a);
     const value = (job: JobRecord) =>
       reportSort === "source" ? job.acquisition.source :
       reportSort === "type" ? (job.job_type || "") :
@@ -614,7 +619,7 @@ export default function BusinessPerformanceV2() {
 
   const currentReportSignature = JSON.stringify({
     range, drilldown, selectedJobIds, reportJobType, reportSource,
-    reportStage, reportSubcontractor, reportSort
+    reportStage, reportSubcontractor, reportSort, reportBasis
   });
 
   const reportIsReady = generatedReportSignature === currentReportSignature;
@@ -843,6 +848,12 @@ export default function BusinessPerformanceV2() {
         </div>
         {showReportFilters && (
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 14 }}>
+            <label>Report Date Basis
+              <select value={reportBasis} onChange={e => setReportBasis(e.target.value)}>
+                <option value="created">Job Created (Sales)</option>
+                <option value="assigned">Subcontractor Assigned (Operations)</option>
+              </select>
+            </label>
             <label>Job Type
               <select value={reportJobType} onChange={e => setReportJobType(e.target.value)}>
                 <option value="">All</option>
