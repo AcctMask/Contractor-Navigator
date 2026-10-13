@@ -588,6 +588,30 @@ export default function BusinessPerformanceV2() {
     return value(a).localeCompare(value(b));
   });
 
+
+  // Navi 3.4: derive management totals from selected supporting jobs.
+  const subcontractorSummary = Array.from(
+    reportJobs.reduce((groups, job) => {
+      const name = job.assigned_subcontractor || "Assignment Not Recorded";
+      const row = groups.get(name) || {
+        name, total: 0, outstanding: 0, completed: 0,
+        invoiced: 0, paid: 0, jobIds: [] as number[]
+      };
+      row.total++;
+      if (job.current_stage === "tarp") row.outstanding++;
+      if (job.current_stage === "tarp_complete") row.completed++;
+      if (job.outcomes.invoiced) row.invoiced++;
+      if (job.outcomes.paid) row.paid++;
+      row.jobIds.push(job.navigator_job_id);
+      groups.set(name, row);
+      return groups;
+    }, new Map<string, {
+      name: string; total: number; outstanding: number;
+      completed: number; invoiced: number; paid: number; jobIds: number[]
+    }>())
+    .values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
+
   const currentReportSignature = JSON.stringify({
     range, drilldown, selectedJobIds, reportJobType, reportSource,
     reportStage, reportSubcontractor, reportSort
@@ -794,6 +818,12 @@ export default function BusinessPerformanceV2() {
               Source: ${reportSource || "All"} |
               Stage: ${reportStage || "All"} |
               Assigned To: ${reportSubcontractor || "All"}</p>
+              <h2>Subcontractor Performance Summary</h2>
+              <p>Outcome categories may overlap.</p>
+              <table><thead><tr><th>Assigned Subcontractor</th><th>Total Jobs</th><th>Outstanding</th><th>Completed</th><th>Invoiced</th><th>Paid</th><th>Assignment Evidence</th></tr></thead>
+              <tbody>${subcontractorSummary.map(r => `<tr><td>${r.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td><td>${r.total}</td><td>${r.outstanding}</td><td>${r.completed}</td><td>${r.invoiced}</td><td>${r.paid}</td><td>${r.name === "Not Assigned" || r.name === "Assignment Not Recorded" ? r.name : "Recorded assignment"}</td></tr>`).join("")}
+              <tr><th>Grand Total</th><th>${reportJobs.length}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.outstanding,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.completed,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.invoiced,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.paid,0)}</th><th>Selected jobs</th></tr></tbody></table>
+              <h2>Supporting Jobs</h2>
               <table><thead><tr><th>Job</th><th>Created</th><th>Type</th>
               <th>Source</th><th>Stage</th><th>Assigned To</th><th>Carrier</th>
               <th>AA Engaged</th><th>AA Signed After Engagement</th><th>Tarp to Roof</th>
@@ -1276,6 +1306,42 @@ export default function BusinessPerformanceV2() {
           />
         </div>
       </Section>
+
+
+      <section style={{ marginTop: 24, marginBottom: 24 }}>
+        <h2>Subcontractor Performance Summary</h2>
+        <p>{reportJobs.length} selected supporting jobs. Outcome columns may overlap.</p>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              {["Assigned Subcontractor", "Total Jobs", "Outstanding", "Completed", "Invoiced", "Paid", "Assignment Evidence"].map(h =>
+                <th key={h} style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #aaa" }}>{h}</th>
+              )}
+            </tr></thead>
+            <tbody>
+              {subcontractorSummary.map(r =>
+                <tr key={r.name}>
+                  <td style={{ padding: 8 }}>{r.name}</td>
+                  {[r.total, r.outstanding, r.completed, r.invoiced, r.paid].map((n, i) =>
+                    <td key={i} style={{ padding: 8 }}>{n}</td>
+                  )}
+                  <td style={{ padding: 8 }}>
+                    {r.name === "Not Assigned" || r.name === "Assignment Not Recorded"
+                      ? r.name : "Recorded assignment"}
+                  </td>
+                </tr>
+              )}
+              <tr>
+                <td><strong>Grand Total</strong></td>
+                {[reportJobs.length, ...(["outstanding", "completed", "invoiced", "paid"] as const).map(k =>
+                  subcontractorSummary.reduce((n, r) => n + r[k], 0)
+                )].map((n, i) => <td key={i}><strong>{n}</strong></td>)}
+                <td>Selected jobs</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div id="navi33-supporting-jobs" />
       <Section
