@@ -605,6 +605,7 @@ export async function registerBusinessPerformanceV2Routes(
           ${userJoin}
           ${directoryJoin}
           where ca.tenant_id = $1
+            and ca.status in ('PENDING', 'active')
           order by ca.job_id,
                    ca.assigned_at desc nulls last,
                    ca.id desc
