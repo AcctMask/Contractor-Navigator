@@ -397,11 +397,19 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
 
       {loading && <p>Loading photos...</p>}
 
-      {photos.length > 3 && (
-        <button onClick={() => setExpanded(value => !value)}>
-          {expanded ? "Show Fewer Photos" : `View All ${photos.length} Photos`}
-        </button>
-      )}
+      {photos.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(value => !value)}
+            aria-expanded={expanded}
+          >
+            {expanded
+              ? "Finish Editing / Show Recent Photos"
+              : photos.length > 3
+                ? `View All ${photos.length} Photos / Edit`
+                : "Edit Photos"}
+          </button>
+        )}
 
       <div style={{
         display: "grid",
