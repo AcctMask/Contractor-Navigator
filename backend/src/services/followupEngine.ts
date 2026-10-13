@@ -3339,6 +3339,37 @@ export async function handleInboundMessageByTenantSlug(
       })
     }
 
+    if (!isHighIntent) {
+      const customerReplyAlertText =
+        `CUSTOMER RESPONSE ALERT\n` +
+        `Customer: ${job.customer_name || "Unknown Customer"}\n` +
+        `Job ID: ${jobId}\n` +
+        `Phone: ${callbackNumber || from || "Unknown"}\n\n` +
+        `Message:\n${trimmed}\n\n` +
+        `Next: Review this customer response and reply if needed.`
+
+      const customerReplyEmailResult = alertTargets.alert_email_to
+        ? await sendAlertEmail(
+            alertTargets.alert_email_to,
+            `Customer response: ${job.customer_name || `Job #${jobId}`}`,
+            customerReplyAlertText
+          )
+        : { skipped: true, reason: "missing_alert_email_to" }
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "customer_reply_alert_routed",
+        "Customer response alert processed in sales-intent branch",
+        {
+          channel: "sms",
+          intent: salesIntent,
+          alert_email_to: alertTargets.alert_email_to,
+          email_result: customerReplyEmailResult,
+        }
+      )
+    }
+
     /*
      * The stage/alert boundary is complete. Only now send the immediate
      * sales-intent response. Subsequent follow-up scheduling sees the
