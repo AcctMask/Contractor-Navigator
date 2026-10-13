@@ -6,6 +6,7 @@ import {
   saveJobAssetByTenantSlug,
 } from "./jobAssetsService"
 import { buildDocumentSnapshotHtml } from "./documentTemplates/proposalContractHtml"
+import { G2G_TERMS_AND_CONDITIONS } from "./documentTemplates/g2gTerms"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import fs from "fs"
 import path from "path"
@@ -988,6 +989,7 @@ export async function createDocumentPackageByTenantSlug(
         ),
     }
   } else if (packageType === "insurance_contract") {
+    const insuranceContractTerms = "INSURANCE CLAIM — SCOPE, PRICING AND AUTHORIZATION\n\nThis agreement relates to an insurance claim for damage to the property identified above. At the time of signing, the final scope of work and contract amount may not yet be established. The scope and pricing will be determined following the insurance carrier's coverage decision, review of the approved scope of repairs, and any additional work agreed upon by the property owner and Good2Go Roofing & Construction LLC.\n\nBy signing this agreement, the property owner authorizes Good2Go Roofing & Construction LLC to communicate with the insurance carrier and its representatives regarding the proposed repairs, provide estimates and supporting documentation, request claim status updates, and assist in expediting the review process. This authorization does not permit Good2Go to negotiate or settle the insurance claim on the property owner's behalf.\n\nGood2Go Roofing & Construction LLC does not guarantee insurance coverage, claim approval, or payment by the carrier. Any applicable deductible, uncovered work, or additional customer financial responsibility will be addressed in accordance with the agreement and applicable law." + "\n\n" + G2G_TERMS_AND_CONDITIONS
     documentTitle = `Insurance Contract - ${customerName}`
     templateSource = "Roof Contract_ Bruno,J Claim#_ (1).pdf"
     payload = {
@@ -1007,6 +1009,7 @@ export async function createDocumentPackageByTenantSlug(
       discount_reason: details?.discount_reason || null,
       vip_benefits_included: true,
       estimator_remarks: details?.estimator_remarks || null,
+      terms_and_conditions: insuranceContractTerms,
       document_display_mode: "insurance_contract",
       ready_for_signature: !!String(job.job_claim_number ?? '').trim(),
     }

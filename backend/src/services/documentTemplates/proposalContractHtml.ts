@@ -24,7 +24,9 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
   const termsAndConditions =
     isEmsWorkAuthorization
       ? String(payload.terms_and_conditions || "")
-      : G2G_TERMS_AND_CONDITIONS
+      : displayMode === "insurance_contract"
+        ? String(payload.terms_and_conditions || G2G_TERMS_AND_CONDITIONS)
+        : G2G_TERMS_AND_CONDITIONS
 
   const isHeritageEmsWorkAuthorization =
     displayMode === "heritage_ems_work_authorization"
