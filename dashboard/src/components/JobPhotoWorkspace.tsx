@@ -403,10 +403,19 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
         </button>
       )}
 
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: expanded
+          ? "repeat(2, minmax(0, 1fr))"
+          : "repeat(3, minmax(0, 1fr))",
+        gap: 14,
+        marginTop: 14,
+        alignItems: "start",
+      }}>
       {(expanded ? photos : photos.slice(0, 3)).map(photo => (
         <article key={photo.id} style={{
           padding: 12,
-          marginTop: 12,
+          minWidth: 0,
           background: "#1c3b61",
           borderRadius: 10,
         }}>
@@ -416,14 +425,23 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
               alt={photo.note || photo.original_name || "Job photo"}
               style={{
                 width: "100%",
-                maxHeight: 350,
+                height: expanded ? 250 : 160,
                 objectFit: "contain",
                 transform: `rotate(${rotations[photo.id] || 0}deg)`,
               }}
             />
           )}
 
-          <p>{photo.original_name || `Photo ${photo.id}`}</p>
+          <p style={{ overflowWrap: "anywhere", fontWeight: 700 }}>{photo.original_name || `Photo ${photo.id}`}</p>
+          {!expanded && (
+            <div>
+              <p>{descriptions[photo.id] || "No description"}</p>
+              <p>Category: {categories[photo.id] || "Not specified"}</p>
+              <button disabled={!!busy} onClick={() => void downloadPhoto(photo)}>Download Photo</button>
+            </div>
+          )}
+          {expanded && (
+            <div style={{ display: "grid", gap: 8 }}>
 
           <label>
             Description
@@ -496,8 +514,11 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
               Download Photo
             </button>
           </div>
-        </article>
+                      </div>
+            )}
+</article>
       ))}
+      </div>
 
       {photos.length > 0 && (
         <div style={{
