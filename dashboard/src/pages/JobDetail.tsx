@@ -8,6 +8,7 @@ import { openFinancialOperations } from "../lib/financialOperations"
 import { stagePresentation } from "../lib/stagePresentation"
 import WorkforceCrewInviteForm, { type CrewInviteDetails } from "../components/WorkforceCrewInviteForm"
 import WorkforceAssignedCrew from "../components/WorkforceAssignedCrew"
+import JobPhotoWorkspace from "../components/JobPhotoWorkspace"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
@@ -2180,6 +2181,12 @@ export default function JobDetail() {
 
             <section style={card}>
               <h2>Upload Files / Photos</h2>
+              {id && Number.isInteger(Number(id)) && Number(id) > 0 ? (
+                <JobPhotoWorkspace
+                  tenantSlug={getTenantSlug()}
+                  jobId={Number(id)}
+                />
+              ) : null}
 
               <label style={label}>Upload Category</label>
               <select

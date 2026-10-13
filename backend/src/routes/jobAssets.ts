@@ -113,6 +113,93 @@ async function requireAssignedJobAccess(
   }
 }
 
+
+// Photo-only authority. Never use this function for notes,
+// documents, SMS, financial information, or administration.
+async function requireAssignedPhotoAccess(
+  request: any,
+  reply: any,
+  tenantId: number,
+  jobId: number
+) {
+  const token = getBearerToken(request)
+
+  if (!token) {
+    reply.code(401)
+    return null
+  }
+
+  const user = await getCurrentUserFromToken(token)
+
+  if (!user?.is_active) {
+    reply.code(401)
+    return null
+  }
+
+  if (
+    String(user.role) !== "platform_owner" &&
+    Number(user.tenant_id) !== tenantId
+  ) {
+    reply.code(403)
+    return null
+  }
+
+  if (String(user.role) !== "crew") {
+    return requireAssignedJobAccess(
+      request,
+      reply,
+      tenantId,
+      jobId
+    )
+  }
+
+  const assignment = await pool.query(
+    `
+    select 1
+    from workforce_crew_members m
+    join workforce_crew_job_assignments a
+      on a.crew_member_id = m.id
+      and a.tenant_id = m.tenant_id
+      and a.subcontractor_company_id =
+          m.subcontractor_company_id
+      and a.status = 'active'
+    join jobs j
+      on j.id = a.job_id
+      and j.tenant_id = a.tenant_id
+    where m.app_user_id = $1
+      and m.tenant_id = $2
+      and a.job_id = $3
+      and m.is_active = true
+      and m.invitation_status = 'active'
+      and exists (
+        select 1
+        from crew_assignments ca
+        join subcontractor_company_users scu
+          on scu.app_user_id = ca.app_user_id
+          and scu.subcontractor_company_id =
+              m.subcontractor_company_id
+        join app_users sub
+          on sub.id = ca.app_user_id
+          and sub.tenant_id = ca.tenant_id
+          and sub.role = 'subcontractor'
+          and sub.is_active = true
+        where ca.tenant_id = a.tenant_id
+          and ca.job_id = a.job_id
+          and ca.status in ('PENDING', 'active')
+      )
+    limit 1
+    `,
+    [Number(user.id), tenantId, jobId]
+  )
+
+  if (!assignment.rowCount) {
+    reply.code(403)
+    return null
+  }
+
+  return user
+}
+
 async function ensureJobExists(tenantId: number, jobId: number) {
   const result = await pool.query(
     `select id from jobs where tenant_id = $1 and id = $2 limit 1`,
@@ -180,7 +267,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         from job_assets
         where tenant_id = $1
           and job_id = $2
-          and ($3::bigint is null or created_by_user_id = $3)
+          and (
+            $3::bigint is null
+            or asset_type = 'photo'
+            or mime_type like 'image/%'
+            or created_by_user_id = $3
+          )
         order by created_at desc, id desc
         `,
         [
@@ -277,6 +369,153 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
     }
   })
 
+
+  // Assigned field users see the complete job photo history.
+  // Documents and private notes are never returned here.
+  app.get("/assets/:tenantSlug/job/:jobId/photos", async (req: any, reply) => {
+    try {
+      await ensureAssetCategoryColumn()
+
+      const { tenantSlug, jobId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+
+      const user = await requireAssignedPhotoAccess(
+        req,
+        reply,
+        tenantId,
+        numericJobId
+      )
+
+      if (!user) {
+        return { ok: false, error: "Not authorized" }
+      }
+
+      const result = await pool.query(
+        `
+        select
+          id,
+          job_id,
+          asset_type,
+          asset_category,
+          original_name,
+          mime_type,
+          file_size_bytes,
+          note,
+          uploaded_by,
+          created_by_user_id,
+          created_at
+        from job_assets
+        where tenant_id = $1
+          and job_id = $2
+          and (
+            asset_type = 'photo'
+            or mime_type like 'image/%'
+          )
+        order by created_at desc, id desc
+        `,
+        [tenantId, numericJobId]
+      )
+
+      const sequenceResult = await pool.query(
+          `
+          select meta
+          from timeline_events
+          where tenant_id = $1
+            and job_id = $2
+            and kind = 'photo_report_sequence_saved'
+          order by created_at desc, id desc
+          limit 1
+          `,
+          [tenantId, numericJobId]
+        )
+
+        const savedSequence = sequenceResult.rows[0]?.meta?.photo_ids
+
+        return {
+        ok: true,
+        assets: result.rows.map((asset: any) => ({
+          ...asset,
+          original_name: asset.original_name || "photo",
+          mime_type: asset.mime_type || "",
+          size_bytes: asset.file_size_bytes || null,
+          download_url: `/assets/${tenantSlug}/file/${asset.id}`,
+        })),
+          photo_sequence: Array.isArray(savedSequence) ? savedSequence : [],
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return {
+        ok: false,
+        error: err?.message || "Load photos failed",
+      }
+    }
+  })
+
+
+  app.get("/assets/:tenantSlug/job/:jobId/photo-report/:assetId/download", async (req: any, reply) => {
+    try {
+      const { tenantSlug, jobId, assetId } = req.params
+      const tenantId = await getTenantIdBySlug(tenantSlug)
+      const numericJobId = Number(jobId)
+      const numericAssetId = Number(assetId)
+
+      if (!Number.isInteger(numericJobId) || numericJobId <= 0 ||
+          !Number.isInteger(numericAssetId) || numericAssetId <= 0) {
+        reply.code(400)
+        return { ok: false, error: "Invalid job or report ID" }
+      }
+
+      const user = await requireAssignedPhotoAccess(req, reply, tenantId, numericJobId)
+      if (!user) return { ok: false, error: "Not authorized" }
+
+      const result = await pool.query(
+        `
+        select a.original_name, a.stored_path
+        from job_assets a
+        where a.tenant_id = $1
+          and a.job_id = $2
+          and a.id = $3
+          and a.mime_type = 'application/pdf'
+          and exists (
+            select 1
+            from timeline_events e
+            where e.tenant_id = a.tenant_id
+              and e.job_id = a.job_id
+              and e.kind = 'photo_report_generated'
+              and e.meta->>'asset_id' = a.id::text
+          )
+        limit 1
+        `,
+        [tenantId, numericJobId, numericAssetId]
+      )
+
+      if (!result.rowCount) {
+        reply.code(404)
+        return { ok: false, error: "Photo report not found" }
+      }
+
+      const report = result.rows[0]
+      const fs = await import("node:fs")
+      const resolved = String(report.stored_path || "")
+
+      if (!fs.existsSync(resolved)) {
+        reply.code(404)
+        return { ok: false, error: "Photo report file unavailable" }
+      }
+
+      reply.header("Content-Type", "application/pdf")
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="${String(report.original_name || "photo-report.pdf").replace(/["\\r\\n]/g, "_")}"`
+      )
+      return reply.send(fs.createReadStream(resolved))
+    } catch (err: any) {
+      reply.code(400)
+      return { ok: false, error: err?.message || "Photo report download failed" }
+    }
+  })
+
   app.get("/assets/:tenantSlug/file/:assetId", async (req: any, reply) => {
     try {
       const { tenantSlug, assetId } = req.params
@@ -288,6 +527,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           job_id,
           original_name,
           stored_path,
+          asset_type,
           mime_type,
           created_by_user_id
         from job_assets
@@ -304,19 +544,33 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       }
 
       const asset = result.rows[0]
-      const user = await requireAssignedJobAccess(
-        req,
-        reply,
-        tenantId,
-        Number(asset.job_id)
-      )
+      const isJobPhoto =
+        String(asset.asset_type || "") === "photo" ||
+        String(asset.mime_type || "").startsWith("image/")
+
+      const user = isJobPhoto
+        ? await requireAssignedPhotoAccess(
+            req,
+            reply,
+            tenantId,
+            Number(asset.job_id)
+          )
+        : await requireAssignedJobAccess(
+            req,
+            reply,
+            tenantId,
+            Number(asset.job_id)
+          )
 
       if (!user) {
         return { ok: false, error: "Not authorized" }
       }
 
+
+
       if (
         String(user.role) === "subcontractor" &&
+        !isJobPhoto &&
         Number(asset.created_by_user_id) !== Number(user.id)
       ) {
         reply.code(403)
@@ -347,7 +601,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const { tenantSlug, jobId } = req.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
-      const user = await requireAssignedJobAccess(
+      const user = await requireAssignedPhotoAccess(
         req,
         reply,
         tenantId,
@@ -391,10 +645,36 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         const storedPath = path.join(jobDir, storedName)
         const relativePath = path.join(relativeDir, storedName)
         const mimetype = part.mimetype || null
+          const isCrewUpload = String(user.role) === "crew"
 
-        await pipeline(part.file, fs.createWriteStream(storedPath))
+          if (isCrewUpload && !mimetype?.startsWith("image/")) {
+            part.file.resume()
+            reply.code(415)
+            return {
+              ok: false,
+              error: "Crew accounts may upload photos only",
+            }
+          }
 
-        const stat = fs.statSync(storedPath)
+          await pipeline(part.file, fs.createWriteStream(storedPath))
+
+          if (isCrewUpload) {
+            try {
+              const imageInfo = await sharp(storedPath).metadata()
+              if (!imageInfo.width || !imageInfo.height) {
+                throw new Error("Invalid image")
+              }
+            } catch {
+              fs.rmSync(storedPath, { force: true })
+              reply.code(415)
+              return {
+                ok: false,
+                error: "Uploaded file is not a valid supported image",
+              }
+            }
+          }
+
+          const stat = fs.statSync(storedPath)
         const assetType = mimetype?.startsWith("image/") ? "photo" : "file"
 
         const result = await pool.query(
@@ -501,7 +781,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
 
-      const user = await requireAssignedJobAccess(
+      const user = await requireAssignedPhotoAccess(
         req,
         reply,
         tenantId,
@@ -549,7 +829,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
-          and ($4::bigint is null or created_by_user_id = $4)
+
           and (
             asset_type = 'photo'
             or mime_type like 'image/%'
@@ -559,7 +839,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           tenantId,
           numericJobId,
           photoIds,
-          String(user.role) === "subcontractor" ? Number(user.id) : null,
+
         ]
       )
 
@@ -634,7 +914,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
 
-      const user = await requireAssignedJobAccess(
+      const user = await requireAssignedPhotoAccess(
         req,
         reply,
         tenantId,
@@ -652,17 +932,14 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and kind = 'photo_report_sequence_saved'
-          and (
-            $3::bigint is null
-            or meta->>'saved_by_user_id' = $3::text
-          )
+
         order by created_at desc, id desc
         limit 1
         `,
         [
           tenantId,
           numericJobId,
-          String(user.role) === "subcontractor" ? Number(user.id) : null,
+
         ]
       )
 
@@ -712,7 +989,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
-          and ($4::bigint is null or created_by_user_id = $4)
+
           and (
             asset_type = 'photo'
             or mime_type like 'image/%'
@@ -722,7 +999,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           tenantId,
           numericJobId,
           photoIds,
-          String(user.role) === "subcontractor" ? Number(user.id) : null,
+
         ]
       )
 
@@ -805,7 +1082,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return unique
       }
 
-      for (const photo of orderedPhotos) {
+      for (const photo of orderedPhotos as any[]) {
         if (
           !photo?.stored_path ||
           !fs.existsSync(photo.stored_path)
@@ -971,7 +1248,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
 
-      const user = await requireAssignedJobAccess(
+      const user = await requireAssignedPhotoAccess(
         req,
         reply,
         tenantId,
@@ -1115,13 +1392,13 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         where tenant_id = $1
           and job_id = $2
           and id = any($3::bigint[])
-          and ($4::bigint is null or created_by_user_id = $4)
+
         `,
         [
           tenantId,
           numericJobId,
           photoIds,
-          String(user.role) === "subcontractor" ? Number(user.id) : null,
+
         ]
       )
 
@@ -1777,7 +2054,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       const tenantId = await getTenantIdBySlug(tenantSlug)
       const numericJobId = Number(jobId)
 
-      const user = await requireAssignedJobAccess(
+      const user = await requireAssignedPhotoAccess(
         req,
         reply,
         tenantId,
@@ -1788,10 +2065,9 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return { ok: false, error: "Not authorized" }
       }
 
-      if (String(user.role) === "subcontractor") {
-        reply.code(403)
-        return { ok: false, error: "Subcontractors cannot edit files" }
-      }
+      const isFieldUser =
+          String(user.role) === "subcontractor" ||
+          String(user.role) === "crew"
 
       const body = req.body || {}
       const note = String(body.note || "").trim() || null
@@ -1805,7 +2081,12 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
                asset_category = $2
          where tenant_id = $3
            and job_id = $4
-           and id = $5
+            and id = $5
+            and (
+              $6::boolean = false
+              or asset_type = 'photo'
+              or mime_type like 'image/%'
+            )
          returning
            id,
            note,
@@ -1816,8 +2097,9 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           assetCategory,
           tenantId,
           numericJobId,
-          Number(assetId),
-        ]
+            Number(assetId),
+            isFieldUser,
+          ]
       )
 
       if (!result.rowCount) {

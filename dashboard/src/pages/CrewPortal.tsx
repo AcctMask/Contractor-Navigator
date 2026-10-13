@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { clearToken, getToken } from "../lib/auth"
+import JobPhotoWorkspace from "../components/JobPhotoWorkspace"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -507,7 +508,13 @@ export default function CrewPortal() {
                   onCompleted={loadJobs}
                 />
               )}
-              <CrewSmsPanel jobId={job.id} spanish={spanish} />\n            </article>
+              <CrewSmsPanel jobId={job.id} spanish={spanish} />
+                {job.tenant_slug ? (
+                  <JobPhotoWorkspace
+                    tenantSlug={job.tenant_slug}
+                    jobId={job.id}
+                  />
+                ) : null}\n            </article>
           ))}
         </div>
       </div>
