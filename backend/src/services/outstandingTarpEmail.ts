@@ -1,3 +1,4 @@
+import { CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL } from "./subcontractorReportingAssignment"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "./followupEngine"
 import { sendAlertEmail } from "./emailService"
@@ -154,7 +155,7 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
       from crew_assignments
       where tenant_id = j.tenant_id
         and job_id = j.id
-        and status in ('PENDING', 'active')
+        and ${CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL}
       order by assigned_at desc nulls last, id desc
       limit 1
     ) ca on true

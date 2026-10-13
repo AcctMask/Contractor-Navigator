@@ -1,3 +1,4 @@
+import { CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL } from "../services/subcontractorReportingAssignment"
 import type { FastifyInstance } from "fastify"
 import { pool } from "../db/db"
 import { getTenantIdBySlug } from "../services/followupEngine"
@@ -248,10 +249,15 @@ export async function registerOutstandingTarpReportRoutes(
           left join customers c
             on c.id = j.customer_id
            and c.tenant_id = j.tenant_id
-          left join crew_assignments ca
-            on ca.tenant_id = j.tenant_id
-           and ca.job_id = j.id
-           and ca.status in ('PENDING', 'active')
+          left join lateral (
+              select ca.*
+              from crew_assignments ca
+              where ca.tenant_id = j.tenant_id
+                and ca.job_id = j.id
+                and ${CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL}
+              order by ca.assigned_at desc nulls last, ca.id desc
+              limit 1
+            ) ca on true
           left join app_users sub
             on sub.id = ca.app_user_id
            and sub.tenant_id = j.tenant_id

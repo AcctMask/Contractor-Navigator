@@ -1,3 +1,4 @@
+import { CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL } from "../services/subcontractorReportingAssignment"
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 
@@ -605,7 +606,7 @@ export async function registerBusinessPerformanceV2Routes(
           ${userJoin}
           ${directoryJoin}
           where ca.tenant_id = $1
-            and ca.status in ('PENDING', 'active')
+            and ${CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL}
           order by ca.job_id,
                    ca.assigned_at desc nulls last,
                    ca.id desc
