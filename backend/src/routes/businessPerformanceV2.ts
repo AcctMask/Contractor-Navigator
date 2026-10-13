@@ -618,6 +618,29 @@ export async function registerBusinessPerformanceV2Routes(
           ])
         );
 
+        // Historical attribution comes from crew_assignments as well.
+        // Do not change the current-assignment lookup above.
+        const historicalAssignments = await pool.query(`
+          select distinct on (ca.job_id)
+            ca.job_id,
+            coalesce(${nameParts.join(", ")})
+              as assigned_company
+          from crew_assignments ca
+          ${userJoin}
+          ${directoryJoin}
+          where ca.tenant_id = $1
+          order by ca.job_id,
+                   ca.assigned_at desc nulls last,
+                   ca.id desc
+        `, [tenant.id]);
+
+        const historicalCompanyByJob = new Map(
+          historicalAssignments.rows.map((row: any) => [
+            Number(row.job_id),
+            String(row.assigned_company)
+          ])
+        );
+
         const jobs = result.rows.map((row: any) => {
           const firstAA =
             row.first_aa_engagement_at
@@ -669,7 +692,8 @@ export async function registerBusinessPerformanceV2Routes(
               assignedCompanyByJob.get(Number(row.id)) ||
               (String(row.stage || "").toLowerCase() === "tarp"
                 ? "Not Assigned"
-                : "Assignment Not Recorded"),
+                : historicalCompanyByJob.get(Number(row.id)) ||
+                  "Assignment Not Recorded"),
 
             acquisition: {
               source: row.acquisition_source || "Unknown",
