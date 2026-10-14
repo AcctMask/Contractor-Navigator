@@ -1,6 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
 import { getTenantSlug } from "../lib/tenant";
 
+
+function ageDays(value?: string | null): number | string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const easternDay = (d: Date) => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).formatToParts(d);
+    const part = (type: string) =>
+      Number(parts.find(p => p.type === type)?.value);
+    return Date.UTC(part("year"), part("month") - 1, part("day"));
+  };
+  const start = easternDay(date);
+  const today = easternDay(new Date());
+  if (!Number.isFinite(start) || !Number.isFinite(today)) return "—";
+  return Math.max(0, Math.round((today - start) / 86400000));
+}
+
 type GroupCount = {
   name?: string;
   value?: string;
@@ -16,6 +38,7 @@ type JobRecord = {
   job_label: string | null;
   created_at: string;
   current_stage: string;
+  current_stage_entered_at?: string | null;
   job_type: string | null;
   assigned_subcontractor?: string;
   assigned_at?: string | null;
@@ -806,8 +829,9 @@ export default function BusinessPerformanceV2() {
           <button type="button" onClick={() => {
             const rows = reportJobs.map(j =>
               `<tr><td>${j.navigator_job_id}</td><td>${[
-                j.created_at, j.job_type || "", j.acquisition.source,
-                j.current_stage, j.assigned_subcontractor || "Unassigned",
+                j.created_at, ageDays(j.created_at), j.job_type || "", j.acquisition.source,
+                j.current_stage, ageDays(j.current_stage_entered_at),
+                j.assigned_subcontractor || "Unassigned",
                 j.insurance.carrier || "",
                 ...navi33EvidenceCells(j)
               ].map(v => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")).join("</td><td>")}</td></tr>`
@@ -829,8 +853,8 @@ export default function BusinessPerformanceV2() {
               <tbody>${subcontractorSummary.map(r => `<tr><td>${r.name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</td><td>${r.total}</td><td>${r.outstanding}</td><td>${r.completed}</td><td>${r.invoiced}</td><td>${r.paid}</td><td>${r.name === "Not Assigned" || r.name === "Assignment Not Recorded" ? r.name : "Recorded assignment"}</td></tr>`).join("")}
               <tr><th>Grand Total</th><th>${reportJobs.length}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.outstanding,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.completed,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.invoiced,0)}</th><th>${subcontractorSummary.reduce((n,r)=>n+r.paid,0)}</th><th>Selected jobs</th></tr></tbody></table>
               <h2>Supporting Jobs</h2>
-              <table><thead><tr><th>Job</th><th>Created</th><th>Type</th>
-              <th>Source</th><th>Stage</th><th>Assigned To</th><th>Carrier</th>
+              <table><thead><tr><th>Job</th><th>Created</th><th>Days Old</th><th>Type</th>
+              <th>Source</th><th>Stage</th><th>Days in Stage</th><th>Assigned To</th><th>Carrier</th>
               <th>AA Engaged</th><th>AA Signed After Engagement</th><th>Tarp to Roof</th>
               </tr></thead><tbody>${rows}</tbody></table></body></html>`);
             win.document.close();

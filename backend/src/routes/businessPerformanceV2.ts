@@ -723,6 +723,7 @@ export async function registerBusinessPerformanceV2Routes(
             created_at: row.created_at,
             assigned_at: assignedDateByJob.get(Number(row.id)) || null,
             current_stage: row.stage || "unknown",
+            current_stage_entered_at: row.current_stage_entered_at || null,
             job_type: row.job_type || null,
             // Reporting classification only. Never infer a contractor.
             // Historical assignment rows remain the attribution evidence.
