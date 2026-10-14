@@ -620,8 +620,8 @@ export async function sendDailyOutstandingTarps() {
   const easternHour = Number(part("hour"))
 
   const catchUpAuthorized =
-  process.env.TARP_CATCHUP_DATE === "2026-10-12" &&
-  `${part("year")}-${part("month")}-${part("day")}` === "2026-10-12"
+  process.env.TARP_CATCHUP_DATE === "2026-10-14" &&
+  `${part("year")}-${part("month")}-${part("day")}` === "2026-10-14"
 
 if (!catchUpAuthorized &&
     (["Sat", "Sun"].includes(part("weekday")) ||
