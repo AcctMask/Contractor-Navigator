@@ -211,6 +211,111 @@ function CrewSmsPanel({
   )
 }
 
+
+function CrewJobNotes({ jobId, spanish }: {
+  jobId: number
+  spanish: boolean
+}) {
+  const [notes, setNotes] = useState<any[]>([])
+  const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  async function refresh() {
+    try {
+      const response = await fetch(
+        `${API_BASE}/workforce/jobs/${jobId}/notes`,
+        {
+          headers: { Authorization: `Bearer ${getToken()}` },
+          cache: "no-store",
+        }
+      )
+      const data = await response.json()
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Unable to load notes")
+      }
+      setNotes(Array.isArray(data.notes) ? data.notes : [])
+      setError("")
+    } catch (err: any) {
+      setError(err?.message || "Unable to load notes")
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [jobId])
+
+  async function save() {
+    if (!message.trim() || saving) return
+    setSaving(true)
+    setError("")
+    try {
+      const response = await fetch(
+        `${API_BASE}/workforce/jobs/${jobId}/notes`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message: message.trim() }),
+        }
+      )
+      const data = await response.json()
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Unable to save note")
+      }
+      setMessage("")
+      await refresh()
+    } catch (err: any) {
+      setError(err?.message || "Unable to save note")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section style={{ marginTop: 20 }}>
+      <h3>{spanish ? "Notas del trabajo" : "Job Notes"}</h3>
+      <textarea
+        aria-label={spanish ? "Nueva nota" : "New job note"}
+        value={message}
+        onChange={e => setMessage(e.target.value)}
+        maxLength={5000}
+        rows={3}
+        style={{ width: "100%", padding: 10, boxSizing: "border-box" }}
+      />
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <button
+          type="button"
+          disabled={saving || !message.trim()}
+          onClick={() => void save()}
+        >
+          {saving
+            ? (spanish ? "Guardando..." : "Saving...")
+            : (spanish ? "Agregar nota" : "Add Note")}
+        </button>
+        <button type="button" onClick={() => void refresh()}>
+          {spanish ? "Actualizar" : "Refresh Notes"}
+        </button>
+      </div>
+      {error && <p role="alert">{error}</p>}
+      {notes.map(note => (
+        <div key={note.id} style={{
+          marginTop: 10,
+          padding: 10,
+          background: "#24456e",
+          borderRadius: 8,
+          whiteSpace: "pre-wrap",
+        }}>
+          <small>{new Date(note.created_at).toLocaleString()}</small>
+          <p>{note.message}</p>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function CrewTarpCompletion({
   job,
   spanish,
@@ -507,6 +612,7 @@ export default function CrewPortal() {
                   onCompleted={loadJobs}
                 />
               )}
+              <CrewJobNotes jobId={job.id} spanish={spanish} />
               <CrewSmsPanel jobId={job.id} spanish={spanish} />\n            </article>
           ))}
         </div>

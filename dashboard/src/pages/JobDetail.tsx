@@ -1988,7 +1988,9 @@ export default function JobDetail() {
 
     loadAssets()
 
-    if (currentUser.role !== "subcontractor") {
+    if (currentUser.role === "subcontractor") {
+      void loadWorkforceNotes()
+    } else {
       loadCalendarEvents()
       loadTasks()
     }
