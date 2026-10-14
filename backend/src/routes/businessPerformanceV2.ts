@@ -1,3 +1,4 @@
+import { CURRENT_REPORTING_ASSIGNMENT_STATUS_SQL } from "../services/subcontractorReportingAssignment";
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 
