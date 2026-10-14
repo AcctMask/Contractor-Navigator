@@ -49,6 +49,144 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
   }
 
 
+
+  // Management adds a named crew member directly to an assigned job.
+  // The subcontractor company is resolved from the job, never the browser.
+  // No invitation token or SMS is created.
+  app.post("/workforce/jobs/:jobId/add-crew", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+
+      const tenantId = Number(actor.tenant_id)
+      const jobId = Number(request.params.jobId)
+      const fullName = String(request.body?.full_name || "").trim()
+      const phone = String(request.body?.mobile_phone || "").trim()
+      const crewRole = String(request.body?.crew_role || "")
+      const language = String(request.body?.preferred_language || "en")
+
+      if (!Number.isSafeInteger(jobId) || jobId <= 0 ||
+          !fullName || fullName.length > 150 ||
+          !["lead", "member"].includes(crewRole) ||
+          !["en", "es"].includes(language)) {
+        return reply.code(400).send({
+          ok: false, error: "Valid name, role and job required",
+        })
+      }
+
+      const normalizedPhone = normalizeCrewPhone(phone)
+      if (!normalizedPhone) {
+        return reply.code(400).send({
+          ok: false, error: "Enter a valid US mobile number",
+        })
+      }
+
+      const client = await pool.connect()
+      try {
+        await client.query("BEGIN")
+
+        const job = await client.query(
+          `select id from jobs
+           where id = $1 and tenant_id = $2
+           for update`,
+          [jobId, tenantId]
+        )
+
+        if (!job.rowCount) {
+          await client.query("ROLLBACK")
+          return reply.code(404).send({
+            ok: false, error: "Job not found",
+          })
+        }
+
+        const companies = await client.query(
+          `select distinct sc.id
+           from crew_assignments ca
+           join app_users u
+             on u.id = ca.app_user_id
+            and u.tenant_id = ca.tenant_id
+            and u.role = 'subcontractor'
+            and u.is_active = true
+           join subcontractor_company_users scu
+             on scu.app_user_id = u.id
+           join subcontractor_companies sc
+             on sc.id = scu.subcontractor_company_id
+            and sc.tenant_id = ca.tenant_id
+           where ca.tenant_id = $1
+             and ca.job_id = $2
+             and ca.status in ('PENDING', 'active')`,
+          [tenantId, jobId]
+        )
+
+        if (companies.rows.length !== 1) {
+          await client.query("ROLLBACK")
+          return reply.code(409).send({
+            ok: false,
+            error: companies.rows.length === 0
+              ? "Assign a subcontractor to this job first"
+              : "More than one subcontractor company is assigned; resolve the assignment before adding crew",
+          })
+        }
+
+        const companyId = Number(companies.rows[0].id)
+
+        const member = await client.query(
+          `insert into workforce_crew_members
+             (tenant_id, subcontractor_company_id,
+              full_name, mobile_phone, crew_role,
+              preferred_language, invited_by_user_id)
+           values ($1,$2,$3,$4,$5,$6,$7)
+           returning id, full_name, crew_role`,
+          [
+            tenantId, companyId, fullName, normalizedPhone,
+            crewRole, language, Number(actor.id),
+          ]
+        )
+
+        const assignment = await client.query(
+          `insert into workforce_crew_job_assignments
+             (tenant_id, job_id, subcontractor_company_id,
+              crew_member_id, assigned_by_user_id)
+           values ($1,$2,$3,$4,$5)
+           returning id, job_id, status`,
+          [
+            tenantId, jobId, companyId,
+            Number(member.rows[0].id), Number(actor.id),
+          ]
+        )
+
+        await recordWorkforceActivity(client, {
+          tenantId,
+          jobId,
+          actorUserId: Number(actor.id),
+          actorName: String(actor.full_name || actor.email || "User"),
+          subjectName: fullName,
+          subjectRole: crewRole === "lead" ? "crew_lead" : "crew_member",
+          action: "assigned",
+          assignmentId: Number(assignment.rows[0].id),
+        })
+
+        await client.query("COMMIT")
+
+        return reply.code(201).send({
+          ok: true,
+          crew_member: member.rows[0],
+          assignment: assignment.rows[0],
+        })
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false, error: "Could not add assigned crew member",
+      })
+    }
+  })
+
   // Management assigns existing company roster members to an existing job.
   // No new member, invitation token, or SMS is created.
   app.get("/workforce/jobs/:jobId/eligible-companies", async (request: any, reply) => {

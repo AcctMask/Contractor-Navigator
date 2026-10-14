@@ -1,18 +1,10 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { getToken } from "../lib/auth"
-
-type Company = { id: number; company_name: string }
-type Crew = {
-  id: number
-  full_name: string
-  crew_role: "lead" | "member"
-  is_active: boolean
-}
 
 export default function WorkforceJobCrewSelector({
   jobId,
   apiBase,
-  refreshKey,
+  refreshKey: _refreshKey,
   onAssigned,
 }: {
   jobId: number
@@ -20,71 +12,23 @@ export default function WorkforceJobCrewSelector({
   refreshKey: number
   onAssigned: () => void
 }) {
-  const [companies, setCompanies] = useState<Company[]>([])
-  const [companyId, setCompanyId] = useState("")
-  const [crew, setCrew] = useState<Crew[]>([])
-  const [memberId, setMemberId] = useState("")
+  const [name, setName] = useState("")
+  const [phone, setPhone] = useState("")
+  const [role, setRole] = useState<"lead" | "member">("member")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
 
-  useEffect(() => {
-    let cancelled = false
-    setCompanies([])
-    setCompanyId("")
-    setCrew([])
-    setMemberId("")
-    setError("")
-
-    if (!Number.isSafeInteger(jobId) || jobId <= 0) return
-
-    fetch(`${apiBase}/workforce/jobs/${jobId}/eligible-companies`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-      .then(async response => {
-        const json = await response.json()
-        if (!response.ok || !json.ok) {
-          throw new Error(json.error || "Could not load companies")
-        }
-        return json.companies as Company[]
-      })
-      .then(items => { if (!cancelled) setCompanies(items) })
-      .catch(err => { if (!cancelled) setError(err.message) })
-
-    return () => { cancelled = true }
-  }, [apiBase, jobId, refreshKey])
-
-  useEffect(() => {
-    let cancelled = false
-    setCrew([])
-    setMemberId("")
-    if (!companyId) return
-
-    fetch(`${apiBase}/workforce/companies/${companyId}/crew`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-      .then(async response => {
-        const json = await response.json()
-        if (!response.ok || !json.ok) {
-          throw new Error(json.error || "Could not load company crew")
-        }
-        return (json.crew as Crew[]).filter(member => member.is_active)
-      })
-      .then(items => { if (!cancelled) setCrew(items) })
-      .catch(err => { if (!cancelled) setError(err.message) })
-
-    return () => { cancelled = true }
-  }, [apiBase, companyId])
-
   async function assign() {
-    if (!companyId || !memberId || busy) return
+    if (!name.trim() || !phone.trim() || busy) return
+
     setBusy(true)
     setError("")
     setNotice("")
 
     try {
       const response = await fetch(
-        `${apiBase}/workforce/jobs/${jobId}/assign-existing-crew`,
+        `${apiBase}/workforce/jobs/${jobId}/add-crew`,
         {
           method: "POST",
           headers: {
@@ -92,22 +36,27 @@ export default function WorkforceJobCrewSelector({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            company_id: Number(companyId),
-            crew_member_id: Number(memberId),
+            full_name: name.trim(),
+            mobile_phone: phone.trim(),
+            crew_role: role,
+            preferred_language: "en",
           }),
         }
       )
+
       const json = await response.json()
+
       if (!response.ok || !json.ok) {
-        throw new Error(json.error || "Crew assignment failed")
+        throw new Error(json.error || "Could not assign crew member")
       }
-      setNotice(json.already_assigned
-        ? "This crew member is already assigned"
-        : "Crew member assigned to job")
-      setMemberId("")
+
+      setName("")
+      setPhone("")
+      setRole("member")
+      setNotice("Crew member assigned")
       onAssigned()
     } catch (err: any) {
-      setError(err?.message || "Crew assignment failed")
+      setError(err?.message || "Could not assign crew member")
     } finally {
       setBusy(false)
     }
@@ -120,61 +69,71 @@ export default function WorkforceJobCrewSelector({
     border: "1px solid #64748b",
     background: "transparent",
     color: "inherit",
+    boxSizing: "border-box" as const,
   }
 
   return (
     <div style={{
-      padding: 16, border: "1px solid #64748b",
-      borderRadius: 12, marginBottom: 18,
+      padding: 16,
+      border: "1px solid #64748b",
+      borderRadius: 12,
+      marginBottom: 18,
     }}>
-      <h3 style={{ marginTop: 0 }}>Assign Existing Crew</h3>
+      <h3 style={{ marginTop: 0 }}>Add Crew Member</h3>
+
       <p style={{ opacity: 0.8 }}>
-        Optional: select a crew member from an assigned subcontractor company.
+        Add a person to the subcontractor already assigned above.
         No invitation SMS is sent.
       </p>
 
       <div style={{ display: "grid", gap: 10, maxWidth: 500 }}>
-        <select aria-label="Assigned subcontractor company"
-          value={companyId} style={fieldStyle}
-          onChange={event => {
-            setCompanyId(event.target.value)
-            setError("")
-            setNotice("")
-          }}>
-          <option value="">Select assigned company...</option>
-          {companies.map(company => (
-            <option key={company.id} value={company.id}>
-              {company.company_name}
-            </option>
-          ))}
+        <label htmlFor="job-crew-name">Full name</label>
+        <input
+          id="job-crew-name"
+          placeholder="Joe Smith"
+          value={name}
+          style={fieldStyle}
+          onChange={event => setName(event.target.value)}
+        />
+
+        <label htmlFor="job-crew-role">Role</label>
+        <select
+          id="job-crew-role"
+          value={role}
+          style={fieldStyle}
+          onChange={event =>
+            setRole(event.target.value as "lead" | "member")
+          }
+        >
+          <option value="lead">Crew Lead</option>
+          <option value="member">Crew Member</option>
         </select>
 
-        <select aria-label="Crew member"
-          value={memberId} style={fieldStyle}
-          disabled={!companyId}
-          onChange={event => setMemberId(event.target.value)}>
-          <option value="">Select crew lead or member...</option>
-          {crew.map(member => (
-            <option key={member.id} value={member.id}>
-              {member.full_name} — {member.crew_role === "lead"
-                ? "Crew Lead" : "Crew Member"}
-            </option>
-          ))}
-        </select>
+        <label htmlFor="job-crew-phone">Mobile phone</label>
+        <input
+          id="job-crew-phone"
+          type="tel"
+          placeholder="(555) 555-5555"
+          value={phone}
+          style={fieldStyle}
+          onChange={event => setPhone(event.target.value)}
+        />
 
-        <button type="button" disabled={busy || !companyId || !memberId}
-          onClick={assign}>
-          {busy ? "Assigning..." : "Assign Selected Crew"}
+        <button
+          type="button"
+          disabled={busy || !name.trim() || !phone.trim()}
+          onClick={assign}
+        >
+          {busy ? "Assigning..." : "Assign Crew Member"}
         </button>
       </div>
 
-      {companies.length === 0 && !error && (
-        <p>No assigned subcontractor companies available yet.</p>
+      {error && (
+        <p role="alert" style={{ color: "#fca5a5" }}>
+          {error}
+        </p>
       )}
-      {companyId && crew.length === 0 && !error && (
-        <p>No active crew members in this company's directory.</p>
-      )}
-      {error && <p role="alert" style={{ color: "#fca5a5" }}>{error}</p>}
+
       {notice && <p role="status">{notice}</p>}
     </div>
   )
