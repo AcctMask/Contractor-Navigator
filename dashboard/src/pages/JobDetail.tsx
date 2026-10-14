@@ -807,6 +807,36 @@ export default function JobDetail() {
     return kind.replaceAll("_", " ").toUpperCase()
   }
 
+  function getWorkforceActivityDisplayLabel(item: any): string {
+    const original = getActivityLabel(item)
+    if (language !== "es") return original
+
+    const labels: Record<string, string> = {
+      "Production Calendar Change": "Cambio en calendario de producción",
+      "Task Activity": "Actividad de tareas",
+      "Team Note": "Nota del equipo",
+      "Staff SMS": "SMS del personal",
+      "Staff Note": "Nota del personal",
+      "Voice AI Transcript": "Transcripción de voz de IA",
+      "AI Follow-Up Engine": "Seguimiento de IA",
+      "Customer Reply": "Respuesta del cliente",
+      "Estimate Details": "Detalles del presupuesto",
+      "Lead Qualification": "Calificación del cliente potencial",
+      "Lead Created": "Cliente potencial creado",
+      "Voice Intake": "Recepción por voz",
+      "Manual Update": "Actualización manual",
+      "Production Planner": "Planificador de producción",
+      "Archived": "Archivado",
+      "Owner Alert": "Alerta del propietario",
+      "Sales Intent": "Intención de compra",
+    }
+
+    const [base, author] = original.split(" — ", 2)
+    const translated = labels[base]
+    if (!translated) return original
+    return author ? `${translated} — ${author}` : translated
+  }
+
   function getActivityAttribution(item: any) {
     const kind = String(item?.kind || "").toLowerCase()
     const meta = item?.meta || item?.metadata || {}
@@ -1073,11 +1103,11 @@ export default function JobDetail() {
 
     return (
       <section style={card}>
-        <h2>Mark Tarp Complete</h2>
-        <p>Record installed quantities. Completion will be saved in Job Activity.</p>
+        <h2>{language === "es" ? "Marcar lona como completada" : "Mark Tarp Complete"}</h2>
+        <p>{language === "es" ? "Registre las cantidades instaladas. La finalización se guardará en la actividad del trabajo." : "Record installed quantities. Completion will be saved in Job Activity."}</p>
         <div style={grid2}>
           <div>
-            <label style={label}>Installed Square Feet *</label>
+            <label style={label}>{language === "es" ? "Pies cuadrados instalados *" : "Installed Square Feet *"}</label>
             <input
               type="number"
               min="0.01"
@@ -1088,7 +1118,7 @@ export default function JobDetail() {
             />
           </div>
           <div>
-            <label style={label}>Number of Sandbags *</label>
+            <label style={label}>{language === "es" ? "Cantidad de sacos de arena *" : "Number of Sandbags *"}</label>
             <input
               type="number"
               min="0"
@@ -1099,7 +1129,7 @@ export default function JobDetail() {
             />
           </div>
         </div>
-        <label style={label}>Completion Notes (optional)</label>
+        <label style={label}>{language === "es" ? "Notas de finalización (opcional)" : "Completion Notes (optional)"}</label>
         <textarea
           style={textarea}
           value={tarpNotes}
@@ -1111,7 +1141,7 @@ export default function JobDetail() {
           disabled={completingTarp}
           onClick={() => void completeTarp()}
         >
-          {completingTarp ? "Recording completion..." : "Mark Tarp Complete"}
+          {completingTarp ? (language === "es" ? "Registrando finalización..." : "Recording completion...") : (language === "es" ? "Marcar lona como completada" : "Mark Tarp Complete")}
         </button>
       </section>
     )
@@ -2000,7 +2030,7 @@ export default function JobDetail() {
     return (
       <div style={page}>
         <Link to="/field" style={linkStyle}>
-          ← Back to My Assigned Jobs
+          {language === "es" ? "← Volver a mis trabajos asignados" : "← Back to My Assigned Jobs"}
         </Link>
 
         <div
@@ -2022,7 +2052,7 @@ export default function JobDetail() {
             }
           }}
         >
-          Financial Operations
+          {language === "es" ? "Operaciones financieras" : "Financial Operations"}
         </button>
       </div>
 
@@ -2030,12 +2060,12 @@ export default function JobDetail() {
 
         {!job ? (
           <section style={card}>
-            <p>Loading assigned job...</p>
+            <p>{language === "es" ? "Cargando trabajo asignado..." : "Loading assigned job..."}</p>
           </section>
         ) : (
           <>
             <section style={card}>
-                <h2>My Crew</h2>
+                <h2>{language === "es" ? "Mi equipo" : "My Crew"}</h2>
                 <WorkforceCrewInviteForm
                   jobLabel={`#${id}`}
                   onInvite={inviteCrewMember}
@@ -2050,44 +2080,44 @@ export default function JobDetail() {
               </section>
 
             <section style={card}>
-              <h2>Job Details</h2>
+              <h2>{language === "es" ? "Detalles del trabajo" : "Job Details"}</h2>
 
               <p>
-                <strong>Customer:</strong> {job.customer_name || "—"}
+                <strong>{language === "es" ? "Cliente:" : "Customer:"}</strong> {job.customer_name || "—"}
               </p>
 
               <p>
-                <strong>Address:</strong>{" "}
+                <strong>{language === "es" ? "Dirección:" : "Address:"}</strong>{" "}
                 {[job.address1, job.city, job.state, job.zip]
                   .filter(Boolean)
                   .join(", ") || "—"}
               </p>
 
               <p>
-                <strong>Job Type:</strong> {job.job_type || "—"}
+                <strong>{language === "es" ? "Tipo de trabajo:" : "Job Type:"}</strong> {job.job_type || "—"}
               </p>
 
               <p>
-                <strong>Current Stage:</strong> {job.stage || "—"}
+                <strong>{language === "es" ? "Etapa actual:" : "Current Stage:"}</strong> {job.stage || "—"}
               </p>
 
               <p>
-                <strong>Assignment:</strong>{" "}
+                <strong>{language === "es" ? "Asignación:" : "Assignment:"}</strong>{" "}
                 {job.assignment_subject || "—"}
               </p>
 
               <p style={{ whiteSpace: "pre-wrap" }}>
-                <strong>Assignment Notes:</strong>{" "}
+                <strong>{language === "es" ? "Notas de asignación:" : "Assignment Notes:"}</strong>{" "}
                 {job.assignment_notes || "—"}
               </p>
 
               <p>
-                <strong>Damage Location:</strong>{" "}
+                <strong>{language === "es" ? "Ubicación del daño:" : "Damage Location:"}</strong>{" "}
                 {job.damage_location || "—"}
               </p>
 
               <p style={{ whiteSpace: "pre-wrap" }}>
-                <strong>Damage Summary:</strong>{" "}
+                <strong>{language === "es" ? "Resumen de daños:" : "Damage Summary:"}</strong>{" "}
                 {job.damage_summary || "—"}
               </p>
             </section>
@@ -2095,8 +2125,8 @@ export default function JobDetail() {
             {tarpCompletionForm()}
 
             <section style={card}>
-              <h2>Send SMS</h2>
-              <label htmlFor="sub-sms-recipient">Send To</label>
+              <h2>{language === "es" ? "Enviar SMS" : "Send SMS"}</h2>
+              <label htmlFor="sub-sms-recipient">{language === "es" ? "Enviar a" : "Send To"}</label>
               <select
                 id="sub-sms-recipient"
                 value={smsRecipient}
@@ -2104,7 +2134,7 @@ export default function JobDetail() {
                 style={input}
               >
                 {smsRecipients.length === 0 && (
-                  <option value="">No authorized SMS recipients available</option>
+                  <option value="">{language === "es" ? "No hay destinatarios de SMS autorizados" : "No authorized SMS recipients available"}</option>
                 )}
                 {smsRecipients.map(r => (
                   <option
@@ -2134,37 +2164,37 @@ export default function JobDetail() {
                 disabled={!smsRecipient || !smsText.trim()}
                 style={button}
               >
-                Send Text
+                {language === "es" ? "Enviar mensaje" : "Send Text"}
               </button>
             </section>
 
             <section style={card}>
-              <h2>Add Job Note</h2>
+              <h2>{language === "es" ? "Agregar nota al trabajo" : "Add Job Note"}</h2>
 
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
-                placeholder="Add a note for the office..."
+                placeholder={language === "es" ? "Agregar una nota para la oficina..." : "Add a note for the office..."}
                 style={textarea}
               />
 
               <button onClick={addNote} style={button}>
-                Add Note
+                {language === "es" ? "Agregar nota" : "Add Note"}
               </button>
             </section>
 
             <section style={card}>
-              <h2>Job Activity</h2>
+              <h2>{language === "es" ? "Actividad del trabajo" : "Job Activity"}</h2>
               <button
                 type="button"
                 onClick={() => void loadWorkforceNotes()}
                 style={button}
               >
-                Refresh Job Notes
+                {language === "es" ? "Actualizar notas del trabajo" : "Refresh Job Notes"}
               </button>
 
               {notes.length === 0 ? (
-                <p>No activity available.</p>
+                <p>{language === "es" ? "No hay actividad disponible." : "No activity available."}</p>
               ) : (
                 notes
                   .sort(
@@ -2186,7 +2216,7 @@ export default function JobDetail() {
 
                         <div style={{ marginTop: 8, marginBottom: 8 }}>
                           <span style={getActivityBadgeStyle(note)}>
-                            {getActivityLabel(note)}
+                            {getWorkforceActivityDisplayLabel(note)}
                           </span>
                         </div>
 
@@ -2213,18 +2243,18 @@ export default function JobDetail() {
             </section>
 
             <section style={card}>
-              <h2>Upload Files / Photos</h2>
+              <h2>{language === "es" ? "Subir archivos / fotos" : "Upload Files / Photos"}</h2>
 
-              <label style={label}>Upload Category</label>
+              <label style={label}>{language === "es" ? "Categoría de carga" : "Upload Category"}</label>
               <select
                 value={uploadCategory}
                 onChange={(e) => setUploadCategory(e.target.value)}
                 style={input}
               >
-                <option value="Documents">Documents</option>
-                <option value="Roof">Roof</option>
-                <option value="Tarp">Tarp</option>
-                <option value="Repairs">Repairs</option>
+                <option value="Documents">{language === "es" ? "Documentos" : "Documents"}</option>
+                <option value="Roof">{language === "es" ? "Techo" : "Roof"}</option>
+                <option value="Tarp">{language === "es" ? "Lona" : "Tarp"}</option>
+                <option value="Repairs">{language === "es" ? "Reparaciones" : "Repairs"}</option>
               </select>
 
               <input
@@ -2235,21 +2265,21 @@ export default function JobDetail() {
               />
 
               <button onClick={uploadFiles} style={button}>
-                Upload Selected Files
+                {language === "es" ? "Subir archivos seleccionados" : "Upload Selected Files"}
               </button>
 
               {files && files.length > 0 ? (
                 <p>
-                  {files.length} file(s) selected for {uploadCategory}
+                  {files.length} {language === "es" ? "archivo(s) seleccionado(s) para" : "file(s) selected for"} {uploadCategory}
                 </p>
               ) : null}
             </section>
 
             <section style={card}>
-              <h2>Files / Photos</h2>
+              <h2>{language === "es" ? "Archivos / fotos" : "Files / Photos"}</h2>
 
               {assets.length === 0 ? (
-                <p>No files uploaded yet.</p>
+                <p>{language === "es" ? "Todavía no se han subido archivos." : "No files uploaded yet."}</p>
               ) : (
                 assets.map((asset) => (
                   <div key={asset.id} style={row}>
@@ -2261,15 +2291,15 @@ export default function JobDetail() {
                       </strong>
 
                       <p>
-                        <strong>Category:</strong>{" "}
+                        <strong>{language === "es" ? "Categoría:" : "Category:"}</strong>{" "}
                         {asset.asset_category || "Documents"}
                       </p>
 
                       <p>
-                        <strong>Uploaded:</strong>{" "}
+                        <strong>{language === "es" ? "Fecha de carga:" : "Uploaded:"}</strong>{" "}
                         {asset.created_at
                           ? new Date(asset.created_at).toLocaleString()
-                          : "Date unavailable"}
+                          : (language === "es" ? "Fecha no disponible" : "Date unavailable")}
                       </p>
 
                       <p>
@@ -2278,14 +2308,14 @@ export default function JobDetail() {
                           ? `${Math.round(
                               Number(asset.size_bytes) / 1024
                             )} KB`
-                          : "unknown size"}
+                          : (language === "es" ? "tamaño desconocido" : "unknown size")}
                       </p>
 
                       <button
                         onClick={() => openFile(asset)}
                         style={button}
                       >
-                        Open File
+                        {language === "es" ? "Abrir archivo" : "Open File"}
                       </button>
                     </div>
                   </div>

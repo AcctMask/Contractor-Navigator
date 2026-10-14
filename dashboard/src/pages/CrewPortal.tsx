@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
-import { clearToken, getToken } from "../lib/auth"
+import { clearToken, getToken, getMe, saveMyPreferredLanguage } from "../lib/auth"
+import { useLanguage } from "../context/LanguageContext"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -447,7 +448,25 @@ export default function CrewPortal() {
   const [jobs, setJobs] = useState<CrewJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [language, setLanguage] = useState<"en" | "es">("en")
+  const { language, setLanguage } = useLanguage()
+  const [savingLanguage, setSavingLanguage] = useState(false)
+  const [languageLoaded, setLanguageLoaded] = useState(false)
+  const [languageError, setLanguageError] = useState("")
+
+  async function changeLanguage() {
+    if (savingLanguage || !languageLoaded) return
+    const next = language === "es" ? "en" : "es"
+    setSavingLanguage(true)
+    setLanguageError("")
+    try {
+      await saveMyPreferredLanguage(next)
+      setLanguage(next)
+    } catch (err: any) {
+      setLanguageError(err?.message || "Unable to save language preference")
+    } finally {
+      setSavingLanguage(false)
+    }
+  }
   const [tarpView, setTarpView] = useState<"all" | "assigned" | "completed">("all")
 
   const spanish = language === "es"
@@ -495,6 +514,20 @@ export default function CrewPortal() {
     void loadJobs()
   }, [])
 
+  useEffect(() => {
+    let active = true
+    void getMe().then(user => {
+      if (active && user) {
+        setLanguage(user.preferred_language === "es" ? "es" : "en")
+      }
+    }).catch(() => {
+      if (active) setLanguageError("Unable to load language preference")
+    }).finally(() => {
+      if (active) setLanguageLoaded(true)
+    })
+    return () => { active = false }
+  }, [setLanguage])
+
   function logout() {
     clearToken()
     window.location.assign("/login")
@@ -520,9 +553,7 @@ export default function CrewPortal() {
             {spanish ? "Mis trabajos" : "My jobs"}
           </h1>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setLanguage(
-              spanish ? "en" : "es"
-            )}>
+            <button onClick={() => void changeLanguage()} disabled={savingLanguage || !languageLoaded}>
               {spanish ? "English" : "Español"}
             </button>
             <button onClick={logout}>
@@ -530,6 +561,10 @@ export default function CrewPortal() {
             </button>
           </div>
         </header>
+
+        {languageError && (
+          <p role="alert" style={{ color: "#fecaca" }}>{languageError}</p>
+        )}
 
         <p>
           {spanish

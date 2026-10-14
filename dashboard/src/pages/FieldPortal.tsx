@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useLanguage } from "../context/LanguageContext"
 import { useNavigate } from "react-router-dom"
 import { clearToken, getMe, getToken, saveMyPreferredLanguage, type AuthUser } from "../lib/auth"
 import {
@@ -8,7 +9,6 @@ import {
 
 import {
   normalizeWorkforceLanguage,
-  workforceText,
   WORKFORCE_LANGUAGES,
   type WorkforceLanguage,
 } from "../lib/workforceLanguage"
@@ -23,11 +23,9 @@ export default function FieldPortalPage() {
   const [jobs, setJobs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [language, setLanguage] = useState<WorkforceLanguage>("en")
+  const { language, setLanguage, t } = useLanguage()
   const [savingLanguage, setSavingLanguage] = useState(false)
   const [languageError, setLanguageError] = useState("")
-  const t = (key: Parameters<typeof workforceText>[1]) =>
-    workforceText(language, key)
 
   useEffect(() => {
     let active = true

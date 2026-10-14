@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react"
+import { useLanguage } from "../context/LanguageContext"
 
 export type CrewInviteDetails = {
   full_name: string
@@ -18,6 +19,7 @@ export default function WorkforceCrewInviteForm({
   onInvite,
   enabled = false,
 }: Props) {
+  const { language: interfaceLanguage } = useLanguage()
   const [name, setName] = useState("")
   const [phone, setPhone] = useState("")
   const [role, setRole] = useState<"lead" | "member">("lead")
@@ -40,7 +42,7 @@ export default function WorkforceCrewInviteForm({
       setName("")
       setPhone("")
     } catch {
-      setError("Invitation could not be completed. Please try again.")
+      setError(interfaceLanguage === "es" ? "No se pudo completar la invitación. Inténtelo de nuevo." : "Invitation could not be completed. Please try again.")
     } finally {
       setBusy(false)
     }
@@ -48,11 +50,11 @@ export default function WorkforceCrewInviteForm({
 
   return (
     <form onSubmit={submit}>
-      <h3>Assign Crew Lead or Member</h3>
-      <p>Job: {jobLabel}</p>
+      <h3>{interfaceLanguage === "es" ? "Asignar líder o miembro del equipo" : "Assign Crew Lead or Member"}</h3>
+      <p>{interfaceLanguage === "es" ? "Trabajo:" : "Job:"} {jobLabel}</p>
 
       <label>
-        Name
+        {interfaceLanguage === "es" ? "Nombre" : "Name"}
         <input
           required
           maxLength={150}
@@ -62,7 +64,7 @@ export default function WorkforceCrewInviteForm({
       </label>
 
       <label>
-        Mobile Phone
+        {interfaceLanguage === "es" ? "Teléfono móvil" : "Mobile Phone"}
         <input
           required
           type="tel"
@@ -72,18 +74,18 @@ export default function WorkforceCrewInviteForm({
       </label>
 
       <label>
-        Crew Role
+        {interfaceLanguage === "es" ? "Rol del equipo" : "Crew Role"}
         <select
           value={role}
           onChange={e => setRole(e.target.value as "lead" | "member")}
         >
-          <option value="member">Crew Member</option>
-          <option value="lead">Crew Lead</option>
+          <option value="member">{interfaceLanguage === "es" ? "Miembro del equipo" : "Crew Member"}</option>
+          <option value="lead">{interfaceLanguage === "es" ? "Líder del equipo" : "Crew Lead"}</option>
         </select>
       </label>
 
       <label>
-        Language
+        {interfaceLanguage === "es" ? "Idioma" : "Language"}
         <select
           value={language}
           onChange={e => setLanguage(e.target.value as "en" | "es")}
@@ -96,7 +98,7 @@ export default function WorkforceCrewInviteForm({
       {error && <p role="alert">{error}</p>}
 
       <button type="submit" disabled={busy || !enabled}>
-        {busy ? "Working..." : "Invite"}
+        {busy ? (interfaceLanguage === "es" ? "Procesando..." : "Working...") : (interfaceLanguage === "es" ? "Invitar" : "Invite")}
       </button>
     </form>
   )

@@ -88,7 +88,7 @@ export default function WorkforceAssignedCrew({
 
       setMessage("")
       setMessageTo(null)
-      setNotice(`SMS submitted to ${member.full_name}.`)
+      setNotice(language === "es" ? `SMS enviado a ${member.full_name}.` : `SMS submitted to ${member.full_name}.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Crew SMS failed")
     } finally {
@@ -98,7 +98,7 @@ export default function WorkforceAssignedCrew({
 
   async function revoke(member: CrewMember) {
     if (!window.confirm(
-      `Remove ${member.full_name} from this job? This ends their access to this job.`
+      `${language === "es" ? "¿Quitar a" : "Remove"} ${member.full_name}${language === "es" ? " de este trabajo? Esto finalizará su acceso a este trabajo." : " from this job? This ends their access to this job."}`
     )) return
 
     setBusyId(member.id)
@@ -129,11 +129,11 @@ export default function WorkforceAssignedCrew({
 
   return (
     <div>
-      <h3>Assigned Crew</h3>
-      {loading && <p>Loading crew...</p>}
+      <h3>{language === "es" ? "Equipo asignado" : "Assigned Crew"}</h3>
+      {loading && <p>{language === "es" ? "Cargando equipo..." : "Loading crew..."}</p>}
       {notice && <p role="status">{notice}</p>}
       {error && <p role="alert" style={{ color: "#b91c1c" }}>{error}</p>}
-      {!loading && crew.length === 0 && <p>No crew assigned yet.</p>}
+      {!loading && crew.length === 0 && <p>{language === "es" ? "Todavía no hay equipo asignado." : "No crew assigned yet."}</p>}
       {crew.map(member => (
         <div
           key={member.id}
@@ -149,7 +149,7 @@ export default function WorkforceAssignedCrew({
           <div>
             <strong>{member.full_name}</strong>
             <div style={{ fontSize: 13 }}>
-              {member.crew_role === "lead" ? "Crew Lead" : "Crew Member"}
+              {member.crew_role === "lead" ? (language === "es" ? "Líder del equipo" : "Crew Lead") : (language === "es" ? "Miembro del equipo" : "Crew Member")}
               {" · "}
               {member.preferred_language === "es" ? "Español" : "English"}
               {" · "}
@@ -167,24 +167,24 @@ export default function WorkforceAssignedCrew({
                 setNotice("")
               }}
             >
-              Send SMS
+              {language === "es" ? "Enviar SMS" : "Send SMS"}
             </button>
             <button
               type="button"
               disabled={busyId !== null}
               onClick={() => void revoke(member)}
             >
-              {busyId === member.id ? "Revoking..." : "Revoke from Job"}
+              {busyId === member.id ? (language === "es" ? "Revocando..." : "Revoking...") : (language === "es" ? "Quitar del trabajo" : "Revoke from Job")}
             </button>
           </div>
           {messageTo === member.id && (
             <div style={{ width: "100%", marginTop: 8 }}>
               <textarea
-                aria-label={`Message to ${member.full_name}`}
+                aria-label={`${language === "es" ? "Mensaje para" : "Message to"} ${member.full_name}`}
                 value={message}
                 maxLength={1500}
                 onChange={event => setMessage(event.target.value)}
-                placeholder="Job-related message..."
+                placeholder={language === "es" ? "Mensaje relacionado con el trabajo..." : "Job-related message..."}
                 rows={3}
                 style={{ width: "100%", boxSizing: "border-box" }}
               />
@@ -211,7 +211,7 @@ export default function WorkforceAssignedCrew({
                 disabled={busyId !== null || !message.trim()}
                 onClick={() => void sendCrewSms(member)}
               >
-                {busyId === member.id ? "Sending..." : "Send Job SMS"}
+                {busyId === member.id ? (language === "es" ? "Enviando..." : "Sending...") : (language === "es" ? "Enviar SMS del trabajo" : "Send Job SMS")}
               </button>
             </div>
           )}
