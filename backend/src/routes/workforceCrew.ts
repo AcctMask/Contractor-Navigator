@@ -23,6 +23,333 @@ function getToken(request: any): string {
 
 export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
 
+  // Management-only company crew directory. Roster changes do not
+  // create job assignments or send invitation SMS messages.
+  async function requireCrewDirectoryManager(request: any, reply: any) {
+    const actor = await getCurrentUserFromToken(getToken(request))
+    if (!actor?.is_active) {
+      reply.code(401).send({ ok: false, error: "Unauthorized" })
+      return null
+    }
+    if (!["platform_owner", "tenant_admin", "admin", "manager"].includes(String(actor.role))) {
+      reply.code(403).send({ ok: false, error: "Forbidden" })
+      return null
+    }
+    return actor
+  }
+
+  async function resolveCrewDirectoryCompany(tenantId: number, companyId: number) {
+    if (!Number.isSafeInteger(companyId) || companyId <= 0) return false
+    const result = await pool.query(
+      `select id from subcontractor_companies
+       where id = $1 and tenant_id = $2`,
+      [companyId, tenantId]
+    )
+    return Boolean(result.rowCount)
+  }
+
+
+  // Management assigns existing company roster members to an existing job.
+  // No new member, invitation token, or SMS is created.
+  app.get("/workforce/jobs/:jobId/eligible-companies", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+
+      const tenantId = Number(actor.tenant_id)
+      const jobId = Number(request.params.jobId)
+
+      if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+        return reply.code(400).send({ ok: false, error: "Invalid job" })
+      }
+
+      const result = await pool.query(
+        `select distinct sc.id, sc.company_name
+         from jobs j
+         join crew_assignments ca
+           on ca.job_id = j.id
+          and ca.tenant_id = j.tenant_id
+          and ca.status in ('PENDING', 'active')
+         join app_users u
+           on u.id = ca.app_user_id
+          and u.tenant_id = j.tenant_id
+          and u.role = 'subcontractor'
+          and u.is_active = true
+         join subcontractor_company_users scu
+           on scu.app_user_id = u.id
+         join subcontractor_companies sc
+           on sc.id = scu.subcontractor_company_id
+          and sc.tenant_id = j.tenant_id
+         where j.tenant_id = $1 and j.id = $2
+         order by sc.company_name, sc.id`,
+        [tenantId, jobId]
+      )
+
+      return reply.send({ ok: true, companies: result.rows })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false, error: "Could not load eligible companies",
+      })
+    }
+  })
+
+  app.post("/workforce/jobs/:jobId/assign-existing-crew", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+
+      const tenantId = Number(actor.tenant_id)
+      const jobId = Number(request.params.jobId)
+      const companyId = Number(request.body?.company_id)
+      const memberId = Number(request.body?.crew_member_id)
+
+      if (![tenantId, jobId, companyId, memberId].every(
+        value => Number.isSafeInteger(value) && value > 0
+      )) {
+        return reply.code(400).send({
+          ok: false, error: "Valid job, company and crew member required",
+        })
+      }
+
+      const client = await pool.connect()
+      try {
+        await client.query("BEGIN")
+
+        // Serialize crew assignment with other transactions locking this job.
+        const job = await client.query(
+          `select id from jobs
+           where id = $1 and tenant_id = $2
+           for update`,
+          [jobId, tenantId]
+        )
+
+        if (!job.rowCount) {
+          await client.query("ROLLBACK")
+          return reply.code(404).send({
+            ok: false, error: "Job not found",
+          })
+        }
+
+        const eligible = await client.query(
+          `select m.id, m.full_name, m.crew_role
+           from workforce_crew_members m
+           join subcontractor_companies sc
+             on sc.id = m.subcontractor_company_id
+            and sc.tenant_id = m.tenant_id
+           where m.id = $1
+             and m.tenant_id = $2
+             and m.subcontractor_company_id = $3
+             and m.is_active = true
+             and exists (
+               select 1
+               from crew_assignments ca
+               join app_users u
+                 on u.id = ca.app_user_id
+                and u.tenant_id = ca.tenant_id
+                and u.role = 'subcontractor'
+                and u.is_active = true
+               join subcontractor_company_users scu
+                 on scu.app_user_id = u.id
+                and scu.subcontractor_company_id = m.subcontractor_company_id
+               where ca.tenant_id = m.tenant_id
+                 and ca.job_id = $4
+                 and ca.status in ('PENDING', 'active')
+             )
+           limit 1`,
+          [memberId, tenantId, companyId, jobId]
+        )
+
+        if (!eligible.rowCount) {
+          await client.query("ROLLBACK")
+          return reply.code(403).send({
+            ok: false,
+            error: "Crew member is not eligible for this job and company",
+          })
+        }
+
+        const existing = await client.query(
+          `select id
+           from workforce_crew_job_assignments
+           where tenant_id = $1
+             and job_id = $2
+             and subcontractor_company_id = $3
+             and crew_member_id = $4
+             and status = 'active'
+           order by id desc
+           limit 1`,
+          [tenantId, jobId, companyId, memberId]
+        )
+
+        if (existing.rowCount) {
+          await client.query("COMMIT")
+          return reply.send({
+            ok: true,
+            already_assigned: true,
+            assignment: { id: existing.rows[0].id },
+          })
+        }
+
+        const assigned = await client.query(
+          `insert into workforce_crew_job_assignments
+             (tenant_id, job_id, subcontractor_company_id,
+              crew_member_id, assigned_by_user_id)
+           values ($1,$2,$3,$4,$5)
+           returning id, job_id, status`,
+          [tenantId, jobId, companyId, memberId, Number(actor.id)]
+        )
+
+        await recordWorkforceActivity(client, {
+          tenantId,
+          jobId,
+          actorUserId: Number(actor.id),
+          actorName: String(actor.full_name || actor.email || "User"),
+          subjectName: String(eligible.rows[0].full_name),
+          subjectRole: eligible.rows[0].crew_role === "lead"
+            ? "crew_lead" : "crew_member",
+          action: "assigned",
+          assignmentId: Number(assigned.rows[0].id),
+        })
+
+        await client.query("COMMIT")
+
+        return reply.code(201).send({
+          ok: true,
+          already_assigned: false,
+          assignment: assigned.rows[0],
+        })
+      } catch (error) {
+        await client.query("ROLLBACK")
+        throw error
+      } finally {
+        client.release()
+      }
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false, error: "Could not assign existing crew",
+      })
+    }
+  })
+
+  app.get("/workforce/companies/:companyId/crew", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+      const companyId = Number(request.params.companyId)
+      const tenantId = Number(actor.tenant_id)
+      if (!await resolveCrewDirectoryCompany(tenantId, companyId)) {
+        return reply.code(404).send({ ok: false, error: "Company not found" })
+      }
+      const result = await pool.query(
+        `select id, full_name, mobile_phone, crew_role,
+                preferred_language, invitation_status, is_active,
+                  (app_user_id is not null) as account_activated,
+                  (invitation_token_hash is not null) as invitation_issued
+         from workforce_crew_members
+         where tenant_id = $1 and subcontractor_company_id = $2
+         order by crew_role, full_name, id`,
+        [tenantId, companyId]
+      )
+      return reply.send({ ok: true, crew: result.rows })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({ ok: false, error: "Could not load company crew" })
+    }
+  })
+
+  app.post("/workforce/companies/:companyId/crew", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+      const companyId = Number(request.params.companyId)
+      const tenantId = Number(actor.tenant_id)
+      if (!await resolveCrewDirectoryCompany(tenantId, companyId)) {
+        return reply.code(404).send({ ok: false, error: "Company not found" })
+      }
+      const fullName = String(request.body?.full_name || "").trim()
+      const phone = String(request.body?.mobile_phone || "").trim()
+      const crewRole = String(request.body?.crew_role || "")
+      const language = String(request.body?.preferred_language || "en")
+      if (!fullName || fullName.length > 150 ||
+          !["lead", "member"].includes(crewRole) ||
+          !["en", "es"].includes(language) ||
+          !phone) {
+        return reply.code(400).send({ ok: false, error: "Invalid crew details" })
+      }
+      const normalizedPhone = normalizeCrewPhone(phone)
+      if (!normalizedPhone) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Enter a valid US mobile number",
+        })
+      }
+      const result = await pool.query(
+        `insert into workforce_crew_members
+           (tenant_id, subcontractor_company_id, full_name, mobile_phone,
+            crew_role, preferred_language, invited_by_user_id)
+         values ($1,$2,$3,$4,$5,$6,$7)
+         returning id, full_name, mobile_phone, crew_role,
+                   preferred_language, invitation_status, is_active`,
+        [tenantId, companyId, fullName, normalizedPhone,
+         crewRole, language, Number(actor.id)]
+      )
+      return reply.code(201).send({ ok: true, crew_member: result.rows[0] })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({ ok: false, error: "Could not add crew member" })
+    }
+  })
+
+  app.patch("/workforce/companies/:companyId/crew/:memberId", async (request: any, reply) => {
+    try {
+      const actor = await requireCrewDirectoryManager(request, reply)
+      if (!actor) return
+      const companyId = Number(request.params.companyId)
+      const memberId = Number(request.params.memberId)
+      const tenantId = Number(actor.tenant_id)
+      if (!Number.isSafeInteger(memberId) || memberId <= 0 ||
+          !await resolveCrewDirectoryCompany(tenantId, companyId)) {
+        return reply.code(404).send({ ok: false, error: "Crew member not found" })
+      }
+      const fullName = String(request.body?.full_name || "").trim()
+      const phone = String(request.body?.mobile_phone || "").trim()
+      const crewRole = String(request.body?.crew_role || "")
+      const language = String(request.body?.preferred_language || "")
+      if (!fullName || fullName.length > 150 || !phone ||
+          !["lead", "member"].includes(crewRole) ||
+          !["en", "es"].includes(language)) {
+        return reply.code(400).send({ ok: false, error: "Invalid crew details" })
+      }
+      const normalizedPhone = normalizeCrewPhone(phone)
+      if (!normalizedPhone) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Enter a valid US mobile number",
+        })
+      }
+      const result = await pool.query(
+        `update workforce_crew_members
+         set full_name = $1, mobile_phone = $2, crew_role = $3,
+             preferred_language = $4, updated_at = now()
+         where id = $5 and tenant_id = $6 and subcontractor_company_id = $7
+           and app_user_id is null
+         returning id, full_name, mobile_phone, crew_role,
+                   preferred_language, invitation_status, is_active`,
+        [fullName, normalizedPhone, crewRole,
+         language, memberId, tenantId, companyId]
+      )
+      if (!result.rowCount) {
+        return reply.code(404).send({ ok: false, error: "Crew member not found" })
+      }
+      return reply.send({ ok: true, crew_member: result.rows[0] })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({ ok: false, error: "Could not update crew member" })
+    }
+  })
+
+
   // Crew-only job list. Authorization is enforced in SQL on every request.
   app.get("/workforce/crew/my-jobs", async (request: any, reply) => {
     try {

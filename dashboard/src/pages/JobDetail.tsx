@@ -8,6 +8,7 @@ import { openFinancialOperations } from "../lib/financialOperations"
 import { stagePresentation } from "../lib/stagePresentation"
 import WorkforceCrewInviteForm, { type CrewInviteDetails } from "../components/WorkforceCrewInviteForm"
 import WorkforceAssignedCrew from "../components/WorkforceAssignedCrew"
+import WorkforceJobCrewSelector from "../components/WorkforceJobCrewSelector"
 
 const API_BASE = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 const STAGES = [
@@ -301,6 +302,7 @@ export default function JobDetail() {
     }
 
     successToast("Subcontractor assigned")
+      setWorkforceCrewRefresh(value => value + 1)
     setSelectedSubcontractorId("")
     await loadJob()
   }
@@ -2660,6 +2662,12 @@ export default function JobDetail() {
       ["platform_owner", "tenant_admin", "admin", "manager"].includes(currentUser.role) ? (
         <section style={card}>
           <h2>Assigned Crews</h2>
+          <WorkforceJobCrewSelector
+            jobId={Number(id)}
+            apiBase={API_BASE}
+            refreshKey={workforceCrewRefresh}
+            onAssigned={() => setWorkforceCrewRefresh(value => value + 1)}
+          />
           <WorkforceAssignedCrew
             jobId={Number(id)}
             apiBase={API_BASE}

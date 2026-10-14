@@ -1,4 +1,5 @@
 import { getMe, getToken } from "../lib/auth"
+import WorkforceCompanyCrew from "../components/WorkforceCompanyCrew"
 import { useEffect, useMemo,
   useRef, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
@@ -1665,6 +1666,13 @@ export default function UsersPage() {
                     </button>
                   </div>
 
+
+                  {selectedUser.role === "subcontractor" ? (
+                    <WorkforceCompanyCrew
+                      key={String(selectedUser.id)}
+                      companyId={selectedUser.subcontractor_company_id}
+                    />
+                  ) : null}
 
                   {selectedUser.role === "subcontractor" ? (
                     <div

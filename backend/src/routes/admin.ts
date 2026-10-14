@@ -1782,6 +1782,33 @@ ${assignmentDirectorySql}
           [tenantId, jobId, appUserId]
         );
 
+        // Remove prior company crew access when its subcontractor
+        // assignment is replaced. Preserve historical records.
+        await client.query(
+          `update workforce_crew_job_assignments a
+           set status = 'revoked',
+               revoked_at = now()
+           where a.tenant_id = $1
+             and a.job_id = $2
+             and a.status = 'active'
+             and not exists (
+               select 1
+               from crew_assignments ca
+               join app_users u
+                 on u.id = ca.app_user_id
+                and u.tenant_id = ca.tenant_id
+                and u.role = 'subcontractor'
+                and u.is_active = true
+               join subcontractor_company_users scu
+                 on scu.app_user_id = u.id
+                and scu.subcontractor_company_id = a.subcontractor_company_id
+               where ca.tenant_id = a.tenant_id
+                 and ca.job_id = a.job_id
+                 and ca.status in ('PENDING', 'active')
+             )`,
+          [tenantId, jobId]
+        );
+
         const existing = await client.query(
           `select *
            from crew_assignments
@@ -1987,6 +2014,32 @@ ${assignmentDirectorySql}
             error: "No active assignment to revoke"
           });
         }
+
+        // Revoke individual crew access only when their company
+        // no longer has an active subcontractor on this job.
+        await client.query(
+          `update workforce_crew_job_assignments a
+           set status = 'revoked', revoked_at = now()
+           where a.tenant_id = $1
+             and a.job_id = $2
+             and a.status = 'active'
+             and not exists (
+               select 1
+               from crew_assignments ca
+               join app_users u
+                 on u.id = ca.app_user_id
+                and u.tenant_id = ca.tenant_id
+                and u.role = 'subcontractor'
+                and u.is_active = true
+               join subcontractor_company_users scu
+                 on scu.app_user_id = u.id
+                and scu.subcontractor_company_id = a.subcontractor_company_id
+               where ca.tenant_id = a.tenant_id
+                 and ca.job_id = a.job_id
+                 and ca.status in ('PENDING', 'active')
+             )`,
+          [tenantId, jobId]
+        );
 
         await client.query(
           `insert into timeline_events
