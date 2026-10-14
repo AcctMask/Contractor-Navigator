@@ -124,8 +124,8 @@ export async function collectOutstandingTarps(): Promise<Row[]> {
           and m.is_active = true
          join subcontractor_company_users scu
            on scu.subcontractor_company_id = a.subcontractor_company_id
-          and scu.app_user_id = ca.app_user_id
-         where a.tenant_id = j.tenant_id
+         where scu.app_user_id = ca.app_user_id
+           and a.tenant_id = j.tenant_id
            and a.job_id = j.id
            and a.status = 'active'
        ) crew on true`
