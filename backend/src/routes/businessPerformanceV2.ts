@@ -646,7 +646,6 @@ export async function registerBusinessPerformanceV2Routes(
           ])
         );
 
-        const assignedDateByJob = new Map(navi33ReportAssignments.rows.map((r: any) => [Number(r.job_id), r.assigned_at]));
         const assignedCompanyByJob = new Map(
           navi33ReportAssignments.rows.map((row: any) => [
             Number(row.job_id),
@@ -721,7 +720,6 @@ export async function registerBusinessPerformanceV2Routes(
             navigator_job_id: numberValue(row.id),
             job_label: row.job_label,
             created_at: row.created_at,
-            assigned_at: assignedDateByJob.get(Number(row.id)) || null,
             assigned_at: assignedDateByJob.get(Number(row.id)) || null,
             current_stage: row.stage || "unknown",
             job_type: row.job_type || null,
