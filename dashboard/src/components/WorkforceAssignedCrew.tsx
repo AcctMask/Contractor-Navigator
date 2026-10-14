@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
+import TranslateMessage from "./TranslateMessage"
+import { useLanguage } from "../context/LanguageContext"
 
 type CrewMember = {
   id: number
@@ -22,6 +24,7 @@ export default function WorkforceAssignedCrew({
   token,
   refreshKey,
 }: Props) {
+  const { language } = useLanguage()
   const [crew, setCrew] = useState<CrewMember[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -185,6 +188,15 @@ export default function WorkforceAssignedCrew({
                 rows={3}
                 style={{ width: "100%", boxSizing: "border-box" }}
               />
+              {message.trim() && (
+                <TranslateMessage
+                  key={`crew-sms-${member.id}-${language}-${message}`}
+                  text={message}
+                  jobId={String(jobId)}
+                  language={language}
+                  onUseTranslation={setMessage}
+                />
+              )}
               <button
                 type="button"
                 disabled={busyId !== null || !message.trim()}
