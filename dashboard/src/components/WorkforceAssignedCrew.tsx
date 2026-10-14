@@ -197,6 +197,15 @@ export default function WorkforceAssignedCrew({
                   onUseTranslation={setMessage}
                 />
               )}
+              {message.trim() && (
+                <TranslateMessage
+                  key={`crew-sms-${member.id}-${language}-${message}`}
+                  text={message}
+                  jobId={String(jobId)}
+                  language={language}
+                  onUseTranslation={setMessage}
+                />
+              )}
               <button
                 type="button"
                 disabled={busyId !== null || !message.trim()}
