@@ -756,7 +756,7 @@ export default function BusinessPerformanceV2() {
               marginTop: 8
             }}>
               <strong>Report ready — {reportJobs.length} supporting jobs</strong>
-          <button type="button" onClick={async () => {
+          <button type="button" hidden onClick={async () => {
             const lines = [
               `Business Performance — ${data.tenant.name} — ${range}`,
               `Supporting jobs: ${reportJobs.length}`,
@@ -802,7 +802,7 @@ export default function BusinessPerformanceV2() {
             link.download = `business-performance-${range}.csv`;
             link.click();
             URL.revokeObjectURL(url);
-          }}>Download CSV</button>
+          }} hidden>Download CSV</button>
           <button type="button" onClick={() => {
             const rows = reportJobs.map(j =>
               `<tr><td>${j.navigator_job_id}</td><td>${[
@@ -841,7 +841,7 @@ export default function BusinessPerformanceV2() {
             window.location.href = `mailto:?subject=${encodeURIComponent(
               "Business Performance Report — " + (data?.tenant.name || tenant)
             )}&body=${encodeURIComponent(reportSummary)}`;
-          }}>Send Email</button>
+          }} hidden>Send Email</button>
             </div>
           )}
           <span role="status">{reportCopyStatus}</span>
