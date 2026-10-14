@@ -23,6 +23,170 @@ function getToken(request: any): string {
 
 export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
 
+
+  // Assigned workforce notes. Do not expose private tenant notes.
+  async function workforceNoteIdentity(request: any, reply: any, jobId: number) {
+    const actor = await getCurrentUserFromToken(getToken(request))
+    if (!actor?.is_active) {
+      reply.code(401).send({ ok: false, error: "Unauthorized" })
+      return null
+    }
+
+    const tenantId = Number(actor.tenant_id)
+    const userId = Number(actor.id)
+
+    if (!Number.isSafeInteger(jobId) || jobId <= 0 ||
+        !Number.isSafeInteger(tenantId) || tenantId <= 0) {
+      reply.code(400).send({ ok: false, error: "Invalid job" })
+      return null
+    }
+
+    if (actor.role === "subcontractor") {
+      const access = await pool.query(
+        `select distinct scu.subcontractor_company_id as company_id
+         from crew_assignments ca
+         join subcontractor_company_users scu
+           on scu.app_user_id = ca.app_user_id
+         join subcontractor_companies sc
+           on sc.id = scu.subcontractor_company_id
+          and sc.tenant_id = ca.tenant_id
+         where ca.tenant_id = $1
+           and ca.job_id = $2
+           and ca.app_user_id = $3
+           and ca.status in ('PENDING', 'active')`,
+        [tenantId, jobId, userId]
+      )
+      if (access.rows.length !== 1) {
+        reply.code(403).send({ ok: false, error: "Job access denied" })
+        return null
+      }
+      return {
+        actor, tenantId, jobId,
+        companyId: Number(access.rows[0].company_id),
+      }
+    }
+
+    if (actor.role === "crew") {
+      const access = await pool.query(
+        `select distinct a.subcontractor_company_id as company_id
+         from workforce_crew_job_assignments a
+         join workforce_crew_members m
+           on m.id = a.crew_member_id
+          and m.tenant_id = a.tenant_id
+          and m.subcontractor_company_id = a.subcontractor_company_id
+         where a.tenant_id = $1
+           and a.job_id = $2
+           and m.app_user_id = $3
+           and m.is_active = true
+           and a.status = 'active'
+           and exists (
+             select 1
+             from crew_assignments ca
+             join subcontractor_company_users scu
+               on scu.app_user_id = ca.app_user_id
+              and scu.subcontractor_company_id = a.subcontractor_company_id
+             join app_users sub
+               on sub.id = ca.app_user_id
+              and sub.tenant_id = ca.tenant_id
+              and sub.is_active = true
+              and sub.role = 'subcontractor'
+             where ca.tenant_id = a.tenant_id
+               and ca.job_id = a.job_id
+               and ca.status in ('PENDING', 'active')
+           )`,
+        [tenantId, jobId, userId]
+      )
+      if (access.rows.length !== 1) {
+        reply.code(403).send({ ok: false, error: "Job access denied" })
+        return null
+      }
+      return {
+        actor, tenantId, jobId,
+        companyId: Number(access.rows[0].company_id),
+      }
+    }
+
+    reply.code(403).send({ ok: false, error: "Workforce access only" })
+    return null
+  }
+
+  app.get("/workforce/jobs/:jobId/notes", async (request: any, reply) => {
+    try {
+      const identity = await workforceNoteIdentity(
+        request, reply, Number(request.params.jobId)
+      )
+      if (!identity) return
+
+      const result = await pool.query(
+        `select id, kind, message, meta, created_at
+         from timeline_events
+         where tenant_id = $1
+           and job_id = $2
+           and kind = 'staff_note'
+           and meta->>'communication_scope' = 'workforce'
+           and meta->>'subcontractor_company_id' = $3
+         order by created_at desc, id desc
+         limit 200`,
+        [
+          identity.tenantId,
+          identity.jobId,
+          String(identity.companyId),
+        ]
+      )
+
+      return reply.send({ ok: true, notes: result.rows })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false, error: "Unable to load workforce notes",
+      })
+    }
+  })
+
+  app.post("/workforce/jobs/:jobId/notes", async (request: any, reply) => {
+    try {
+      const identity = await workforceNoteIdentity(
+        request, reply, Number(request.params.jobId)
+      )
+      if (!identity) return
+
+      const message = String(request.body?.message || "").trim()
+      if (!message || message.length > 5000) {
+        return reply.code(400).send({
+          ok: false, error: "Note must contain 1–5000 characters",
+        })
+      }
+
+      const actor = identity.actor
+      const result = await pool.query(
+        `insert into timeline_events
+           (tenant_id, job_id, kind, message, meta, created_at)
+         values ($1, $2, 'staff_note', $3, $4::jsonb, now())
+         returning id, kind, message, meta, created_at`,
+        [
+          identity.tenantId,
+          identity.jobId,
+          message,
+          JSON.stringify({
+            author: String(actor.full_name || actor.email || "Team"),
+            author_app_user_id: Number(actor.id),
+            communication_scope: "workforce",
+            subcontractor_company_id: identity.companyId,
+          }),
+        ]
+      )
+
+      return reply.code(201).send({
+        ok: true, note: result.rows[0],
+      })
+    } catch (error) {
+      request.log.error(error)
+      return reply.code(500).send({
+        ok: false, error: "Unable to save workforce note",
+      })
+    }
+  })
+
   // Management-only company crew directory. Roster changes do not
   // create job assignments or send invitation SMS messages.
   async function requireCrewDirectoryManager(request: any, reply: any) {

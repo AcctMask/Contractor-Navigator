@@ -181,6 +181,23 @@ export default function JobDetail() {
     }
   }
 
+  async function loadWorkforceNotes() {
+    if (!id) return
+
+    const response = await fetch(
+      `${API_BASE}/workforce/jobs/${id}/notes`,
+      { headers: { Authorization: `Bearer ${getToken()}` } }
+    )
+    const result = await response.json()
+
+    if (!response.ok || !result.ok) {
+      errorToast(result.error || "Unable to load job notes")
+      return
+    }
+
+    setNotes(Array.isArray(result.notes) ? result.notes : [])
+  }
+
   async function loadJob() {
     if (!id) return
 
@@ -1259,7 +1276,9 @@ export default function JobDetail() {
     setStatus("Adding note...")
 
     const token = getToken()
-    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/notes`, {
+    const res = await fetch(currentUser?.role === "subcontractor"
+      ? `${API_BASE}/workforce/jobs/${id}/notes`
+      : `${API_BASE}/assets/${getTenantSlug()}/job/${id}/notes`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1280,8 +1299,12 @@ export default function JobDetail() {
 
     setNoteText("")
     successToast("Note added")
-    await loadJob()
-    await loadAssets()
+    if (currentUser?.role === "subcontractor") {
+      await loadWorkforceNotes()
+    } else {
+      await loadJob()
+      await loadAssets()
+    }
   }
 
   async function deleteNote(noteId: number | string) {
@@ -2130,6 +2153,13 @@ export default function JobDetail() {
 
             <section style={card}>
               <h2>Job Activity</h2>
+              <button
+                type="button"
+                onClick={() => void loadWorkforceNotes()}
+                style={button}
+              >
+                Refresh Job Notes
+              </button>
 
               {notes.length === 0 ? (
                 <p>No activity available.</p>
