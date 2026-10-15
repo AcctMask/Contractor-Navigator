@@ -89,6 +89,7 @@ export default function JobDetail() {
   const uploadInFlightRef = useRef(false)
   const [showAllPhotos, setShowAllPhotos] = useState(true)
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
+  const [photoZoom, setPhotoZoom] = useState(1)
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
@@ -1991,6 +1992,7 @@ export default function JobDetail() {
         return
       }
 
+      setPhotoZoom(1)
       setSelectedPhotoId((current) => {
         if (current !== String(assetId)) return current
         const photos = assets.filter(
@@ -2079,6 +2081,7 @@ export default function JobDetail() {
   }, [id, currentUser])
 
   function openPhoto(asset: any) {
+    setPhotoZoom(1)
     setSelectedPhotoId(String(asset.id))
   }
 
@@ -2123,20 +2126,45 @@ export default function JobDetail() {
         <strong>
           {spanish ? "Foto" : "Photo"} {index + 1} / {photos.length}
         </strong>
-        {photoPreviewUrls[String(photo.id)] ? (
-          <img
-            src={photoPreviewUrls[String(photo.id)]}
-            alt={photo.note || photo.original_name || "Job photo"}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "75vh",
-              objectFit: "contain",
-              transform: `rotate(${photoRotations[String(photo.id)] || 0}deg)`,
-            }}
-          />
-        ) : (
-          <span>{spanish ? "Cargando foto..." : "Loading photo..."}</span>
-        )}
+        <div style={{
+          width: "min(94vw, 1200px)",
+          maxHeight: "72vh",
+          overflow: "auto",
+          textAlign: "center",
+        }}>
+          {photoPreviewUrls[String(photo.id)] ? (
+            <img
+              src={photoPreviewUrls[String(photo.id)]}
+              alt={photo.note || photo.original_name || "Job photo"}
+              style={{
+                maxWidth: photoZoom === 1 ? "100%" : "none",
+                maxHeight: photoZoom === 1 ? "70vh" : "none",
+                width: photoZoom === 1 ? "auto" : `${photoZoom * 100}%`,
+                height: "auto",
+                objectFit: "contain",
+                transform: `rotate(${photoRotations[String(photo.id)] || 0}deg)`,
+              }}
+            />
+          ) : (
+            <span>{spanish ? "Cargando foto..." : "Loading photo..."}</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+          <button type="button" style={button}
+            disabled={photoZoom <= 1}
+            onClick={() => setPhotoZoom(z => Math.max(1, z - 0.5))}>
+            {spanish ? "− Alejar" : "− Zoom Out"}
+          </button>
+          <button type="button" style={button}
+            disabled={photoZoom >= 3}
+            onClick={() => setPhotoZoom(z => Math.min(3, z + 0.5))}>
+            {spanish ? "+ Acercar" : "+ Zoom In"}
+          </button>
+          <button type="button" style={button}
+            onClick={() => setPhotoZoom(1)}>
+            {spanish ? "Restablecer" : "Reset"} ({Math.round(photoZoom * 100)}%)
+          </button>
+        </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             type="button"

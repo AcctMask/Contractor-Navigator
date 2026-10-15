@@ -69,6 +69,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
   const [message, setMessage] = useState("")
   const [expanded, setExpanded] = useState(true)
   const [selectedViewerPhotoId, setSelectedViewerPhotoId] = useState<number | null>(null)
+  const [photoZoom, setPhotoZoom] = useState(1)
   const previewUrls = useRef<string[]>([])
 
   const base = `${API_BASE}/assets/${encodeURIComponent(tenantSlug)}/job/${jobId}`
@@ -390,6 +391,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
 
       const index = photos.findIndex(item => item.id === photo.id)
       const adjacent = photos[index + 1] || photos[index - 1]
+      setPhotoZoom(1)
       setSelectedViewerPhotoId(current =>
         current === photo.id ? (adjacent?.id ?? null) : current
       )
@@ -461,32 +463,57 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
               }}
             >
               <strong>{tr("Photo", "Foto")} {index + 1} / {photos.length}</strong>
-              {previews[photo.id] ? (
-                <img
-                  src={previews[photo.id]}
-                  alt={photo.note || photo.original_name || "Job photo"}
-                  style={{
-                    maxWidth: "100%",
-                    maxHeight: "75vh",
-                    objectFit: "contain",
-                    transform: `rotate(${rotations[photo.id] || 0}deg)`,
-                  }}
-                />
-              ) : (
-                <span>{tr("Loading photo...", "Cargando foto...")}</span>
-              )}
+              <div style={{
+                width: "min(94vw, 1200px)",
+                maxHeight: "72vh",
+                overflow: "auto",
+                textAlign: "center",
+              }}>
+                {previews[photo.id] ? (
+                  <img
+                    src={previews[photo.id]}
+                    alt={photo.note || photo.original_name || "Job photo"}
+                    style={{
+                      maxWidth: photoZoom === 1 ? "100%" : "none",
+                      maxHeight: photoZoom === 1 ? "70vh" : "none",
+                      width: photoZoom === 1 ? "auto" : `${photoZoom * 100}%`,
+                      height: "auto",
+                      objectFit: "contain",
+                      transform: `rotate(${rotations[photo.id] || 0}deg)`,
+                    }}
+                  />
+                ) : (
+                  <span>{tr("Loading photo...", "Cargando foto...")}</span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                <button type="button"
+                  disabled={photoZoom <= 1}
+                  onClick={() => setPhotoZoom(z => Math.max(1, z - 0.5))}>
+                  {tr("− Zoom Out", "− Alejar")}
+                </button>
+                <button type="button"
+                  disabled={photoZoom >= 3}
+                  onClick={() => setPhotoZoom(z => Math.min(3, z + 0.5))}>
+                  {tr("+ Zoom In", "+ Acercar")}
+                </button>
+                <button type="button"
+                  onClick={() => setPhotoZoom(1)}>
+                  {tr("Reset", "Restablecer")} ({Math.round(photoZoom * 100)}%)
+                </button>
+              </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button
                   type="button"
                   disabled={!previous}
-                  onClick={() => previous && setSelectedViewerPhotoId(previous.id)}
+                  onClick={() => { if (previous) { setPhotoZoom(1); setSelectedViewerPhotoId(previous.id) } }}
                 >
                   {tr("← Back", "← Anterior")}
                 </button>
                 <button
                   type="button"
                   disabled={!next}
-                  onClick={() => next && setSelectedViewerPhotoId(next.id)}
+                  onClick={() => { if (next) { setPhotoZoom(1); setSelectedViewerPhotoId(next.id) } }}
                 >
                   {tr("Next →", "Siguiente →")}
                 </button>
@@ -587,6 +614,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
               type="button"
               onClick={() => {
                 setExpanded(true)
+                setPhotoZoom(1)
                 setSelectedViewerPhotoId(photo.id)
               }}
             >
