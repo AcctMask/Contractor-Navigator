@@ -599,9 +599,8 @@ export async function previewDailyTarpRecipients() {
 
 
 /**
- * Controlled daily delivery.
- * Requires explicit enablement and a database delivery ledger.
- * Never runs on weekends or outside 7 AM America/New_York.
+ * Protected daily delivery with per-recipient database deduplication.
+ * Scheduling is controlled externally; authorized manual calls are allowed.
  */
 export async function sendDailyOutstandingTarps() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -616,21 +615,6 @@ export async function sendDailyOutstandingTarps() {
 
   const part = (type: string) =>
     parts.find(p => p.type === type)?.value || ""
-
-  const easternHour = Number(part("hour"))
-
-  const catchUpAuthorized =
-  process.env.TARP_CATCHUP_DATE === "2026-10-14" &&
-  `${part("year")}-${part("month")}-${part("day")}` === "2026-10-14"
-
-if (!catchUpAuthorized &&
-    (["Sat", "Sun"].includes(part("weekday")) ||
-     easternHour < 7 || easternHour > 8)) {
-    return {
-      ok: false,
-      skipped: "Outside weekday 7–9 AM Eastern delivery window"
-    }
-  }
 
   const reportDate =
     `${part("year")}-${part("month")}-${part("day")}`
