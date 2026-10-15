@@ -1,3 +1,4 @@
+import JobPhotoWorkspace from "../components/JobPhotoWorkspace"
 import { useEffect, useState } from "react"
 import { clearToken, getToken } from "../lib/auth"
 import { useLanguage } from "../context/LanguageContext"
@@ -617,7 +618,13 @@ export default function CrewPortal() {
                 />
               )}
               <CrewJobNotes jobId={job.id} spanish={spanish} />
-              <CrewSmsPanel jobId={job.id} spanish={spanish} />\n            </article>
+              <CrewSmsPanel jobId={job.id} spanish={spanish} />
+                {job.tenant_slug ? (
+                  <JobPhotoWorkspace
+                    tenantSlug={job.tenant_slug}
+                    jobId={job.id}
+                  />
+                ) : null}\n            </article>
           ))}
         </div>
       </div>

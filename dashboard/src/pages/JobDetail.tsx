@@ -1,3 +1,4 @@
+import JobPhotoWorkspace from "../components/JobPhotoWorkspace"
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Link, useParams } from "react-router-dom"
 import { getMe, getToken, type AuthUser } from "../lib/auth"
@@ -87,6 +88,7 @@ export default function JobDetail() {
   const [uploadProgress, setUploadProgress] = useState("")
   const uploadInFlightRef = useRef(false)
   const [showAllPhotos, setShowAllPhotos] = useState(false)
+  const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
   const [photoPreviewUrls, setPhotoPreviewUrls] = useState<Record<string, string>>({})
@@ -1961,6 +1963,54 @@ export default function JobDetail() {
     await loadAssets()
   }
 
+  async function deletePhoto(assetId: number | string) {
+    if (!id) return
+
+    const spanish = language === "es"
+    const confirmed = window.confirm(
+      spanish
+        ? "¿Eliminar esta foto permanentemente? Esta acción no se puede deshacer."
+        : "Permanently delete this photo? This cannot be undone."
+    )
+    if (!confirmed) return
+
+    try {
+      const res = await fetch(
+        `${API_BASE}/assets/${getTenantSlug()}/job/${id}/photo/${assetId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${getToken()}` },
+        }
+      )
+      const data = await res.json()
+
+      if (!res.ok || !data.ok) {
+        errorToast(data?.error || (
+          spanish ? "No se pudo eliminar la foto" : "Unable to delete photo"
+        ))
+        return
+      }
+
+      setSelectedPhotoId((current) => {
+        if (current !== String(assetId)) return current
+        const photos = assets.filter(
+          (asset: any) =>
+            asset.asset_type === "photo" ||
+            String(asset.mime_type || "").startsWith("image/")
+        )
+        const index = photos.findIndex(
+          (asset: any) => String(asset.id) === String(assetId)
+        )
+        const following = photos[index + 1] || photos[index - 1]
+        return following ? String(following.id) : null
+      })
+      successToast(spanish ? "Foto eliminada" : "Photo deleted")
+      await loadAssets()
+    } catch {
+      errorToast(spanish ? "No se pudo eliminar la foto" : "Unable to delete photo")
+    }
+  }
+
   async function deleteFile(assetId: number | string) {
     if (!id) return
     if (!window.confirm("Delete this file/photo?")) return
@@ -2000,7 +2050,6 @@ export default function JobDetail() {
   }, [id])
 
   useEffect(() => {
-    if (!showAllPhotos) return
 
     const photos = assets.filter(
       (asset: any) =>
@@ -2009,7 +2058,7 @@ export default function JobDetail() {
     )
 
     void loadPhotoPreviews(photos)
-  }, [showAllPhotos, assets])
+  }, [assets])
 
   useEffect(() => {
     if (!currentUser) {
@@ -2026,9 +2075,105 @@ export default function JobDetail() {
     }
   }, [id, currentUser])
 
+  function openPhoto(asset: any) {
+    setSelectedPhotoId(String(asset.id))
+  }
+
+  function renderPhotoViewer() {
+    if (!selectedPhotoId) return null
+
+    const photos = assets.filter(
+      (asset: any) =>
+        asset.asset_type === "photo" ||
+        String(asset.mime_type || "").startsWith("image/")
+    )
+    const index = photos.findIndex(
+      (asset: any) => String(asset.id) === selectedPhotoId
+    )
+    if (index < 0) return null
+
+    const photo = photos[index]
+    const previous = photos[index - 1]
+    const next = photos[index + 1]
+    const spanish = language === "es"
+
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={spanish ? "Visor de fotos" : "Photo viewer"}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 20000,
+          background: "rgba(0,0,0,0.94)",
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 16,
+          padding: 18,
+          boxSizing: "border-box",
+        }}
+      >
+        <strong>
+          {spanish ? "Foto" : "Photo"} {index + 1} / {photos.length}
+        </strong>
+        {photoPreviewUrls[String(photo.id)] ? (
+          <img
+            src={photoPreviewUrls[String(photo.id)]}
+            alt={photo.note || photo.original_name || "Job photo"}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "75vh",
+              objectFit: "contain",
+              transform: `rotate(${photoRotations[String(photo.id)] || 0}deg)`,
+            }}
+          />
+        ) : (
+          <span>{spanish ? "Cargando foto..." : "Loading photo..."}</span>
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            style={button}
+            disabled={!previous}
+            onClick={() => previous && openPhoto(previous)}
+          >
+            {spanish ? "← Anterior" : "← Back"}
+          </button>
+          <button
+            type="button"
+            style={button}
+            disabled={!next}
+            onClick={() => next && openPhoto(next)}
+          >
+            {spanish ? "Siguiente →" : "Next →"}
+          </button>
+          <button
+            type="button"
+            style={{ ...dangerButton, background: "#dc2626" }}
+            onClick={() => { void deletePhoto(photo.id) }}
+          >
+            {spanish ? "Eliminar foto" : "Delete Photo"}
+          </button>
+          <button
+            type="button"
+            style={button}
+            onClick={() => setSelectedPhotoId(null)}
+          >
+            {spanish ? "Cerrar" : "Close"}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (currentUser?.role === "subcontractor") {
     return (
       <div style={page}>
+        {renderPhotoViewer()}
         <Link to="/field" style={linkStyle}>
           {language === "es" ? "← Volver a mis trabajos asignados" : "← Back to My Assigned Jobs"}
         </Link>
@@ -2244,6 +2389,12 @@ export default function JobDetail() {
 
             <section style={card}>
               <h2>{language === "es" ? "Subir archivos / fotos" : "Upload Files / Photos"}</h2>
+                {id && Number.isSafeInteger(Number(id)) && Number(id) > 0 ? (
+                  <JobPhotoWorkspace
+                    tenantSlug={getTenantSlug()}
+                    jobId={Number(id)}
+                  />
+                ) : null}
 
               <label style={label}>{language === "es" ? "Categoría de carga" : "Upload Category"}</label>
               <select
@@ -2283,6 +2434,37 @@ export default function JobDetail() {
               ) : (
                 assets.map((asset) => (
                   <div key={asset.id} style={row}>
+                    {/* navi-subcontractor-photo-thumbnail-20261015 */}
+                    {(asset.asset_type === "photo" ||
+                      String(asset.mime_type || "").startsWith("image/")) && (
+                      <button
+                        type="button"
+                        onClick={() => openPhoto(asset)}
+                        style={{
+                          padding: 0,
+                          border: 0,
+                          background: "transparent",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {photoPreviewUrls[String(asset.id)] ? (
+                          <img
+                            src={photoPreviewUrls[String(asset.id)]}
+                            alt={asset.original_name || "Job photo"}
+                            style={{
+                              width: 140,
+                              height: 110,
+                              objectFit: "cover",
+                              borderRadius: 8,
+                            }}
+                          />
+                        ) : (
+                          <span>
+                            {language === "es" ? "Cargando foto..." : "Loading photo..."}
+                          </span>
+                        )}
+                      </button>
+                    )}
                     <div>
                       <strong>
                         {asset.original_name ||
@@ -2312,7 +2494,12 @@ export default function JobDetail() {
                       </p>
 
                       <button
-                        onClick={() => openFile(asset)}
+                        onClick={() =>
+                            asset.asset_type === "photo" ||
+                            String(asset.mime_type || "").startsWith("image/")
+                              ? openPhoto(asset)
+                              : openFile(asset)
+                          }
                         style={button}
                       >
                         {language === "es" ? "Abrir archivo" : "Open File"}
@@ -2330,6 +2517,7 @@ export default function JobDetail() {
 
   return (
     <div style={page}>
+        {renderPhotoViewer()}
       {toast ? (
         <div style={{
           position: "fixed",
@@ -3631,7 +3819,7 @@ export default function JobDetail() {
 
             <button
               type="button"
-              onClick={() => openFile(asset)}
+              onClick={() => openPhoto(asset)}
               style={photoPreviewButton}
               title="Open full size"
             >
@@ -3719,11 +3907,18 @@ export default function JobDetail() {
                   ) : null}
 
                   <button
-                    onClick={() => openFile(asset)}
+                    onClick={() => openPhoto(asset)}
                     style={button}
                   >
                     Open Full Size
                   </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePhoto(asset.id)}
+                      style={{ ...dangerButton, background: "#dc2626", color: "#fff", fontWeight: 800 }}
+                    >
+                      {language === "es" ? "Eliminar foto" : "Delete Photo"}
+                    </button>
                 </div>
               </>
             )}
