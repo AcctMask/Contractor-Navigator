@@ -87,7 +87,7 @@ export default function JobDetail() {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState("")
   const uploadInFlightRef = useRef(false)
-  const [showAllPhotos, setShowAllPhotos] = useState(false)
+  const [showAllPhotos, setShowAllPhotos] = useState(true)
   const [selectedPhotoId, setSelectedPhotoId] = useState<string | null>(null)
   const [showAllDocuments, setShowAllDocuments] = useState(false)
   const [photoSequences, setPhotoSequences] = useState<Record<string, string>>({})
@@ -2017,6 +2017,9 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/file/${assetId}`, {
       method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${getToken()}`,
+      },
     })
 
     const data = await res.json()

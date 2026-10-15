@@ -67,7 +67,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
   const [busy, setBusy] = useState("")
   const [error, setError] = useState("")
   const [message, setMessage] = useState("")
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(true)
   const [selectedViewerPhotoId, setSelectedViewerPhotoId] = useState<number | null>(null)
   const previewUrls = useRef<string[]>([])
 
@@ -659,14 +659,25 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
 
           <label>
             {tr("Photo location", "Ubicación de la foto")}
-            <input
+            <select
               value={locations[photo.id] || ""}
-              placeholder={tr("e.g. Front roof slope", "Ej.: pendiente frontal del techo")}
               onChange={event => setLocations(current => ({
                 ...current,
                 [photo.id]: event.target.value,
               }))}
-            />
+            >
+              <option value="">{tr("Not specified", "Sin especificar")}</option>
+              <option value="Front">{tr("Front", "Frente")}</option>
+              <option value="Right">{tr("Right", "Derecha")}</option>
+              <option value="Rear">{tr("Rear", "Parte trasera")}</option>
+              <option value="Left">{tr("Left", "Izquierda")}</option>
+              {locations[photo.id] &&
+               !["Front", "Right", "Rear", "Left"].includes(locations[photo.id]) && (
+                <option value={locations[photo.id]}>
+                  {locations[photo.id]}
+                </option>
+              )}
+            </select>
           </label>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
