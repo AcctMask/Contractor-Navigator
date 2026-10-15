@@ -22,10 +22,12 @@ export function getToken() {
 
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
+  window.dispatchEvent(new Event("contractor-navigator-auth-change"))
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  window.dispatchEvent(new Event("contractor-navigator-auth-change"))
 }
 
 export function isLoggedIn() {

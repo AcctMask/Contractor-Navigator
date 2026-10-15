@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react"
 import { useLanguage } from "../context/LanguageContext"
 import { useNavigate } from "react-router-dom"
-import { clearToken, getMe, getToken, saveMyPreferredLanguage, type AuthUser } from "../lib/auth"
+import { clearToken, getMe, getToken, type AuthUser } from "../lib/auth"
 import {
   getTenantSlug,
   tenantDisplayName,
 } from "../lib/tenant"
 
 import {
-  normalizeWorkforceLanguage,
   WORKFORCE_LANGUAGES,
   type WorkforceLanguage,
 } from "../lib/workforceLanguage"
@@ -24,8 +23,6 @@ export default function FieldPortalPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const { language, setLanguage, t } = useLanguage()
-  const [savingLanguage, setSavingLanguage] = useState(false)
-  const [languageError, setLanguageError] = useState("")
 
   useEffect(() => {
     let active = true
@@ -36,9 +33,6 @@ export default function FieldPortalPage() {
 
         if (!active) return
         setUser(currentUser)
-        setLanguage(
-          normalizeWorkforceLanguage(currentUser?.preferred_language)
-        )
 
         const token = getToken()
         const res = await fetch(
@@ -77,25 +71,9 @@ export default function FieldPortalPage() {
     }
   }, [])
 
-  async function changeLanguage(next: WorkforceLanguage) {
-    if (savingLanguage || next === language) return
-
-    setSavingLanguage(true)
-    setLanguageError("")
-
-    try {
-      await saveMyPreferredLanguage(next)
-      setLanguage(next)
-      setUser((current) =>
-        current ? { ...current, preferred_language: next } : current
-      )
-    } catch (err: any) {
-      setLanguageError(
-        err?.message || "Unable to save language preference"
-      )
-    } finally {
-      setSavingLanguage(false)
-    }
+  function changeLanguage(next: WorkforceLanguage) {
+    if (next === language) return
+    setLanguage(next)
   }
 
   function handleLogout() {
@@ -176,7 +154,7 @@ export default function FieldPortalPage() {
             <select
               id="field-language"
               value={language}
-              disabled={!user || savingLanguage}
+              disabled={!user}
               onChange={(e) =>
                 void changeLanguage(e.target.value as WorkforceLanguage)
               }
@@ -188,11 +166,6 @@ export default function FieldPortalPage() {
                 </option>
               ))}
             </select>
-            {languageError && (
-              <p role="alert" style={{ color: "#ffb4b4" }}>
-                {languageError}
-              </p>
-            )}
           </div>
         </div>
 

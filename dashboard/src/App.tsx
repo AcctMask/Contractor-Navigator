@@ -30,10 +30,8 @@ import {
   clearToken,
   getToken,
   isLoggedIn,
-  saveMyPreferredLanguage,
 } from "./lib/auth"
 import {
-  normalizeWorkforceLanguage,
   type WorkforceLanguage,
 } from "./lib/workforceLanguage"
 import { useLanguage } from "./context/LanguageContext"
@@ -63,10 +61,6 @@ function HeaderBar() {
     language: headerPreferredLanguage,
     setLanguage: setHeaderPreferredLanguage,
   } = useLanguage()
-  const [savingHeaderLanguage, setSavingHeaderLanguage] =
-    useState(false)
-  const [headerLanguageError, setHeaderLanguageError] =
-    useState("")
 
   const [platformTenants, setPlatformTenants] =
     useState<any[]>([])
@@ -113,9 +107,6 @@ function HeaderBar() {
         }
 
         setCurrentUser(data.user)
-        setHeaderPreferredLanguage(
-          normalizeWorkforceLanguage(data.user?.preferred_language)
-        )
 
         if (
           data.user?.role !==
@@ -199,25 +190,9 @@ function HeaderBar() {
     )
   }
 
-  async function saveHeaderLanguage(next: WorkforceLanguage) {
-    if (savingHeaderLanguage || next === headerPreferredLanguage) return
-
-    setSavingHeaderLanguage(true)
-    setHeaderLanguageError("")
-
-    try {
-      await saveMyPreferredLanguage(next)
-      setHeaderPreferredLanguage(next)
-      setCurrentUser((current: any) =>
-        current ? { ...current, preferred_language: next } : current
-      )
-    } catch (err: any) {
-      setHeaderLanguageError(
-        err?.message || "Unable to save language preference"
-      )
-    } finally {
-      setSavingHeaderLanguage(false)
-    }
+  function saveHeaderLanguage(next: WorkforceLanguage) {
+    if (next === headerPreferredLanguage) return
+    setHeaderPreferredLanguage(next)
   }
 
   function handleLogout() {
@@ -387,7 +362,7 @@ function HeaderBar() {
               id="header-language"
               aria-label="Preferred language"
               value={headerPreferredLanguage}
-              disabled={!currentUser || savingHeaderLanguage}
+              disabled={!currentUser}
               onChange={(event) =>
                 void saveHeaderLanguage(
                   event.target.value as WorkforceLanguage
@@ -401,11 +376,6 @@ function HeaderBar() {
               <option value="en">English</option>
               <option value="es">Español</option>
             </select>
-            {headerLanguageError ? (
-              <span role="alert" style={{ color: "#fecaca", fontSize: "12px" }}>
-                {headerLanguageError}
-              </span>
-            ) : null}
 
             <button
               onClick={handleLogout}
