@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { getToken } from "../lib/auth"
+import { useLanguage } from "../context/LanguageContext"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -33,6 +34,26 @@ const CATEGORIES = [
 ]
 
 export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
+  const { language } = useLanguage()
+  const spanish = language === "es"
+  const tr = (en: string, es: string) => spanish ? es : en
+
+  // Translate presentation only; preserve category database keys.
+  const categoryLabels: Record<string, string> = {
+    Roof: "Techo",
+    Tarp: "Lona",
+    Repairs: "Reparaciones",
+    Exterior: "Exterior",
+    Interior: "Interior",
+    Damage: "Daños",
+    Before: "Antes",
+    During: "Durante",
+    After: "Después",
+    Other: "Otro",
+    Documents: "Documentos",
+  }
+  const categoryLabel = (key: string) =>
+    spanish ? (categoryLabels[key] || key) : key
   const [photos, setPhotos] = useState<Photo[]>([])
   const [previews, setPreviews] = useState<Record<number, string>>({})
   const [files, setFiles] = useState<File[]>([])
@@ -155,9 +176,9 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
     setMessage("")
     try {
       await action()
-      setMessage(`${label} completed`)
+      setMessage(spanish ? "Operación completada" : `${label} completed`)
     } catch (err: any) {
-      setError(err?.message || `${label} failed`)
+      setError(err?.message || tr(`${label} failed`, "No se pudo completar la operación"))
     } finally {
       setBusy("")
     }
@@ -349,7 +370,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
     if (busy) return
 
     if (!window.confirm(
-      "Permanently delete this photo? / ¿Eliminar esta foto permanentemente? This cannot be undone."
+      tr("Permanently delete this photo? This cannot be undone.", "¿Eliminar esta foto permanentemente? Esta acción no se puede deshacer.")
     )) return
 
     setBusy("Delete photo")
@@ -364,7 +385,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
 
       const data = await response.json()
       if (!response.ok || !data.ok) {
-        throw new Error(data.error || "Photo deletion failed")
+        throw new Error(data.error || tr("Photo deletion failed", "No se pudo eliminar la foto"))
       }
 
       const index = photos.findIndex(item => item.id === photo.id)
@@ -372,10 +393,10 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
       setSelectedViewerPhotoId(current =>
         current === photo.id ? (adjacent?.id ?? null) : current
       )
-      setMessage("Photo permanently deleted / Foto eliminada permanentemente")
+      setMessage(tr("Photo permanently deleted", "Foto eliminada permanentemente"))
       await load()
     } catch (err: any) {
-      setError(err?.message || "Photo deletion failed")
+      setError(err?.message || tr("Photo deletion failed", "No se pudo eliminar la foto"))
     } finally {
       setBusy("")
     }
@@ -423,7 +444,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
             <div
               role="dialog"
               aria-modal="true"
-              aria-label="Job photo viewer"
+              aria-label={tr("Job photo viewer", "Visor de fotos del trabajo")}
               style={{
                 position: "fixed",
                 inset: 0,
@@ -439,7 +460,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                 color: "#fff",
               }}
             >
-              <strong>Photo / Foto {index + 1} / {photos.length}</strong>
+              <strong>{tr("Photo", "Foto")} {index + 1} / {photos.length}</strong>
               {previews[photo.id] ? (
                 <img
                   src={previews[photo.id]}
@@ -452,7 +473,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                   }}
                 />
               ) : (
-                <span>Loading photo / Cargando foto...</span>
+                <span>{tr("Loading photo...", "Cargando foto...")}</span>
               )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button
@@ -460,14 +481,14 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                   disabled={!previous}
                   onClick={() => previous && setSelectedViewerPhotoId(previous.id)}
                 >
-                  ← Back / Anterior
+                  {tr("← Back", "← Anterior")}
                 </button>
                 <button
                   type="button"
                   disabled={!next}
                   onClick={() => next && setSelectedViewerPhotoId(next.id)}
                 >
-                  Next / Siguiente →
+                  {tr("Next →", "Siguiente →")}
                 </button>
                 <button
                   type="button"
@@ -482,21 +503,21 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                     fontWeight: 800,
                   }}
                 >
-                  Delete Photo / Eliminar foto
+                  {tr("Delete Photo", "Eliminar foto")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setSelectedViewerPhotoId(null)}
                 >
-                  Close / Cerrar
+                  {tr("Close", "Cerrar")}
                 </button>
               </div>
             </div>
           )
         })()}
 
-        <h3>Job Photo Workspace ({photos.length})</h3>
-      <p>Shared photo history for currently assigned job personnel.</p>
+        <h3>{tr("Job Photo Workspace", "Espacio de fotos del trabajo")} ({photos.length})</h3>
+      <p>{tr("Shared photo history for currently assigned job personnel.", "Historial de fotos compartido con el personal asignado al trabajo.")}</p>
 
       {error && <p role="alert" style={{ color: "#fecaca" }}>{error}</p>}
       {message && <p style={{ color: "#bbf7d0" }}>{message}</p>}
@@ -509,14 +530,14 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
           onChange={event => setFiles(Array.from(event.target.files || []))}
         />
         <select value={category} onChange={event => setCategory(event.target.value)}>
-          {CATEGORIES.map(value => <option key={value}>{value}</option>)}
+          {CATEGORIES.map(value => <option key={value} value={value}>{categoryLabel(value)}</option>)}
         </select>
         <button disabled={!!busy || !files.length} onClick={() => void upload()}>
-          {busy === "Upload" ? "Uploading..." : "Upload Photos"}
+          {busy === "Upload" ? tr("Uploading...", "Subiendo...") : tr("Upload Photos", "Subir fotos")}
         </button>
       </div>
 
-      {loading && <p>Loading photos...</p>}
+      {loading && <p>{tr("Loading photos...", "Cargando fotos...")}</p>}
 
       {photos.length > 0 && (
           <button
@@ -525,10 +546,10 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
             aria-expanded={expanded}
           >
             {expanded
-              ? "Finish Editing / Show Recent Photos"
+              ? tr("Finish Editing / Show Recent Photos", "Terminar edición / Mostrar fotos recientes")
               : photos.length > 3
-                ? `View All ${photos.length} Photos / Edit`
-                : "Edit Photos"}
+                ? tr(`View All ${photos.length} Photos / Edit`, `Ver las ${photos.length} fotos / Editar`)
+                : tr("Edit Photos", "Editar fotos")}
           </button>
         )}
 
@@ -569,7 +590,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                 setSelectedViewerPhotoId(photo.id)
               }}
             >
-              Open Full Size / Ver foto
+              {tr("Open Full Size", "Ver foto en tamaño completo")}
             </button>
             <button
               type="button"
@@ -585,20 +606,20 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
                 cursor: "pointer",
               }}
             >
-              Delete Photo / Eliminar foto
+              {tr("Delete Photo", "Eliminar foto")}
             </button>
           {!expanded && (
             <div>
-              <p>{descriptions[photo.id] || "No description"}</p>
-              <p>Category: {categories[photo.id] || "Not specified"}</p>
-              <button disabled={!!busy} onClick={() => void downloadPhoto(photo)}>Download Photo</button>
+              <p>{descriptions[photo.id] || tr("No description", "Sin descripción")}</p>
+              <p>{tr("Category", "Categoría")}: {categoryLabel(categories[photo.id] || "Not specified")}</p>
+              <button disabled={!!busy} onClick={() => void downloadPhoto(photo)}>{tr("Download Photo", "Descargar foto")}</button>
             </div>
           )}
           {expanded && (
             <div style={{ display: "grid", gap: 8 }}>
 
           <label>
-            Description
+            {tr("Description", "Descripción")}
             <textarea
               value={descriptions[photo.id] || ""}
               onChange={event => setDescriptions(current => ({
@@ -609,7 +630,7 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
           </label>
 
           <label>
-            Category
+            {tr("Category", "Categoría")}
             <select
               value={categories[photo.id] || "Roof"}
               onChange={event => setCategories(current => ({
@@ -618,13 +639,13 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
               }))}
             >
               {[...new Set([...CATEGORIES, categories[photo.id] || "Roof"])].map(
-                value => <option key={value}>{value}</option>
+                value => <option key={value} value={value}>{categoryLabel(value)}</option>
               )}
             </select>
           </label>
 
           <label>
-            Sequence
+            {tr("Sequence", "Secuencia")}
             <input
               type="number"
               min="1"
@@ -637,10 +658,10 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
           </label>
 
           <label>
-            Photo location
+            {tr("Photo location", "Ubicación de la foto")}
             <input
               value={locations[photo.id] || ""}
-              placeholder="e.g. Front roof slope"
+              placeholder={tr("e.g. Front roof slope", "Ej.: pendiente frontal del techo")}
               onChange={event => setLocations(current => ({
                 ...current,
                 [photo.id]: event.target.value,
@@ -650,22 +671,22 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button disabled={!!busy} onClick={() => void saveDetails(photo)}>
-              Save Description / Category
+              {tr("Save Description / Category", "Guardar descripción / categoría")}
             </button>
             <button onClick={() => setRotations(current => ({
               ...current,
               [photo.id]: ((current[photo.id] || 0) + 270) % 360,
             }))}>
-              Rotate Left
+              {tr("Rotate Left", "Girar a la izquierda")}
             </button>
             <button onClick={() => setRotations(current => ({
               ...current,
               [photo.id]: ((current[photo.id] || 0) + 90) % 360,
             }))}>
-              Rotate Right
+              {tr("Rotate Right", "Girar a la derecha")}
             </button>
             <button disabled={!!busy} onClick={() => void downloadPhoto(photo)}>
-              Download Photo
+              {tr("Download Photo", "Descargar foto")}
             </button>
           </div>
                       </div>
@@ -682,13 +703,13 @@ export default function JobPhotoWorkspace({ tenantSlug, jobId }: Props) {
           marginTop: 20,
         }}>
           <button disabled={!!busy} onClick={() => void saveSequence()}>
-            Save Photo Sequence
+            {tr("Save Photo Sequence", "Guardar secuencia de fotos")}
           </button>
           <button disabled={!!busy} onClick={() => void downloadPhotos()}>
-            Download Photos
+            {tr("Download Photos", "Descargar fotos")}
           </button>
           <button disabled={!!busy} onClick={() => void report()}>
-            Generate PDF Photo Report
+            {tr("Generate PDF Photo Report", "Generar informe PDF de fotos")}
           </button>
         </div>
       )}
