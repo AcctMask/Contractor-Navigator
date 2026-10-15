@@ -3703,7 +3703,7 @@ export default function JobDetail() {
                   htmlFor={`photo-sequence-${asset.id}`}
                   style={{ fontWeight: 800 }}
                 >
-                  Photo Sequence
+                  Photo Sequence (1, 2, 3...)
                 </label>
 
                 <input
@@ -3788,11 +3788,10 @@ export default function JobDetail() {
                   }}
                 >
                   <option value="">Not specified</option>
-                  <option value="Upper left">Upper left</option>
-                  <option value="Upper right">Upper right</option>
-                  <option value="Center">Center</option>
-                  <option value="Lower left">Lower left</option>
-                  <option value="Lower right">Lower right</option>
+                  <option value="Front">Front</option>
+                  <option value="Right">Right</option>
+                  <option value="Rear">Rear</option>
+                  <option value="Left">Left</option>
                 </select>
 
                 {(photoRotations[String(asset.id)] ||
@@ -3858,12 +3857,32 @@ export default function JobDetail() {
                   placeholder="Enter a description for this photo"
                 />
 
+                <label style={{ ...label, marginTop: 10 }}>
+                  Category
+                </label>
+                <select
+                  value={editingAssetCategory}
+                  onChange={(e) => setEditingAssetCategory(e.target.value)}
+                  style={input}
+                >
+                  {[...new Set([
+                    "Documents", "Roof", "Tarp", "Repairs",
+                    "Exterior", "Interior", "Damage",
+                    "Before", "During", "After", "Other",
+                    editingAssetCategory,
+                  ])].map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+
                 <div style={buttonRow}>
                   <button
                     onClick={() => saveAssetMetadata(asset.id)}
                     style={button}
                   >
-                    Save Description
+                    Save Description / Category
                   </button>
 
                   <button
