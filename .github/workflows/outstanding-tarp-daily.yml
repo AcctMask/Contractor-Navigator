@@ -1,10 +1,6 @@
 name: Good2Go Daily Outstanding Tarps
 
 on:
-  schedule:
-    # Retry opportunities during the Eastern morning.
-    # Backend controls delivery time and prevents duplicate sends.
-    - cron: '*/10 11-13 * * 1-5'
   workflow_dispatch:
 
 permissions:

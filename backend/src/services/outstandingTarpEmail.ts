@@ -632,10 +632,6 @@ if (!catchUpAuthorized &&
     }
   }
 
-  if (process.env.TARP_DAILY_EMAIL_ENABLED !== "true") {
-    return { ok: false, skipped: "Daily tarp email disabled" }
-  }
-
   const reportDate =
     `${part("year")}-${part("month")}-${part("day")}`
 
