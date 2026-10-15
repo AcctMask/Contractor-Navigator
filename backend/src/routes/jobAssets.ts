@@ -8,6 +8,7 @@ import { randomUUID } from "crypto"
 import { sendSMS } from "../services/twilioService"
 import { translateIncomingWorkforceMessage } from "../services/workforceTranslation"
 import { getCurrentUserFromToken } from "../services/authService"
+import { ensureWorkforceCrewTables } from "../services/workforceCrewSchema"
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib"
 import sharp from "sharp"
 import { ZipArchive } from "archiver"
@@ -2212,6 +2213,11 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
       if (!permitted) {
         return { ok: false, error: "Photo access denied" }
       }
+
+      // Initialize the existing additive crew schema before SQL
+      // references workforce_crew_members.app_user_id.
+      // This grants no additional photo or document permissions.
+      await ensureWorkforceCrewTables()
 
       const client = await pool.connect()
       let committed = false
