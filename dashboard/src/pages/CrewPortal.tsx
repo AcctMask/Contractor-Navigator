@@ -330,8 +330,64 @@ function CrewTarpCompletion({
   const [squareFeet, setSquareFeet] = useState("")
   const [sandbags, setSandbags] = useState("")
   const [notes, setNotes] = useState("")
+  const [mobilizeReason, setMobilizeReason] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+
+  async function mobilizeOnly() {
+    if (saving) return
+
+    if (!["no_tarp_needed", "homeowner_already_installed"].includes(mobilizeReason)) {
+      setError(spanish ? "Seleccione un motivo" : "Select a mobilization reason")
+      return
+    }
+
+    if (!job.tenant_slug) {
+      setError(spanish ? "Falta la empresa del trabajo" : "Job tenant is missing")
+      return
+    }
+
+    const reasonLabel = mobilizeReason === "no_tarp_needed"
+      ? (spanish ? "No se necesita lona" : "No tarp needed")
+      : (spanish ? "El propietario ya instaló la lona" : "Homeowner already installed tarp")
+
+    const question = spanish
+      ? `¿Registrar solo movilización? Motivo: ${reasonLabel}. No se registrará lona instalada.`
+      : `Record mobilization only? Reason: ${reasonLabel}. No installed tarp will be recorded.`
+
+    if (!window.confirm(question)) return
+
+    setSaving(true)
+    setError("")
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${encodeURIComponent(job.tenant_slug)}/${job.id}/complete-tarp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            completion_outcome: "mobilization_only",
+            mobilization_reason: mobilizeReason,
+            notes: notes.trim(),
+          }),
+        }
+      )
+
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Mobilization could not be recorded")
+      }
+
+      await onCompleted()
+    } catch (err: any) {
+      setError(err?.message || "Mobilization could not be recorded")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function complete() {
     const area = Number(squareFeet)
@@ -432,6 +488,33 @@ function CrewTarpCompletion({
 
       {error && <p role="alert" style={{ color: "#fecaca" }}>{error}</p>}
 
+      <div style={{ marginTop: 20, marginBottom: 16 }}>
+        <h4>{spanish ? "Solo movilización" : "Mobilize Only"}</h4>
+        <p>{spanish
+          ? "Se acudió al trabajo, pero no se instaló una lona."
+          : "Crew mobilized, but no tarp was installed."}</p>
+        <label>
+          {spanish ? "Motivo obligatorio *" : "Required Reason *"}
+        </label>
+        <select
+          value={mobilizeReason}
+          onChange={e => setMobilizeReason(e.target.value)}
+          style={{ display: "block", width: "100%", marginTop: 6, marginBottom: 12 }}
+        >
+          <option value="">{spanish ? "Seleccione un motivo" : "Select a reason"}</option>
+          <option value="no_tarp_needed">{spanish ? "No se necesita lona" : "No tarp needed"}</option>
+          <option value="homeowner_already_installed">{spanish ? "El propietario ya instaló la lona" : "Homeowner already installed tarp"}</option>
+        </select>
+        <button
+          type="button"
+          disabled={saving || !mobilizeReason}
+          onClick={() => void mobilizeOnly()}
+        >
+          {saving
+            ? (spanish ? "Guardando..." : "Saving...")
+            : (spanish ? "Registrar solo movilización" : "Record Mobilize Only")}
+        </button>
+      </div>
       <button
         type="button"
         disabled={saving}

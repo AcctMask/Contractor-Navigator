@@ -108,6 +108,7 @@ export default function JobDetail() {
   const [tarpSquareFeet, setTarpSquareFeet] = useState("")
   const [tarpSandbags, setTarpSandbags] = useState("")
   const [tarpNotes, setTarpNotes] = useState("")
+  const [tarpMobilizeReason, setTarpMobilizeReason] = useState("")
   const [completingTarp, setCompletingTarp] = useState(false)
   const [tarpOverrideReason, setTarpOverrideReason] = useState("")
   const [closingTarpAdministratively, setClosingTarpAdministratively] = useState(false)
@@ -970,6 +971,55 @@ export default function JobDetail() {
     setStatus("")
   }
 
+  async function mobilizeOnly() {
+    if (!id || completingTarp || job?.stage !== "tarp") return
+    if (!["no_tarp_needed", "homeowner_already_installed"].includes(tarpMobilizeReason)) {
+      errorToast(language === "es" ? "Seleccione un motivo" : "Select a reason")
+      return
+    }
+
+    const reasonLabel = tarpMobilizeReason === "no_tarp_needed"
+      ? (language === "es" ? "No se necesita lona" : "No tarp needed")
+      : (language === "es" ? "El propietario ya instaló la lona" : "Homeowner already installed tarp")
+
+    if (!window.confirm(
+      language === "es"
+        ? `¿Registrar solo movilización? Motivo: ${reasonLabel}. No se registrará lona instalada.`
+        : `Record mobilization only? Reason: ${reasonLabel}. No installed tarp will be recorded.`
+    )) return
+
+    setCompletingTarp(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${getTenantSlug()}/${id}/complete-tarp`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken()}`,
+          },
+          body: JSON.stringify({
+            completion_outcome: "mobilization_only",
+            mobilization_reason: tarpMobilizeReason,
+            notes: tarpNotes.trim(),
+          }),
+        }
+      )
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Mobilization could not be recorded")
+      }
+      setTarpMobilizeReason("")
+      setTarpNotes("")
+      successToast(language === "es" ? "Movilización registrada" : "Mobilization recorded")
+      await loadJob()
+    } catch (err: any) {
+      errorToast(err?.message || "Mobilization could not be recorded")
+    } finally {
+      setCompletingTarp(false)
+    }
+  }
+
   async function completeTarp() {
     if (!id || completingTarp || job?.stage !== "tarp") return
 
@@ -1145,6 +1195,34 @@ export default function JobDetail() {
           onClick={() => void completeTarp()}
         >
           {completingTarp ? (language === "es" ? "Registrando finalización..." : "Recording completion...") : (language === "es" ? "Marcar lona como completada" : "Mark Tarp Complete")}
+        </button>
+
+        <hr style={{ margin: "24px 0" }} />
+        <h3>{language === "es" ? "Solo movilización" : "Mobilize Only"}</h3>
+        <p>{language === "es"
+          ? "Se acudió al trabajo, pero no se instaló una lona."
+          : "Crew mobilized, but no tarp was installed."}</p>
+        <label style={label}>
+          {language === "es" ? "Motivo obligatorio *" : "Required Reason *"}
+        </label>
+        <select
+          style={input}
+          value={tarpMobilizeReason}
+          onChange={e => setTarpMobilizeReason(e.target.value)}
+        >
+          <option value="">{language === "es" ? "Seleccione un motivo" : "Select a reason"}</option>
+          <option value="no_tarp_needed">{language === "es" ? "No se necesita lona" : "No tarp needed"}</option>
+          <option value="homeowner_already_installed">{language === "es" ? "El propietario ya instaló la lona" : "Homeowner already installed tarp"}</option>
+        </select>
+        <button
+          type="button"
+          style={{ ...button, marginTop: 12 }}
+          disabled={completingTarp || !tarpMobilizeReason}
+          onClick={() => void mobilizeOnly()}
+        >
+          {completingTarp
+            ? (language === "es" ? "Guardando..." : "Saving...")
+            : (language === "es" ? "Registrar solo movilización" : "Record Mobilize Only")}
         </button>
       </section>
     )

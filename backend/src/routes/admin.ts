@@ -133,9 +133,24 @@ export async function registerAdminRoutes(app: FastifyInstance) {
     const notes = String(req.body?.notes || "").trim();
     const override = req.body?.administrative_override === true;
     const overrideReason = String(req.body?.override_reason || "").trim();
+    const mobilizationOnly = req.body?.completion_outcome === "mobilization_only";
+    const mobilizationReason = String(req.body?.mobilization_reason || "").trim();
+    const validMobilizationReasons = [
+      "no_tarp_needed",
+      "homeowner_already_installed"
+    ];
+    const invalidOutcome =
+      req.body?.completion_outcome !== undefined &&
+      !["tarp_installed", "mobilization_only"].includes(req.body.completion_outcome);
+    const invalidMobilization =
+      (mobilizationOnly && (override ||
+        !validMobilizationReasons.includes(mobilizationReason) ||
+        hasSquareFeet || hasSandbags)) ||
+      (!mobilizationOnly && mobilizationReason.length > 0);
 
     if (!Number.isSafeInteger(jobId) || jobId <= 0 ||
-        (!override && (!hasSquareFeet || !hasSandbags ||
+        invalidOutcome || invalidMobilization ||
+        (!override && !mobilizationOnly && (!hasSquareFeet || !hasSandbags ||
                       !Number.isFinite(squareFeet) || squareFeet <= 0 ||
                        !Number.isSafeInteger(sandbags) || sandbags < 0)) ||
         notes.length > 5000 ||
@@ -260,9 +275,13 @@ export async function registerAdminRoutes(app: FastifyInstance) {
       );
       const message = override
         ? `Tarp administratively closed by ${actorName}. Reason: ${overrideReason}`
-        : `Tarp completed by ${actorName}: ${squareFeet} sq ft installed, ` +
-          `${sandbags} sandbags` +
-          (notes ? `. Notes: ${notes}` : "");
+        : mobilizationOnly
+          ? `Mobilization only by ${actorName}: ${mobilizationReason === "no_tarp_needed"
+              ? "No tarp needed" : "Homeowner already installed tarp"}` +
+            (notes ? `. Notes: ${notes}` : "")
+          : `Tarp completed by ${actorName}: ${squareFeet} sq ft installed, ` +
+            `${sandbags} sandbags` +
+            (notes ? `. Notes: ${notes}` : "");
 
       await client.query(
         `insert into timeline_events
@@ -275,12 +294,16 @@ export async function registerAdminRoutes(app: FastifyInstance) {
           JSON.stringify({
             stage: "tarp_complete",
             previous_stage: "tarp",
-            action: override ? "tarp_administratively_closed" : "tarp_completed",
+            action: override ? "tarp_administratively_closed" :
+              mobilizationOnly ? "tarp_mobilization_only" : "tarp_completed",
+            completion_outcome: override ? null :
+              mobilizationOnly ? "mobilization_only" : "tarp_installed",
+            mobilization_reason: mobilizationOnly ? mobilizationReason : null,
             administrative_override: override,
             override_reason: override ? overrideReason : null,
             documentation_exception: override,
-            installed_square_feet: override ? null : squareFeet,
-            sandbags: override ? null : sandbags,
+            installed_square_feet: (override || mobilizationOnly) ? null : squareFeet,
+            sandbags: (override || mobilizationOnly) ? null : sandbags,
             notes,
             actor_app_user_id: Number(actor.id),
             actor_role: role,
@@ -296,8 +319,11 @@ export async function registerAdminRoutes(app: FastifyInstance) {
         job_id: jobId,
         stage: "tarp_complete",
         administrative_override: override,
-        installed_square_feet: override ? null : squareFeet,
-        sandbags: override ? null : sandbags
+        completion_outcome: override ? null :
+          mobilizationOnly ? "mobilization_only" : "tarp_installed",
+        mobilization_reason: mobilizationOnly ? mobilizationReason : null,
+        installed_square_feet: (override || mobilizationOnly) ? null : squareFeet,
+        sandbags: (override || mobilizationOnly) ? null : sandbags
       });
     } catch (error) {
       await client.query("ROLLBACK");
@@ -1076,7 +1102,8 @@ ${assignmentDirectorySql}
                kind = 'manual_stage_updated'
                and meta->>'action' in (
                  'tarp_completed',
-                 'tarp_administratively_closed'
+                  'tarp_administratively_closed',
+                  'tarp_mobilization_only'
                )
              )
              or (
