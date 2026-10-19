@@ -55,6 +55,10 @@ async function ensureAssetTable() {
       created_at timestamptz not null default now()
     )
   `)
+  await pool.query(`
+    alter table job_assets
+    add column if not exists asset_category text
+  `)
 }
 
 async function getTenantIdBySlug(slug: string): Promise<number> {
@@ -198,6 +202,7 @@ export async function saveJobAssetByTenantSlug(params: {
   mimeType?: string | null
   note?: string | null
   uploadedBy?: string | null
+  assetCategory?: string | null
   fileBuffer: Buffer
 }) {
   await ensureAssetTable()
@@ -237,7 +242,8 @@ export async function saveJobAssetByTenantSlug(params: {
       tenant_id,
       job_id,
       asset_type,
-      bucket,
+      asset_category,
+        bucket,
       original_name,
       stored_name,
       stored_path,
@@ -249,7 +255,7 @@ export async function saveJobAssetByTenantSlug(params: {
       created_at
     )
     values (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now()
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, now()
     )
     returning
       id,
@@ -269,7 +275,8 @@ export async function saveJobAssetByTenantSlug(params: {
       tenantId,
       params.jobId,
       params.assetType || "other",
-      bucket,
+      params.assetCategory || null,
+        bucket,
       params.originalName,
       storedName,
       absolutePath,

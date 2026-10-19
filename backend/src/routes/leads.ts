@@ -1,3 +1,6 @@
+import { weatherAddressesMatch } from "../services/weatherAddressMatching";
+import { saveJobAssetByTenantSlug } from "../services/jobAssetsService"
+import { generateWeatherEvidencePdf } from "../services/weatherEvidencePdfService"
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 import { sendSMS } from "../services/twilioService";
@@ -563,6 +566,20 @@ const insertedJob = await pool.query(
 
 
   app.post("/lead/weather-evidence", async (req, reply) => {
+
+    const configuredKey = process.env.STORM_NAVIGATOR_SECRET;
+    const suppliedKey = req.headers["x-storm-integration-key"];
+
+    if (!configuredKey ||
+        typeof suppliedKey !== "string" ||
+        suppliedKey !== configuredKey) {
+      return reply.code(401).send({
+        ok: false,
+        error: "Unauthorized Storm Verification integration"
+      });
+    }
+
+
     const body: any = (req as any).body || {};
 
     const tenantSlug = asString(body.tenant_slug) || DEFAULT_TENANT;
@@ -573,50 +590,191 @@ const insertedJob = await pool.query(
     const email = asString(body.email);
     const address = asString(body.address);
 
-    const customerId = await findOrCreateCustomer(tenantId, fullName, phone, email, address);
+    if (!address) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Property address is required"
+      });
+    }
 
-    const insertedJob = await pool.query(
-      `insert into jobs (
-        tenant_id,
-        customer_id,
-        external_crm,
-        external_job_id,
-        job_type,
-        stage,
-        crm_substatus,
-        crm_flow_key,
-        address1,
-        city,
-        state,
-        zip,
-        lead_source,
-        lead_source_detail
-      )
-      values (
-        $1,$2,
-        'storm_verification',
-        $3,
-        'ROOF_REPLACEMENT',
-        'lead',
-        'weather_evidence_report_generated',
-        'weather_evidence_report',
-        $4,$5,$6,$7,
-        'Storm Verification',
-        'weather_evidence_report'
-      )
-      returning id`,
-      [
-        tenantId,
-        customerId,
-        `weather-${Date.now()}`,
-        address,
-        asString(body.city),
-        asString(body.state),
-        asString(body.zip),
-      ]
+    if (tenantSlug !== "g2g-roofing") {
+      return reply.code(403).send({
+        ok: false,
+        error: "Weather evidence intake is restricted to Good2Go"
+      });
+    }
+
+    const reportId = asString(body.report_id);
+
+    if (!reportId) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Weather report ID is required"
+      });
+    }
+
+    const weatherReport = body.weather_report;
+
+    if (!weatherReport?.ok ||
+        weatherReport.report_id !== reportId ||
+        !Array.isArray(weatherReport.events)) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Complete Storm Verification report is required"
+      });
+    }
+
+
+    const reportAddress = asString(
+      weatherReport.property?.address ||
+      weatherReport.property?.formatted_address
+    );
+    if (!reportAddress ||
+        !weatherAddressesMatch(address, reportAddress)) {
+      return reply.code(400).send({
+        ok: false,
+        error: "Weather report property does not match submitted address"
+      });
+    }
+
+    const existingReport = await pool.query(
+      `select job_id
+       from timeline_events
+       where tenant_id = $1
+         and kind = 'weather_evidence_report_generated'
+         and meta->>'report_id' = $2
+       order by created_at desc
+       limit 1`,
+      [tenantId, reportId]
     );
 
-    const jobId = Number(insertedJob.rows[0].id);
+    if (existingReport.rowCount) {
+      return reply.send({
+        ok: true,
+        job_id: Number(existingReport.rows[0].job_id),
+        already_submitted: true
+      });
+    }
+
+    // Storm Verification only: find candidate properties without
+    // requiring a homeowner to enter a full postal address.
+    const candidates = await pool.query(
+      `select j.id, j.stage, j.customer_id, j.address1,
+              j.city, j.state, j.zip,
+              c.full_name as customer_name
+         from jobs j
+         left join customers c on c.id = j.customer_id
+        where j.tenant_id = $1
+        order by j.created_at desc`,
+      [tenantId]
+    );
+
+    const enteredCity = asString(body.city);
+    const matchingRows = candidates.rows.filter((job: any) => {
+      if (!weatherAddressesMatch(address, String(job.address1 || ""))) {
+        return false;
+      }
+      if (enteredCity && job.city &&
+          enteredCity.trim().toLowerCase() !==
+          String(job.city).trim().toLowerCase()) {
+        return false;
+      }
+      return true;
+    });
+
+    const matchingJobs = {
+      rows: matchingRows,
+      rowCount: matchingRows.length
+    };
+
+    const normalizedName = fullName.trim().toLowerCase();
+
+    const eligibleJobs = matchingJobs.rows.filter((job: any) => {
+      const jobCustomerName = String(job.customer_name || "")
+        .trim()
+        .toLowerCase();
+
+      return jobCustomerName === normalizedName;
+    });
+
+    let jobId: number;
+
+    if (eligibleJobs.length === 1) {
+      jobId = Number(eligibleJobs[0].id);
+    } else if (matchingJobs.rowCount) {
+      return reply.code(409).send({
+        ok: false,
+        error: "Property has existing jobs requiring staff review before attaching weather evidence"
+      });
+    } else {
+      const customerId = await findOrCreateCustomer(
+        tenantId,
+        fullName,
+        phone,
+        email,
+        address
+      );
+
+      const insertedJob = await pool.query(
+        `insert into jobs (
+          tenant_id, customer_id, external_crm, external_job_id,
+          job_type, stage, crm_substatus, crm_flow_key,
+          address1, city, state, zip,
+          lead_source, lead_source_detail
+        )
+        values (
+          $1,$2,'storm_verification',$3,
+          'ROOF_REPLACEMENT','lead',
+          'weather_evidence_report_generated','weather_evidence_report',
+          $4,$5,$6,$7,
+          'Storm Verification','weather_evidence_report'
+        )
+        returning id`,
+        [
+          tenantId,
+          customerId,
+          `weather-${reportId}`,
+          address,
+          asString(body.city),
+          asString(body.state),
+          asString(body.zip)
+        ]
+      );
+
+      jobId = Number(insertedJob.rows[0].id);
+    }
+
+
+
+    const pdfName = `Weather-Evidence-${reportId}.pdf`;
+    const existingPdf = await pool.query(
+      `select to_regclass('public.job_assets') as table_name`
+    );
+    const savedPdf = existingPdf.rows[0]?.table_name
+      ? await pool.query(
+          `select id from job_assets
+           where tenant_id = $1 and job_id = $2
+             and original_name = $3 limit 1`,
+          [tenantId, jobId, pdfName]
+        )
+      : { rowCount: 0 };
+
+    if (!savedPdf.rowCount) {
+    const pdfBuffer = await generateWeatherEvidencePdf(weatherReport);
+
+
+    await saveJobAssetByTenantSlug({
+      tenantSlug,
+      jobId,
+      assetType: "other",
+      assetCategory: "Documents",
+      originalName: `Weather-Evidence-${reportId}.pdf`,
+      mimeType: "application/pdf",
+      note: "Professional Storm Verification weather evidence report",
+      uploadedBy: "Storm Verification",
+      fileBuffer: pdfBuffer
+    });
+    }
 
     const reportMeta = {
       source: "storm_verification",
@@ -629,11 +787,11 @@ const insertedJob = await pool.query(
       search_start: asString(body.search_start),
       search_end: asString(body.search_end),
       search_radius_miles: body.search_radius_miles ? Number(body.search_radius_miles) : null,
-      events_within_radius: body.events_within_radius ? Number(body.events_within_radius) : null,
-      hail_observations: body.hail_observations ? Number(body.hail_observations) : null,
-      wind_observations: body.wind_observations ? Number(body.wind_observations) : null,
-      highest_wind_mph: body.highest_wind_mph ? Number(body.highest_wind_mph) : null,
-      largest_hail_in: body.largest_hail_in ? Number(body.largest_hail_in) : null,
+      events_within_radius: weatherReport.weather_evidence_summary?.events_within_radius != null ? Number(weatherReport.weather_evidence_summary.events_within_radius) : null,
+      hail_observations: weatherReport.weather_evidence_summary?.hail_observations != null ? Number(weatherReport.weather_evidence_summary.hail_observations) : null,
+      wind_observations: weatherReport.weather_evidence_summary?.wind_observations != null ? Number(weatherReport.weather_evidence_summary.wind_observations) : null,
+      highest_wind_mph: weatherReport.weather_evidence_summary?.highest_wind_mph != null ? Number(weatherReport.weather_evidence_summary.highest_wind_mph) : null,
+      largest_hail_in: weatherReport.weather_evidence_summary?.largest_hail_in != null ? Number(weatherReport.weather_evidence_summary.largest_hail_in) : null,
     };
 
     await pool.query(
@@ -648,6 +806,35 @@ const insertedJob = await pool.query(
         JSON.stringify(reportMeta)
       ]
     );
+
+    try {
+      const recipient = process.env.G2G_GMAIL_TO ||
+        process.env.ALERT_EMAIL_TO ||
+        "good2goroofingandconstruction@gmail.com";
+      const message = [
+        "New Storm Verification Weather Evidence Report",
+        `Customer: ${fullName}`,
+        `Phone: ${phone || "Not provided"}`,
+        `Email: ${email || "Not provided"}`,
+        `Property: ${address}`,
+        `Report ID: ${reportId}`,
+        `Search: ${reportMeta.search_start} through ${reportMeta.search_end}`,
+        `Radius: ${reportMeta.search_radius_miles ?? "N/A"} miles`,
+        `Wind: ${reportMeta.highest_wind_mph ?? "N/A"} MPH`,
+        `Hail: ${reportMeta.largest_hail_in ?? "N/A"} inches`,
+        `Navigator Job ID: ${jobId}`,
+        "The complete professional PDF is archived in Job Documents."
+      ].join("\n");
+      const emailResult = await sendAlertEmail(recipient,
+        `Storm Verification Report: ${fullName}`, message);
+      if (!emailResult.ok) {
+        req.log.error({ reportId, error: emailResult.error },
+          "Storm Verification email was not accepted");
+      }
+    } catch (emailError) {
+      req.log.error({ err: emailError, reportId },
+        "Storm Verification staff notification failed");
+    }
 
     return reply.send({
       ok: true,
