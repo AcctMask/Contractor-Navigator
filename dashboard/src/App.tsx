@@ -352,12 +352,51 @@ function HeaderBar() {
               ),
             )}
 
-            <label
-              htmlFor="header-language"
-              style={{ fontSize: "12px", opacity: 0.9 }}
-            >
-              {headerPreferredLanguage === "es" ? "Idioma" : "Language"}
-            </label>
+            {[
+              "g2g-roofing",
+              "actual-assistant-llc",
+              "actual-assistant",
+            ].includes(tenantSlug) && currentUser ? (
+              <details style={{ position: "relative" }}>
+                <summary
+                  style={{
+                    ...mutedLinkStyle,
+                    cursor: "pointer",
+                    listStyle: "none",
+                  }}
+                >
+                  {headerPreferredLanguage === "es" ? "Herramientas" : "Tools"} ▾
+                </summary>
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "100%",
+                    zIndex: 100,
+                    minWidth: "190px",
+                    padding: "10px",
+                    borderRadius: "8px",
+                    background: "#1e293b",
+                    boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
+                  }}
+                >
+                  <a
+                    href="https://storm-verification-platform.vercel.app"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: "block",
+                      fontSize: "13px",
+                      color: "inherit",
+                      textDecoration: "none",
+                      padding: "4px 0",
+                    }}
+                  >
+                    Storm Verification
+                  </a>
+                </div>
+              </details>
+            ) : null}
             <select
               id="header-language"
               aria-label="Preferred language"
