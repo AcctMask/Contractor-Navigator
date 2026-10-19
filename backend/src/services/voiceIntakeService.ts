@@ -223,7 +223,8 @@ async function getJobContext(tenantSlug: string, jobId: number): Promise<JobCont
 }
 
 async function updateCustomerName(tenantId: number, customerId: number | null, fullName: string) {
-  if (!customerId) return
+  const name = fullName.trim()
+  if (!customerId || !/[a-zA-Z]/.test(name)) return
 
   await pool.query(
     `
@@ -233,8 +234,13 @@ async function updateCustomerName(tenantId: number, customerId: number | null, f
       updated_at = now()
     where tenant_id = $1
       and id = $2
+      and (
+        full_name is null
+        or btrim(full_name) = ''
+        or lower(btrim(full_name)) in ('inbound caller', 'unknown customer')
+      )
     `,
-    [tenantId, customerId, fullName]
+    [tenantId, customerId, name]
   )
 }
 

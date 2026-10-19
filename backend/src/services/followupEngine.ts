@@ -2518,7 +2518,8 @@ async function updateCustomerNameForIntake(
   customerId: number | null,
   fullName: string
 ) {
-  if (!customerId || !fullName.trim()) return
+  const name = fullName.trim()
+  if (!customerId || !/[a-zA-Z]/.test(name)) return
 
   await pool.query(
     `
@@ -2527,8 +2528,13 @@ async function updateCustomerNameForIntake(
            updated_at = now()
      where tenant_id = $2
        and id = $3
+       and (
+         full_name is null
+         or btrim(full_name) = ''
+         or lower(btrim(full_name)) in ('inbound caller', 'unknown customer')
+       )
     `,
-    [fullName.trim(), tenantId, customerId]
+    [name, tenantId, customerId]
   )
 }
 
