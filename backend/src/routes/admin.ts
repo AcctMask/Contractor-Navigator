@@ -1301,14 +1301,7 @@ ${assignmentDirectorySql}
       });
     }
 
-    // Tarp completion requires the dedicated, audited completion endpoint.
-    // General job editing must never bypass quantities or role validation.
-    if (String(body.stage || "").trim().toLowerCase() === "tarp_complete") {
-      return reply.code(403).send({
-        ok: false,
-        error: "Use the authorized tarp completion workflow"
-      });
-    }
+
 
 
     const jobRow = await pool.query(
@@ -1326,6 +1319,25 @@ ${assignmentDirectorySql}
     }
 
     const existingJob = jobRow.rows[0];
+
+    // Only the audited tarp completion endpoint may ENTER tarp_complete.
+    // Editing an already completed job must remain possible.
+    const requestedStage = String(body.stage || "").trim().toLowerCase();
+    const existingStage = String(existingJob.stage || "").trim().toLowerCase();
+
+    if (requestedStage === "tarp_complete" && existingStage !== "tarp_complete") {
+      return reply.code(403).send({
+        ok: false,
+        error: "Use the authorized tarp completion workflow"
+      });
+    }
+
+    // Preserve completed tarp stage during ordinary customer/claim edits.
+    // Stage transitions require their dedicated authorized workflow.
+    if (existingStage === "tarp_complete") {
+      body.stage = existingJob.stage;
+    }
+
     const customerId = existingJob.customer_id;
 
     await pool.query(
