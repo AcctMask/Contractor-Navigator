@@ -67,7 +67,7 @@ export default function SignDocument() {
       return
     }
 
-    if (!agree) {
+    if (!agree && !["ems_work_authorization", "heritage_ems_work_authorization"].includes(String(doc?.payload?.document_display_mode || ""))) {
       setError("Please confirm authorization before signing.")
       return
     }
@@ -81,7 +81,7 @@ export default function SignDocument() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           signer_name: name.trim(),
-          terms_accepted: agree,
+          terms_accepted: agree || ["ems_work_authorization", "heritage_ems_work_authorization"].includes(String(doc?.payload?.document_display_mode || "")),
           terms_version: TERMS_VERSION,
           terms_url: TERMS_URL,
         }),
@@ -109,7 +109,7 @@ export default function SignDocument() {
   const documentDisplayMode = String(payload.document_display_mode || "")
   const isRetailContract = documentDisplayMode === "retail_contract"
   const isInsuranceContract = documentDisplayMode === "insurance_contract"
-  const isEmsWorkAuthorization = documentDisplayMode === "ems_work_authorization"
+  const isEmsWorkAuthorization = documentDisplayMode === "ems_work_authorization" || documentDisplayMode === "heritage_ems_work_authorization"
   const phone = payload.customer_phone || "Not provided"
   const email = payload.customer_email || "Not provided"
   const remarks = payload.estimator_remarks || "None provided"
@@ -303,6 +303,7 @@ export default function SignDocument() {
               </div>
             ) : null}
 
+            {!isEmsWorkAuthorization ? (
             <div style={docBox}>
               <h3 style={docBoxTitle}>Terms and Conditions</h3>
               <div
@@ -317,6 +318,7 @@ export default function SignDocument() {
                 {String(termsAndConditions)}
               </div>
             </div>
+            ) : null}
           </section>
 
           <section style={rightCard}>
@@ -339,6 +341,7 @@ export default function SignDocument() {
               style={input}
             />
 
+            {!isEmsWorkAuthorization ? (
             <label style={checkRow}>
               <input
                 type="checkbox"
@@ -351,6 +354,7 @@ export default function SignDocument() {
                   : "I have read, understand, and agree to the Proposal / Contract terms and conditions included with this agreement."}
               </span>
             </label>
+            ) : null}
 
             {error ? <div style={errorBox}>{error}</div> : null}
 

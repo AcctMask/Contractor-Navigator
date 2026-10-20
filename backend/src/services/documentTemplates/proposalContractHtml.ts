@@ -239,7 +239,7 @@ export function buildDocumentSnapshotHtml(doc: any, payload: any, statusLabel: s
       : ""
   }
 
-  ${!isHeritageEmsWorkAuthorization ? `
+  ${!isEmsWorkAuthorization ? `
   <section>
     <h2>Terms and Conditions</h2>
     <div class="terms">${escapeHtml(termsAndConditions)}</div>
