@@ -844,6 +844,37 @@ const insertedJob = await pool.query(
         "Storm Verification staff notification failed");
     }
 
+    // Verify both durable records before confirming archival success.
+    const verifiedPdf = await pool.query(
+      `select id from job_assets
+       where tenant_id = $1 and job_id = $2
+         and original_name = $3
+       limit 1`,
+      [tenantId, jobId, pdfName]
+    );
+
+    const verifiedActivity = await pool.query(
+      `select id from timeline_events
+       where tenant_id = $1 and job_id = $2
+         and kind = 'weather_evidence_report_generated'
+         and meta->>'report_id' = $3
+       limit 1`,
+      [tenantId, jobId, reportId]
+    );
+
+    if (!verifiedPdf.rowCount || !verifiedActivity.rowCount) {
+      req.log.error(
+        { reportId, jobId,
+          pdfSaved: Boolean(verifiedPdf.rowCount),
+          activitySaved: Boolean(verifiedActivity.rowCount) },
+        "Weather evidence archival verification failed"
+      );
+      return reply.code(502).send({
+        ok: false,
+        error: "Weather report archival could not be fully verified"
+      });
+    }
+
     return reply.send({
       ok: true,
       job_id: jobId,

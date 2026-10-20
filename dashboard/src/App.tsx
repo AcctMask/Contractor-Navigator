@@ -383,6 +383,44 @@ function HeaderBar() {
                   <a
                     href="https://storm-verification-platform.vercel.app"
                     target="_blank"
+                    onClick={async (event) => {
+                      event.preventDefault()
+                      const token = getToken()
+                      if (!token) {
+                        window.alert("Navigator login required")
+                        return
+                      }
+
+                      const launchWindow = window.open("", "_blank")
+                      if (!launchWindow) {
+                        window.alert("Please allow pop-ups for Navigator")
+                        return
+                      }
+
+                      try {
+                        const response = await fetch(
+                          `${API_BASE}/auth/storm-launch`,
+                          {
+                            method: "POST",
+                            headers: {
+                              Authorization: `Bearer ${token}`
+                            }
+                          }
+                        )
+                        const result = await response.json()
+                        if (!response.ok || !result.ok || !result.launch_token) {
+                          throw new Error(result.error || "Launch denied")
+                        }
+                        launchWindow.location.href =
+                          "https://storm-verification-platform.vercel.app/#storm_token=" +
+                          encodeURIComponent(result.launch_token)
+                      } catch (error) {
+                        launchWindow.close()
+                        window.alert(
+                          error instanceof Error ? error.message : "Storm launch failed"
+                        )
+                      }
+                    }}
                     rel="noopener noreferrer"
                     style={{
                       display: "block",

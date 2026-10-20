@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify"
+import { createHmac, randomUUID } from "node:crypto"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
@@ -110,6 +111,49 @@ async function requireTenantUserManager(
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  app.post("/auth/storm-launch", async (request: any, reply) => {
+    try {
+      const token = getBearerToken(request)
+      if (!token) {
+        return reply.code(401).send({ ok: false, error: "Login required" })
+      }
+
+      const user = await getCurrentUserFromToken(token)
+      if (!user?.is_active) {
+        return reply.code(401).send({ ok: false, error: "Inactive session" })
+      }
+
+      const secret = process.env.STORM_NAVIGATOR_SECRET
+      if (!secret) {
+        return reply.code(503).send({
+          ok: false,
+          error: "Storm integration is not configured"
+        })
+      }
+
+      const payload = Buffer.from(JSON.stringify({
+        aud: "storm-professional",
+        sub: String(user.id),
+        tenant_id: String(user.tenant_id),
+        jti: randomUUID()
+      })).toString("base64url")
+
+      const signature = createHmac("sha256", secret)
+        .update(payload)
+        .digest("base64url")
+
+      return {
+        ok: true,
+        launch_token: `${payload}.${signature}`
+      }
+    } catch {
+      return reply.code(401).send({
+        ok: false,
+        error: "Navigator authorization failed"
+      })
+    }
+  })
+
   app.post("/auth/:tenantSlug/invite", async (request: any, reply) => {
     try {
       const { tenantSlug } =
