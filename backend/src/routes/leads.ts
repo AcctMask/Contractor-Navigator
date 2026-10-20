@@ -671,7 +671,15 @@ const insertedJob = await pool.query(
 
     const enteredCity = asString(body.city);
     const matchingRows = candidates.rows.filter((job: any) => {
-      if (!weatherAddressesMatch(address, String(job.address1 || ""))) {
+      // Compare against the existing complete job address without
+      // modifying Navigator's stored customer or property records.
+      const jobAddress = [
+        job.address1,
+        job.city,
+        job.state,
+        job.zip
+      ].filter((part: unknown) => String(part || "").trim()).join(", ");
+      if (!weatherAddressesMatch(address, jobAddress)) {
         return false;
       }
       if (enteredCity && job.city &&
