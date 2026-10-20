@@ -695,19 +695,25 @@ const insertedJob = await pool.query(
       rowCount: matchingRows.length
     };
 
-    const normalizedName = fullName.trim().toLowerCase();
+    // Storm Verification: property address is the primary job identity.
+    // Use the unique address match regardless of minor customer-name differences.
+    // Where multiple jobs share an address, require one unambiguous name match.
+    const normalizeStormCustomerName = (value: unknown) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
 
-    const eligibleJobs = matchingJobs.rows.filter((job: any) => {
-      const jobCustomerName = String(job.customer_name || "")
-        .trim()
-        .toLowerCase();
+    const normalizedName = normalizeStormCustomerName(fullName);
 
-      return jobCustomerName === normalizedName;
-    });
+    const eligibleJobs = matchingJobs.rows.filter((job: any) =>
+      normalizeStormCustomerName(job.customer_name) === normalizedName
+    );
 
     let jobId: number;
 
-    if (eligibleJobs.length === 1) {
+    if (matchingJobs.rowCount === 1) {
+      jobId = Number(matchingJobs.rows[0].id);
+    } else if (eligibleJobs.length === 1) {
       jobId = Number(eligibleJobs[0].id);
     } else if (matchingJobs.rowCount) {
       return reply.code(409).send({
