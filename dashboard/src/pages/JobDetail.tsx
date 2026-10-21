@@ -800,14 +800,37 @@ export default function JobDetail() {
       kind.includes("ai_followup")
     ) return "AI Follow-Up Engine"
 
-    if (kind.includes("customer_reply")) return "Customer Reply"
+    if (kind.includes("customer_reply")) {
+      const sender = String(
+        meta.sender_name ||
+        meta.from_name ||
+        meta.contact_name ||
+        meta.from ||
+        ""
+      ).trim()
+
+      return sender
+        ? `Customer Reply — ${sender} → Good2Go`
+        : "Customer Reply"
+    }
 
     if (
       meta.note_type === "manual_sms_sent" ||
       kind.includes("manual_sms")
     ) {
       const author = String(meta.author || "").trim()
-      return author ? `Staff SMS — ${author}` : "Staff SMS"
+      const recipient = String(
+        meta.recipient_label || ""
+      ).trim()
+
+      if (author && recipient) {
+        return `Staff SMS — ${author} → ${recipient}`
+      }
+
+      if (author) return `Staff SMS — ${author}`
+      if (recipient) return `Staff SMS → ${recipient}`
+
+      return "Staff SMS"
     }
     if (kind.includes("staff_note")) return meta.author ? `Staff Note — ${meta.author}` : "Staff Note"
     if (kind.includes("voice_ai_transcript")) return "Voice AI Transcript"
@@ -862,10 +885,17 @@ export default function JobDetail() {
       "Sales Intent": "Intención de compra",
     }
 
-    const [base, author] = original.split(" — ", 2)
+    const separator = original.indexOf(" — ")
+    const base = separator >= 0
+      ? original.slice(0, separator)
+      : original
+    const detail = separator >= 0
+      ? original.slice(separator)
+      : ""
+
     const translated = labels[base]
     if (!translated) return original
-    return author ? `${translated} — ${author}` : translated
+    return `${translated}${detail}`
   }
 
   function getActivityAttribution(item: any) {
