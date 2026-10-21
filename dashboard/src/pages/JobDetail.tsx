@@ -817,6 +817,7 @@ export default function JobDetail() {
     if (kind.includes("lead_intent")) return "Lead Qualification"
     if (kind.includes("lead_created")) return "Lead Created"
     if (kind.includes("voice")) return "Voice Intake"
+    if (kind === "manual_stage_updated") return "Stage Change"
     if (kind.includes("job_manually_updated")) return "Manual Update"
     if (kind.includes("production_planner_explanation_updated")) return "Production Planner"
     if (kind.includes("job_archived")) return "Archived"
@@ -837,6 +838,7 @@ export default function JobDetail() {
       "Task Activity": "Actividad de tareas",
       "Team Note": "Nota del equipo",
       "Staff SMS": "SMS del personal",
+      "Stage Change": "Cambio de etapa",
       "Staff Note": "Nota del personal",
       "Voice AI Transcript": "Transcripción de voz de IA",
       "AI Follow-Up Engine": "Seguimiento de IA",
@@ -918,6 +920,7 @@ export default function JobDetail() {
     const eventStage =
       meta.stage_at_event ||
       item?.stage_at_event ||
+      (kind === "manual_stage_updated" ? meta.stage : null) ||
       item?.stage_classification ||
       meta.stage_classification ||
       item?.event_type ||
@@ -2636,6 +2639,16 @@ export default function JobDetail() {
                           <span style={getActivityBadgeStyle(note)}>
                             {getWorkforceActivityDisplayLabel(note)}
                           </span>
+                          {getActivityAttribution(note) && (
+                            <div style={{
+                              marginTop: 5,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: "#4b5563",
+                            }}>
+                              {getActivityAttribution(note)}
+                            </div>
+                          )}
                         </div>
 
                         <p
@@ -3819,6 +3832,16 @@ export default function JobDetail() {
                     <span style={getActivityBadgeStyle(note)}>
                       {getActivityLabel(note)}
                     </span>
+                    {getActivityAttribution(note) && (
+                      <div style={{
+                        marginTop: 5,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#4b5563",
+                      }}>
+                        {getActivityAttribution(note)}
+                      </div>
+                    )}
                   </div>
 
                   <p
