@@ -85,6 +85,26 @@ async function installCorporateStageTransitionAuthority() {
         return new;
       end if;
 
+      if tg_op = 'UPDATE'
+         and exists (
+           select 1 from tenants t
+           where t.id = new.tenant_id and t.slug = 'g2g-roofing'
+         )
+         and (
+           (old.stage = 'tarp_complete' and new.stage = 'invoiced')
+           or (
+             old.stage = 'invoiced' and new.stage = 'paid'
+             and (
+               old.tarp_conversion_active = true
+               or old.active_followup_workflow = 'tarp_complete'
+             )
+           )
+         ) then
+        new.active_followup_workflow := 'tarp_complete';
+        new.followup_workflow_started_at := now();
+        return new;
+      end if;
+
       select
         settings->'stage_followups'->stage_key
       into stage_config
