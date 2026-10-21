@@ -792,8 +792,23 @@ export default function JobDetail() {
     ) return "Task Activity"
 
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
-    if (meta.note_type === "manual_sms_sent" || meta.channel === "sms") return "Staff SMS"
-    if (kind.includes("manual_sms")) return "Staff SMS"
+    if (
+      kind.includes("ai_message") ||
+      kind.includes("ai_inbound") ||
+      kind.includes("voice_ai") ||
+      kind.includes("voice_followup_sms") ||
+      kind.includes("ai_followup")
+    ) return "AI Follow-Up Engine"
+
+    if (kind.includes("customer_reply")) return "Customer Reply"
+
+    if (
+      meta.note_type === "manual_sms_sent" ||
+      kind.includes("manual_sms")
+    ) {
+      const author = String(meta.author || "").trim()
+      return author ? `Staff SMS — ${author}` : "Staff SMS"
+    }
     if (kind.includes("staff_note")) return meta.author ? `Staff Note — ${meta.author}` : "Staff Note"
     if (kind.includes("voice_ai_transcript")) return "Voice AI Transcript"
     if (kind.includes("ai_message") || kind.includes("ai_inbound") || kind.includes("voice_ai")) return "AI Follow-Up Engine"
@@ -881,30 +896,60 @@ export default function JobDetail() {
   }
 
   function getActivityBadgeStyle(item: any): CSSProperties {
+    const kind = String(item?.kind || "").toLowerCase()
+    const meta = item?.meta || item?.metadata || {}
     const label = getActivityLabel(item).toLowerCase()
 
-    if (label.includes("task activity")) {
-      const presentation = taskActivityPresentation(item)
-
+    if (
+      kind.includes("ai_message") ||
+      kind.includes("ai_inbound") ||
+      kind.includes("voice_ai") ||
+      kind.includes("voice_followup_sms") ||
+      kind.includes("ai_followup") ||
+      label.includes("ai")
+    ) {
       return {
         ...badge,
-        background:
-          presentation?.backgroundColor ||
-          "#64748b",
-        color:
-          presentation?.color ||
-          "#111827",
+        background: "#1d4ed8",
+        color: "#ffffff",
       }
     }
 
-    if (label.includes("ai")) return { ...badge, background: "#1d4ed8" }
-    if (label.includes("customer")) return { ...badge, background: "#047857" }
-    if (label.includes("team")) return { ...badge, background: "#6d28d9" }
-    if (label.includes("estimate")) return { ...badge, background: "#b45309" }
-    if (label.includes("production planner")) return { ...badge, background: "#475569" }
-    if (label.includes("production calendar change")) return { ...badge, background: "#dc2626" }
-    if (label.includes("alert")) return { ...badge, background: "#be123c" }
-    return badge
+    const eventStage =
+      meta.stage_at_event ||
+      item?.stage_at_event ||
+      item?.stage_classification ||
+      meta.stage_classification ||
+      item?.event_type ||
+      meta.event_type ||
+      null
+
+    if (eventStage) {
+      const presentation = stagePresentation(String(eventStage))
+      return {
+        ...badge,
+        background: presentation.backgroundColor,
+        color: presentation.color,
+        border: `1px solid ${presentation.borderColor}`,
+      }
+    }
+
+    if (label.includes("task activity")) {
+      const presentation = taskActivityPresentation(item)
+      return {
+        ...badge,
+        background: presentation.backgroundColor,
+        color: presentation.color,
+      }
+    }
+
+    const neutral = stagePresentation(null)
+    return {
+      ...badge,
+      background: neutral.backgroundColor,
+      color: neutral.color,
+      border: `1px solid ${neutral.borderColor}`,
+    }
   }
 
 

@@ -2498,7 +2498,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         return reply.code(403).send({ok:false,error:"Recipient prohibited"})
 
       const job=await pool.query(
-        `select j.id,c.phone as customer_phone,j.adjuster_phone,j.adjuster_name
+        `select j.id,j.stage,c.phone as customer_phone,j.adjuster_phone,j.adjuster_name
          from jobs j left join customers c
            on c.id=j.customer_id and c.tenant_id=j.tenant_id
          where j.id=$1 and j.tenant_id=$2 limit 1`,
@@ -2584,6 +2584,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           author:actor.full_name||actor.email||"Team",
           author_app_user_id:Number(actor.id),
           note_type:"manual_sms_sent",
+          stage_at_event:job.rows[0].stage||null,
           channel:"sms",
           recipient_type:type,
           recipient_id:id,
@@ -2702,6 +2703,16 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         subcontractorCompanyId = Number(membership.rows[0].id)
       }
 
+      const noteStageResult = await pool.query(
+        `select stage from jobs
+         where id=$1 and tenant_id=$2 limit 1`,
+        [numericJobId, tenantId]
+      )
+
+      if (!noteStageResult.rowCount) {
+        throw new Error("Job not found")
+      }
+
       const result = await pool.query(
         `
         insert into timeline_events
@@ -2721,6 +2732,7 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
           JSON.stringify({
             author: noteAuthor,
             author_app_user_id: Number(user.id),
+            stage_at_event: noteStageResult.rows[0].stage || null,
             ...(subcontractorCompanyId !== null
               ? {
                   communication_scope: "workforce",
