@@ -1356,13 +1356,15 @@ export default function JobDetail() {
   async function sendManualSms() {
     if (!id || smsSendingRef.current) return
 
-    const message = smsText.trim()
+    const messageBody = smsText.trim()
+    const jobPrefix = `Job #${id}: `
+    const message = `${jobPrefix}${messageBody}`
     const selected = [...new Set(smsSelectedRecipients)]
     const eligible = new Set(
       smsRecipients.map(r => `${r.type}:${r.id}`)
     )
 
-    if (!message) {
+    if (!messageBody) {
       errorToast("Type a text message first")
       return
     }
@@ -1443,7 +1445,7 @@ export default function JobDetail() {
 
       if (failedRecipientIds.length) {
         setSmsSelectedRecipients(failedRecipientIds)
-        setSmsText(message)
+        setSmsText(messageBody)
         setStatus("")
         errorToast(
           `${successful} of ${selected.length} SMS requests succeeded; ` +
@@ -2504,9 +2506,19 @@ export default function JobDetail() {
                   )
                 })}
               </fieldset>
+              <div style={{ marginBottom: 8, fontWeight: 600 }}>
+                {`Job #${id}: `}
+                <span style={{ fontWeight: 400 }}>
+                  {language === "es"
+                    ? "Se agregará automáticamente al mensaje"
+                    : "Automatically added to the message"}
+                </span>
+              </div>
               <textarea
                 value={smsText}
                 onChange={e => setSmsText(e.target.value)}
+                disabled={smsSending}
+                maxLength={Math.max(0, 1500 - `Job #${id}: `.length)}
                 style={textarea}
               />
               {id && smsText.trim() && (
@@ -2520,7 +2532,7 @@ export default function JobDetail() {
               )}
               <button
                 onClick={sendManualSms}
-                disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || smsText.length > 1500}
+                disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || (`Job #${id}: `.length + smsText.trim().length) > 1500}
                 style={button}
               >
                 {smsSending
@@ -3689,10 +3701,17 @@ export default function JobDetail() {
             )
           })}
         </fieldset>
+        <div style={{ marginBottom: 8, fontWeight: 600 }}>
+          {`Job #${id}: `}
+          <span style={{ fontWeight: 400 }}>
+            Automatically added to the message
+          </span>
+        </div>
         <textarea
           value={smsText}
           onChange={(e) => setSmsText(e.target.value)}
-
+          disabled={smsSending}
+          maxLength={Math.max(0, 1500 - `Job #${id}: `.length)}
           style={textarea}
         />
         {id && smsText.trim() && (
@@ -3708,7 +3727,7 @@ export default function JobDetail() {
         )}
         <button
           onClick={sendManualSms}
-          disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || smsText.length > 1500}
+          disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || (`Job #${id}: `.length + smsText.trim().length) > 1500}
           style={button}
         >
           {smsSending
