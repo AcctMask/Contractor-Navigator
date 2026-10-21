@@ -103,7 +103,9 @@ export default function JobDetail() {
   const [smsRecipients, setSmsRecipients] = useState<
     {type:string;id:number;label:string}[]
   >([])
-  const [smsRecipient, setSmsRecipient] = useState("customer")
+  const [smsSelectedRecipients, setSmsSelectedRecipients] = useState<string[]>([])
+  const [smsSending, setSmsSending] = useState(false)
+  const smsSendingRef = useRef(false)
   const [stage, setStage] = useState("lead")
   const [tarpSquareFeet, setTarpSquareFeet] = useState("")
   const [tarpSandbags, setTarpSandbags] = useState("")
@@ -1308,12 +1310,14 @@ export default function JobDetail() {
   useEffect(() => {
     if (!id || !getToken()) return
     let cancelled = false
+    setSmsSelectedRecipients([])
+
     fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/sms-recipients`, {
-      headers: {Authorization: `Bearer ${getToken()}`}
+      headers: { Authorization: `Bearer ${getToken()}` }
     })
-      .then(async r => {
-        const data = await r.json()
-        if (!r.ok || !data.ok) {
+      .then(async response => {
+        const data = await response.json()
+        if (!response.ok || !data.ok) {
           throw new Error(data.error || "Unable to load SMS recipients")
         }
         return data
@@ -1322,58 +1326,151 @@ export default function JobDetail() {
         if (cancelled) return
         const recipients = Array.isArray(data.recipients) ? data.recipients : []
         setSmsRecipients(recipients)
-        setSmsRecipient(
-          recipients.some((r: {type:string}) => r.type === "customer")
-            ? "customer:0"
-            : recipients.length
-              ? `${recipients[0].type}:${recipients[0].id}`
-              : ""
+        setSmsSelectedRecipients(previous =>
+          previous.filter(key =>
+            recipients.some((r: {type:string;id:number}) =>
+              `${r.type}:${r.id}` === key
+            )
+          )
         )
       })
       .catch(err => {
-        if (!cancelled) {
-          setSmsRecipients([])
-          setSmsRecipient("")
-          console.error("SMS recipient lookup:", err)
-        }
+        if (cancelled) return
+        setSmsRecipients([])
+        setSmsSelectedRecipients([])
+        console.error("SMS recipient lookup:", err)
       })
-    return () => {cancelled = true}
+
+    return () => { cancelled = true }
   }, [id])
 
+  function toggleSmsRecipient(key: string) {
+    if (smsSendingRef.current) return
+    setSmsSelectedRecipients(previous =>
+      previous.includes(key)
+        ? previous.filter(value => value !== key)
+        : [...previous, key]
+    )
+  }
+
   async function sendManualSms() {
-    if (!id) return
-    if (!smsText.trim()) {
+    if (!id || smsSendingRef.current) return
+
+    const message = smsText.trim()
+    const selected = [...new Set(smsSelectedRecipients)]
+    const eligible = new Set(
+      smsRecipients.map(r => `${r.type}:${r.id}`)
+    )
+
+    if (!message) {
       errorToast("Type a text message first")
       return
     }
 
-    setError("")
-    setStatus("Sending text...")
-
-    const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/send-sms`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getToken()}`,
-      },
-      body: JSON.stringify({
-        message: smsText,
-        recipient_type: smsRecipient.split(":")[0],
-        recipient_id: Number(smsRecipient.split(":")[1] || 0),
-      }),
-    })
-
-    const data = await res.json()
-
-    if (!res.ok || !data.ok) {
-      setStatus("")
-      errorToast(data?.error || "Send text failed")
+    if (message.length > 1500) {
+      errorToast("SMS cannot exceed 1,500 characters")
       return
     }
 
-    setSmsText("")
-    successToast("Text sent")
-    await loadJob()
+    if (!selected.length || selected.some(key => !eligible.has(key))) {
+      errorToast("Select authorized SMS recipients")
+      return
+    }
+
+    const jobId = id
+    const tenantSlug = getTenantSlug()
+    const token = getToken()
+
+    if (!token) {
+      errorToast("Authentication required")
+      return
+    }
+
+    smsSendingRef.current = true
+    setSmsSending(true)
+    setError("")
+    setStatus(`Sending text to ${selected.length} recipient(s)...`)
+
+    const failedRecipientIds: string[] = []
+    const failureDetails: string[] = []
+    let successful = 0
+
+    try {
+      for (const key of selected) {
+        const recipient = smsRecipients.find(
+          r => `${r.type}:${r.id}` === key
+        )
+
+        if (!recipient) {
+          failedRecipientIds.push(key)
+          failureDetails.push(`${key}: recipient unavailable`)
+          continue
+        }
+
+        try {
+          const response = await fetch(
+            `${API_BASE}/assets/${tenantSlug}/job/${jobId}/send-sms`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                message,
+                recipient_type: recipient.type,
+                recipient_id: recipient.id,
+              }),
+            }
+          )
+
+          const data = await response.json()
+
+          if (!response.ok || !data.ok) {
+            throw new Error(data?.error || "Send rejected")
+          }
+
+          successful += 1
+        } catch (err) {
+          failedRecipientIds.push(key)
+          failureDetails.push(
+            `${recipient.label}: ${
+              err instanceof Error ? err.message : "Send failed"
+            }`
+          )
+        }
+      }
+
+      if (failedRecipientIds.length) {
+        setSmsSelectedRecipients(failedRecipientIds)
+        setSmsText(message)
+        setStatus("")
+        errorToast(
+          `${successful} of ${selected.length} SMS requests succeeded; ` +
+          `${failedRecipientIds.length} failed. ` +
+          failureDetails.join("; ")
+        )
+      } else {
+        setSmsSelectedRecipients([])
+        setSmsText("")
+        setStatus("")
+        successToast(
+          `${successful} SMS request(s) accepted`
+        )
+      }
+
+      if (successful) {
+        try {
+          await loadJob()
+        } catch (err) {
+          console.error("SMS sent, but job refresh failed:", err)
+        }
+      }
+    } finally {
+      smsSendingRef.current = false
+      setSmsSending(false)
+      setStatus("")
+    }
   }
 
   async function addNote() {
@@ -2380,25 +2477,33 @@ export default function JobDetail() {
 
             <section style={card}>
               <h2>{language === "es" ? "Enviar SMS" : "Send SMS"}</h2>
-              <label htmlFor="sub-sms-recipient">{language === "es" ? "Enviar a" : "Send To"}</label>
-              <select
-                id="sub-sms-recipient"
-                value={smsRecipient}
-                onChange={e => setSmsRecipient(e.target.value)}
-                style={input}
+              <fieldset
+                disabled={smsSending}
+                style={{ border: "1px solid #d1d5db", padding: 12, marginBottom: 12 }}
               >
+                <legend>{language === "es" ? "Enviar a" : "Send To"}</legend>
                 {smsRecipients.length === 0 && (
-                  <option value="">{language === "es" ? "No hay destinatarios de SMS autorizados" : "No authorized SMS recipients available"}</option>
+                  <p>{language === "es"
+                    ? "No hay destinatarios de SMS autorizados"
+                    : "No authorized SMS recipients available"}</p>
                 )}
-                {smsRecipients.map(r => (
-                  <option
-                    key={`${r.type}:${r.id}`}
-                    value={`${r.type}:${r.id}`}
-                  >
-                    {r.label}
-                  </option>
-                ))}
-              </select>
+                {smsRecipients.map(r => {
+                  const key = `${r.type}:${r.id}`
+                  return (
+                    <label key={key} style={{
+                      display: "flex", alignItems: "center",
+                      gap: 8, marginBottom: 8
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={smsSelectedRecipients.includes(key)}
+                        onChange={() => toggleSmsRecipient(key)}
+                      />
+                      <span>{r.label}</span>
+                    </label>
+                  )
+                })}
+              </fieldset>
               <textarea
                 value={smsText}
                 onChange={e => setSmsText(e.target.value)}
@@ -2415,10 +2520,12 @@ export default function JobDetail() {
               )}
               <button
                 onClick={sendManualSms}
-                disabled={!smsRecipient || !smsText.trim()}
+                disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || smsText.length > 1500}
                 style={button}
               >
-                {language === "es" ? "Enviar mensaje" : "Send Text"}
+                {smsSending
+                  ? (language === "es" ? "Enviando..." : "Sending...")
+                  : `${language === "es" ? "Enviar mensaje" : "Send Text"} (${smsSelectedRecipients.length})`}
               </button>
             </section>
 
@@ -3557,22 +3664,31 @@ export default function JobDetail() {
 
       <section style={card}>
         <h2>Send SMS</h2>
-        <label htmlFor="sms-recipient">Send To</label>
-        <select
-          id="sms-recipient"
-          value={smsRecipient}
-          onChange={e => setSmsRecipient(e.target.value)}
-          style={{width:"100%",padding:10,marginBottom:12}}
+        <fieldset
+          disabled={smsSending}
+          style={{ border: "1px solid #d1d5db", padding: 12, marginBottom: 12 }}
         >
+          <legend>Send To</legend>
           {smsRecipients.length === 0 && (
-            <option value="">No authorized SMS recipients available</option>
+            <p>No authorized SMS recipients available</p>
           )}
-          {smsRecipients.map(r => (
-            <option key={`${r.type}:${r.id}`} value={`${r.type}:${r.id}`}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+          {smsRecipients.map(r => {
+            const key = `${r.type}:${r.id}`
+            return (
+              <label key={key} style={{
+                display: "flex", alignItems: "center",
+                gap: 8, marginBottom: 8
+              }}>
+                <input
+                  type="checkbox"
+                  checked={smsSelectedRecipients.includes(key)}
+                  onChange={() => toggleSmsRecipient(key)}
+                />
+                <span>{r.label}</span>
+              </label>
+            )
+          })}
+        </fieldset>
         <textarea
           value={smsText}
           onChange={(e) => setSmsText(e.target.value)}
@@ -3590,7 +3706,15 @@ export default function JobDetail() {
             />
           </div>
         )}
-        <button onClick={sendManualSms} disabled={!smsRecipient} style={button}>Send Text</button>
+        <button
+          onClick={sendManualSms}
+          disabled={smsSending || !smsSelectedRecipients.length || !smsText.trim() || smsText.length > 1500}
+          style={button}
+        >
+          {smsSending
+            ? "Sending..."
+            : `Send Text (${smsSelectedRecipients.length})`}
+        </button>
       </section>
 
       <section style={card}>
