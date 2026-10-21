@@ -817,7 +817,15 @@ export default function JobDetail() {
     if (kind.includes("lead_intent")) return "Lead Qualification"
     if (kind.includes("lead_created")) return "Lead Created"
     if (kind.includes("voice")) return "Voice Intake"
-    if (kind === "manual_stage_updated") return "Stage Change"
+    if (kind === "manual_stage_updated") {
+      const actor = String(
+        meta.actor_name ||
+        meta.actor_email ||
+        meta.author ||
+        ""
+      ).trim()
+      return actor ? `Stage Change — ${actor}` : "Stage Change"
+    }
     if (kind.includes("job_manually_updated")) return "Manual Update"
     if (kind.includes("production_planner_explanation_updated")) return "Production Planner"
     if (kind.includes("job_archived")) return "Archived"
@@ -871,10 +879,6 @@ export default function JobDetail() {
       meta.user_name ||
       meta.author ||
       null
-
-    if (kind === "manual_stage_updated" && actor) {
-      return `Moved by ${actor}`
-    }
 
     if (
       (
