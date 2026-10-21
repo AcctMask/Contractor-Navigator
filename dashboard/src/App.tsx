@@ -46,6 +46,7 @@ import CrewPortal from "./pages/CrewPortal"
 
 function HeaderBar() {
   const location = useLocation()
+  const stormJobId = /^\/job\/(\d+)\/?$/.exec(location.pathname)?.[1] || null
   const navigate = useNavigate()
   const authed = isLoggedIn()
   const {
@@ -403,8 +404,12 @@ function HeaderBar() {
                           {
                             method: "POST",
                             headers: {
-                              Authorization: `Bearer ${token}`
-                            }
+                              Authorization: `Bearer ${token}`,
+                              "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify(
+                              stormJobId ? { job_id: Number(stormJobId) } : {}
+                            )
                           }
                         )
                         const result = await response.json()

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify"
 import { createHmac, randomUUID } from "node:crypto"
+import { pool } from "../db/db"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
@@ -131,11 +132,69 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         })
       }
 
+      const requestedJobId = (request.body as any)?.job_id
+      let stormJob: any = null
+
+      if (requestedJobId !== undefined && requestedJobId !== null) {
+        const jobId = Number(requestedJobId)
+        if (!Number.isSafeInteger(jobId) || jobId <= 0) {
+          return reply.code(400).send({
+            ok: false, error: "Invalid job ID"
+          })
+        }
+
+        if (!["platform_owner", "tenant_admin", "admin", "manager"]
+            .includes(String(user.role))) {
+          return reply.code(403).send({
+            ok: false, error: "Staff access required"
+          })
+        }
+
+        const found = await pool.query(
+          `select j.id, j.address1, j.city, j.state, j.zip,
+                  c.full_name as customer_name,
+                  c.phone as customer_phone,
+                  c.email as customer_email
+           from jobs j
+           left join customers c
+             on c.id = j.customer_id and c.tenant_id = j.tenant_id
+           where j.tenant_id = $1 and j.id = $2
+           limit 1`,
+          [Number(user.tenant_id), jobId]
+        )
+
+        if (!found.rowCount) {
+          return reply.code(404).send({
+            ok: false, error: "Job not found"
+          })
+        }
+
+        const job = found.rows[0]
+        if (!job.address1 || !job.customer_name ||
+            !job.customer_phone || !job.customer_email) {
+          return reply.code(409).send({
+            ok: false,
+            error: "Job requires customer name, phone, email and address"
+          })
+        }
+
+        stormJob = {
+          id: Number(job.id),
+          name: String(job.customer_name),
+          phone: String(job.customer_phone),
+          email: String(job.customer_email),
+          address: [job.address1, job.city, job.state, job.zip]
+            .filter(Boolean).join(", ")
+        }
+      }
+
       const payload = Buffer.from(JSON.stringify({
         aud: "storm-professional",
         sub: String(user.id),
         tenant_id: String(user.tenant_id),
-        jti: randomUUID()
+        jti: randomUUID(),
+        iat: Math.floor(Date.now() / 1000),
+        ...(stormJob ? { storm_job: stormJob } : {})
       })).toString("base64url")
 
       const signature = createHmac("sha256", secret)

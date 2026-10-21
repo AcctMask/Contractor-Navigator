@@ -637,6 +637,81 @@ const insertedJob = await pool.query(
       });
     }
 
+    let verifiedStormJobId: number | null = null;
+    const launchToken = asString(body.storm_launch_token);
+
+    if (launchToken) {
+      const parts = launchToken.split(".");
+      const secret = process.env.STORM_NAVIGATOR_SECRET || "";
+
+      if (parts.length !== 2 || !secret) {
+        return reply.code(403).send({
+          ok: false, error: "Invalid Storm launch"
+        });
+      }
+
+      const { createHmac, timingSafeEqual } = await import("node:crypto");
+      const expected = createHmac("sha256", secret)
+        .update(parts[0]).digest();
+      const supplied = Buffer.from(parts[1], "base64url");
+
+      if (supplied.length !== expected.length ||
+          !timingSafeEqual(supplied, expected)) {
+        return reply.code(403).send({
+          ok: false, error: "Invalid launch signature"
+        });
+      }
+
+      let claims: any;
+      try {
+        claims = JSON.parse(
+          Buffer.from(parts[0], "base64url").toString("utf8")
+        );
+      } catch {
+        return reply.code(403).send({
+          ok: false, error: "Invalid launch claims"
+        });
+      }
+
+      if (claims.aud !== "storm-professional" ||
+          String(claims.tenant_id) !== String(tenantId) ||
+          !Number.isSafeInteger(claims.iat) ||
+          Math.abs(Math.floor(Date.now() / 1000) - claims.iat) > 1800 ||
+          !Number.isSafeInteger(claims.storm_job?.id) ||
+          claims.storm_job.id <= 0) {
+        return reply.code(403).send({
+          ok: false, error: "Expired or invalid job launch"
+        });
+      }
+
+      const found = await pool.query(
+        `select address1, city, state, zip
+         from jobs
+         where tenant_id = $1 and id = $2
+         limit 1`,
+        [tenantId, claims.storm_job.id]
+      );
+
+      if (!found.rowCount) {
+        return reply.code(404).send({
+          ok: false, error: "Originating job not found"
+        });
+      }
+
+      const j = found.rows[0];
+      const jobAddress = [j.address1, j.city, j.state, j.zip]
+        .filter(Boolean).join(", ");
+
+      if (!weatherAddressesMatch(address, jobAddress)) {
+        return reply.code(409).send({
+          ok: false,
+          error: "Report property differs from originating job"
+        });
+      }
+
+      verifiedStormJobId = claims.storm_job.id;
+    }
+
     const existingReport = await pool.query(
       `select job_id
        from timeline_events
@@ -649,6 +724,13 @@ const insertedJob = await pool.query(
     );
 
     if (existingReport.rowCount) {
+      if (verifiedStormJobId !== null &&
+          Number(existingReport.rows[0].job_id) !== verifiedStormJobId) {
+        return reply.code(409).send({
+          ok: false,
+          error: "Report already archived to another job"
+        });
+      }
       return reply.send({
         ok: true,
         job_id: Number(existingReport.rows[0].job_id),
@@ -711,7 +793,9 @@ const insertedJob = await pool.query(
 
     let jobId: number;
 
-    if (matchingJobs.rowCount === 1) {
+    if (verifiedStormJobId !== null) {
+      jobId = verifiedStormJobId;
+    } else if (matchingJobs.rowCount === 1) {
       jobId = Number(matchingJobs.rows[0].id);
     } else if (eligibleJobs.length === 1) {
       jobId = Number(eligibleJobs[0].id);
