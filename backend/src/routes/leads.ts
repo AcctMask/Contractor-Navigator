@@ -149,12 +149,10 @@ async function registerLeadRoutes(app: FastifyInstance) {
       const body: any = (req as any).body || {}
 
       const tenantSlug = asString(body.tenant_slug) || DEFAULT_TENANT
-      const tenantId = await getTenantIdBySlug(tenantSlug)
 
       const fullName =
         asString(body.name) ||
-        asString(body.Field1) ||
-        "Unknown Lead"
+        asString(body.Field1)
 
       const email =
         asString(body.email) ||
@@ -163,6 +161,27 @@ async function registerLeadRoutes(app: FastifyInstance) {
       const phone =
         asString(body.phone) ||
         asString(body.Field3)
+
+      const message =
+        asString(body.message) ||
+        asString(body.Message) ||
+        asString(body.comments) ||
+        asString(body.comment) ||
+        asString(body.notes) ||
+        asString(body.description) ||
+        asString(body.Field6) ||
+        asString(body["your-message"])
+
+      // Website contact intake requires a real contact and an actual inquiry.
+      // Do not create a customer, job, or notification for incomplete submissions.
+      if (!fullName || !phone || !message) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Name, phone number, and message are required",
+        })
+      }
+
+      const tenantId = await getTenantIdBySlug(tenantSlug)
 
       const zip =
         asString(body.zip) ||
@@ -240,7 +259,8 @@ async function registerLeadRoutes(app: FastifyInstance) {
         `Phone: ${phone || "Unknown"}\n` +
         `Email: ${email || "Unknown"}\n` +
         `ZIP: ${zip || "Unknown"}\n` +
-        `Requested Service: ${product}\n\n` +
+        `Requested Service: ${product}\n` +
+        `Message: ${message}\n\n` +
         `Source: Website Contact Form`
 
       try {
@@ -292,10 +312,11 @@ async function registerLeadRoutes(app: FastifyInstance) {
         [
           tenantId,
           jobId,
-          `Website contact form received: ${product}`,
+          `Website contact form received: ${product}. Message: ${message}`,
           JSON.stringify({
             source: "wordpress_contact_form",
             product,
+            message,
             raw_payload: body,
             customer_sms: customerSmsResult,
             customer_email: customerEmailResult,
