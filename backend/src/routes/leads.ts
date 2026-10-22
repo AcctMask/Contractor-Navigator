@@ -162,35 +162,38 @@ async function registerLeadRoutes(app: FastifyInstance) {
         asString(body.phone) ||
         asString(body.Field3)
 
-      const message =
-        asString(body.message) ||
-        asString(body.Message) ||
-        asString(body.comments) ||
-        asString(body.comment) ||
-        asString(body.notes) ||
-        asString(body.description) ||
-        asString(body.Field6) ||
-        asString(body["your-message"])
-
-      // Website contact intake requires a real contact and an actual inquiry.
-      // Do not create a customer, job, or notification for incomplete submissions.
-      if (!fullName || !phone || !message) {
-        return reply.code(400).send({
-          ok: false,
-          error: "Name, phone number, and message are required",
-        })
-      }
-
-      const tenantId = await getTenantIdBySlug(tenantSlug)
-
       const zip =
         asString(body.zip) ||
         asString(body.Field4)
 
       const product =
         asString(body.product) ||
-        asString(body.Field5) ||
-        "Website Contact"
+        asString(body.Field5)
+
+      const allowedServices = new Set([
+        "residential roofing",
+        "commercial roofing",
+        "damage assessment",
+        "emergency roof tarping",
+        "inspections",
+        "repair",
+      ])
+
+      // The public form has a service dropdown, not a message field.
+      // Reject blank/default/unknown selections before creating any records.
+      if (
+        !fullName ||
+        !phone ||
+        !product ||
+        !allowedServices.has(product.toLowerCase())
+      ) {
+        return reply.code(400).send({
+          ok: false,
+          error: "Name, phone number, and a roofing service selection are required",
+        })
+      }
+
+      const tenantId = await getTenantIdBySlug(tenantSlug)
 
       const customerId = await findOrCreateCustomer(
         tenantId,
@@ -260,7 +263,7 @@ async function registerLeadRoutes(app: FastifyInstance) {
         `Email: ${email || "Unknown"}\n` +
         `ZIP: ${zip || "Unknown"}\n` +
         `Requested Service: ${product}\n` +
-        `Message: ${message}\n\n` +
+        `\n` +
         `Source: Website Contact Form`
 
       try {
@@ -312,11 +315,10 @@ async function registerLeadRoutes(app: FastifyInstance) {
         [
           tenantId,
           jobId,
-          `Website contact form received: ${product}. Message: ${message}`,
+          `Website contact form received: ${product}`,
           JSON.stringify({
             source: "wordpress_contact_form",
             product,
-            message,
             raw_payload: body,
             customer_sms: customerSmsResult,
             customer_email: customerEmailResult,
