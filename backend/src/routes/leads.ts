@@ -146,7 +146,30 @@ async function registerLeadRoutes(app: FastifyInstance) {
 
   app.post("/lead/contact", async (req, reply) => {
     try {
-      const body: any = (req as any).body || {}
+      let body: any = (req as any).body || {}
+
+      // WordPress sends multipart/form-data. @fastify/multipart does not
+      // populate req.body unless configured to attach fields, so read the
+      // text fields explicitly for this route only.
+      if (req.isMultipart()) {
+        const fields: Record<string, string> = {}
+        let fieldCount = 0
+        for await (const part of req.parts({
+          limits: { fields: 20, files: 0, fieldSize: 4096 },
+        })) {
+          if (part.type !== "field") {
+            return reply.code(400).send({ ok: false, error: "File uploads are not supported" })
+          }
+          fieldCount++
+          if (fieldCount > 20) {
+            return reply.code(400).send({ ok: false, error: "Too many form fields" })
+          }
+          if (typeof part.value === "string") {
+            fields[part.fieldname] = part.value
+          }
+        }
+        body = fields
+      }
 
       const tenantSlug = asString(body.tenant_slug) || DEFAULT_TENANT
 
