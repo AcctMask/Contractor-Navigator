@@ -187,6 +187,16 @@ async function registerLeadRoutes(app: FastifyInstance) {
         !product ||
         !allowedServices.has(product.toLowerCase())
       ) {
+        // Log structure only: never log customer name, phone, email, or field values.
+        req.log.warn({
+          event: "website_contact_validation_rejected",
+          contentType: req.headers["content-type"] || null,
+          fieldNames: Object.keys(body).slice(0, 30),
+          hasName: Boolean(fullName),
+          hasPhone: Boolean(phone),
+          hasService: Boolean(product),
+          recognizedService: Boolean(product && allowedServices.has(product.toLowerCase())),
+        }, "Website contact form submission rejected")
         return reply.code(400).send({
           ok: false,
           error: "Name, phone number, and a roofing service selection are required",
