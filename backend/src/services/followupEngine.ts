@@ -998,6 +998,14 @@ async function maybeRecordAndRouteWaUtc(
 }
 
 function getWorkflowMessages(settings: DevSettings, job: JobRow) {
+  if (job.stage === "lead" && job.crm_flow_key === "weather_evidence_report") {
+    const configuration = getStageFollowupConfig(settings, "lead")
+    return {
+      workflowKey: "lead",
+      messages: configuration?.messages || [],
+    }
+  }
+
   if (job.crm_flow_key === "weather_evidence_report") {
     return {
       workflowKey: "weather_evidence_report",

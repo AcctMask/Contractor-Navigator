@@ -77,7 +77,10 @@ async function workflowDelaysForTenant(
       tenantSlug,
     )
 
-  if (crmFlowKey === "weather_evidence_report") {
+  if (
+    crmFlowKey === "weather_evidence_report" &&
+    activeWorkflow !== "lead"
+  ) {
     return timingsToMs(
       settings.weather_report_timings_minutes || [],
     )
@@ -181,6 +184,10 @@ function getWorkflowClockAt(job: SchedJob) {
 }
 
 function getAutomationKey(job: SchedJob) {
+  if (job.stage === "lead" && job.crm_flow_key === "weather_evidence_report") {
+    return "lead"
+  }
+
   if (job.crm_flow_key === "weather_evidence_report") {
     return "weather_evidence_report"
   }
@@ -331,7 +338,9 @@ async function processJob(job: SchedJob) {
 
   const delays = await workflowDelaysForTenant(
     job.tenant_slug,
-    job.active_followup_workflow,
+    job.stage === "lead" && job.crm_flow_key === "weather_evidence_report"
+      ? "lead"
+      : job.active_followup_workflow,
     job.crm_flow_key
   )
   if (!delays.length) return
