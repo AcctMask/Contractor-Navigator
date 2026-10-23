@@ -1052,8 +1052,28 @@ function buildAiMessage(job: JobRow, timeline: TimelineRow[], settings: DevSetti
 }
 
 function detectBuyingSignals(message: string) {
-  const normalized = message.toLowerCase()
-  return BUYING_SIGNAL_PATTERNS.filter((pattern) => normalized.includes(pattern))
+  const normalized = String(message || "")
+    .toLowerCase()
+    .replace(/[’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  const negativeReadiness = /\b(?:not|never|don't|do not|no longer)\s+(?:quite\s+|yet\s+)?ready\b|\bnot\s+(?:ready\s+)?to\s+(?:proceed|move forward|go ahead)\b/i
+  const negativeProceed = /\b(?:do not|don't|does not|doesn't|did not|didn't|not|never|no longer|cannot|can't|won't|wouldn't)\s+(?:really\s+)?(?:want|wish|intend|plan|like)\s+to\s+(?:go ahead|proceed|move forward|start|begin|sign)\b/i
+  if (negativeReadiness.test(normalized) || negativeProceed.test(normalized)) return []
+
+  const matches = BUYING_SIGNAL_PATTERNS.filter((pattern) => normalized.includes(pattern))
+  const readiness = /\b(?:i(?:'m| am)|we(?:'re| are))\b.{0,45}\bready\s+to\s+(?:proceed|go ahead|start|begin|move forward)\b|\b(?:ready|want|would like)\s+to\s+(?:proceed|move forward|go ahead|sign|start)\b/i
+  if (readiness.test(normalized)) matches.push("readiness_to_proceed")
+
+  const affirmativeProceed = /\b(?:i(?:'d| would)|we(?:'d| would))\s+(?:really\s+)?like\s+to\s+(?:go ahead|proceed|move forward|start|begin|sign)\b|\b(?:let's|lets)\s+(?:go ahead|proceed|get started)\b/i
+  const negatedProceed = /\b(?:don't|do not|not|never|wouldn't|would not)\b.{0,35}\b(?:go ahead|proceed|move forward|start|begin|sign)\b/i
+
+  if (affirmativeProceed.test(normalized) && !negatedProceed.test(normalized)) {
+    matches.push("affirmative_proceed_intent")
+  }
+
+  return [...new Set(matches)]
 }
 
 export function detectCustomerFrustration(
@@ -2592,7 +2612,8 @@ export async function handleInboundMessageByTenantSlug(
   })
 
 
-  await reportAaCustomerActivity({
+  try {
+    await reportAaCustomerActivity({
     tenant_slug: tenantSlug,
     module_id: "ai_followup",
     module_name: "AI Follow-Up & After-Hours Assistant",
@@ -2608,7 +2629,10 @@ export async function handleInboundMessageByTenantSlug(
       message: trimmed,
       needs_attention: true,
     },
-  })
+    })
+  } catch (error) {
+    console.warn("Navigator inbound SMS AA activity reporting failed; continuing customer handling", error)
+  }
 
   /*
    * Customer-frustration safety valve.
@@ -3222,7 +3246,12 @@ export async function handleInboundMessageByTenantSlug(
       classification === "inspection_request" ||
       classification === "contract_request"
 
-    if (qualifiedLeadIntent) {
+    if (
+      qualifiedLeadIntent &&
+      ["intake_pending", "intake", "lead"].includes(
+        String(job.stage || "").toLowerCase()
+      )
+    ) {
       await updateJobRoutingForClassification(
         tenantId,
         jobId,
@@ -3381,7 +3410,71 @@ export async function handleInboundMessageByTenantSlug(
      * sales-intent response. Subsequent follow-up scheduling sees the
      * updated Lead stage and uses the Lead workflow.
      */
-    const sms = await sendSMS(callbackNumber, salesIntentReply, replyFrom)
+    let sms: any = null
+    let salesReplyError: string | null = null
+
+    try {
+      sms = await sendSMS(callbackNumber, salesIntentReply, replyFrom)
+    } catch (error: any) {
+      salesReplyError = error?.message || String(error)
+    }
+
+    if (salesReplyError) {
+      const escalationText = [
+        "URGENT: SALES-INTENT SMS RESPONSE FAILED",
+        `Job ID: ${jobId}`,
+        `Customer: ${job.customer_name || "Unknown"}`,
+        `Phone: ${callbackNumber}`,
+        `Customer message: ${trimmed}`,
+        `Failure: ${salesReplyError}`,
+        "Action: Contact customer personally.",
+      ].join("\n")
+
+      let escalationSms: any = { skipped: true, reason: "missing_alert_sms_to" }
+      let escalationEmail: any = { skipped: true, reason: "missing_alert_email_to" }
+
+      if (alertTargets.alert_sms_to) {
+        try {
+          escalationSms = await sendSMS(alertTargets.alert_sms_to, escalationText)
+        } catch (error: any) {
+          escalationSms = { error: error?.message || String(error) }
+        }
+      }
+
+      if (alertTargets.alert_email_to) {
+        try {
+          escalationEmail = await sendAlertEmail(
+            alertTargets.alert_email_to,
+            `Urgent SMS response failure: Job #${jobId}`,
+            escalationText
+          )
+        } catch (error: any) {
+          escalationEmail = { error: error?.message || String(error) }
+        }
+      }
+
+      await addTimelineEvent(
+        tenantId,
+        jobId,
+        "customer_acknowledgment_escalated",
+        "Sales-intent SMS response failed; staff escalation attempted",
+        {
+          intent: salesIntent,
+          error: salesReplyError,
+          sms_result: escalationSms,
+          email_result: escalationEmail,
+        }
+      )
+
+      return {
+        ok: true,
+        handled_by_sales_intent_engine: true,
+        intent: salesIntent,
+        customer_acknowledgment_sent: false,
+        customer_acknowledgment_reason: salesReplyError,
+        staff_escalation_attempted: true,
+      }
+    }
 
     await addTimelineEvent(
       tenantId,
@@ -3657,20 +3750,78 @@ export async function handleInboundMessageByTenantSlug(
     })
   }
 
-  await sendAutoClassificationReply(
-    tenantSlug,
-    tenantId,
-    jobId,
-    job,
-    classification,
-    settings,
-    callbackNumber,
-    trimmed,
-    replyFrom
-  )
+  let acknowledgment: any
+
+  try {
+    acknowledgment = await sendAutoClassificationReply(
+      tenantSlug,
+      tenantId,
+      jobId,
+      job,
+      classification,
+      settings,
+      callbackNumber,
+      trimmed,
+      replyFrom
+    )
+  } catch (error: any) {
+    acknowledgment = {
+      sent: false,
+      error: error?.message || String(error),
+    }
+  }
+
+  if (!acknowledgment?.sent && acknowledgment?.reason !== "dnc") {
+    const escalationText =
+      `CUSTOMER SMS ACKNOWLEDGMENT FAILED\n` +
+      `Job ID: ${jobId}\n` +
+      `Customer: ${job.customer_name || "Unknown"}\n` +
+      `Phone: ${callbackNumber || from || "Unknown"}\n` +
+      `Message: ${trimmed}\n` +
+      `Reason: ${acknowledgment?.error || acknowledgment?.reason || "unknown"}\n` +
+      `Action: Staff must contact customer personally.`
+
+    let escalationSms: any = { skipped: true, reason: "missing_alert_sms_to" }
+    let escalationEmail: any = { skipped: true, reason: "missing_alert_email_to" }
+
+    if (alertTargets.alert_sms_to) {
+      try {
+        escalationSms = await sendSMS(alertTargets.alert_sms_to, escalationText)
+      } catch (error: any) {
+        escalationSms = { error: error?.message || String(error) }
+      }
+    }
+
+    if (alertTargets.alert_email_to) {
+      try {
+        escalationEmail = await sendAlertEmail(
+          alertTargets.alert_email_to,
+          `SMS acknowledgment failed: Job #${jobId}`,
+          escalationText
+        )
+      } catch (error: any) {
+        escalationEmail = { error: error?.message || String(error) }
+      }
+    }
+
+    await addTimelineEvent(
+      tenantId,
+      jobId,
+      "customer_acknowledgment_escalated",
+      "Customer SMS acknowledgment failed; staff escalation attempted",
+      {
+        acknowledgment,
+        sms_result: escalationSms,
+        email_result: escalationEmail,
+      }
+    )
+  }
 
   return {
     ok: true,
+    customer_acknowledgment_sent: Boolean(acknowledgment?.sent),
+    customer_acknowledgment_reason:
+      acknowledgment?.reason || acknowledgment?.error || null,
     tenant_id: tenantId,
     job_id: jobId,
     classification,
