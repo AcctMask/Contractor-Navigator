@@ -1249,10 +1249,41 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       return reply.send({ ok: true, dnc: false, action: "opt_in" })
     }
 
-    // Workforce replies go to the assigned job, not customer AI follow-up.
-    // Assignment is authoritative; invitation acceptance is not required.
+    /*
+     * A documented recent customer SMS conversation takes precedence over
+     * a crew identity sharing the same phone. This is particularly important
+     * when an owner/test phone exists in both customer and workforce records.
+     * Scope stays within the tenant and requires the same customer phone.
+     */
+    const customerConversation = await pool.query(
+      `
+      select
+        j.id as job_id,
+        j.tenant_id,
+        j.customer_id,
+        t.slug as tenant_slug
+      from timeline_events te
+      join jobs j on j.id = te.job_id and j.tenant_id = te.tenant_id
+      join customers c on c.id = j.customer_id and c.tenant_id = j.tenant_id
+      join tenants t on t.id = j.tenant_id
+      where te.tenant_id = $1
+        and te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
+        and te.created_at >= now() - interval '14 days'
+        and right(regexp_replace(coalesce(te.meta->>'to', ''), '[^0-9]', '', 'g'), 10) = right(regexp_replace($2, '[^0-9]', '', 'g'), 10)
+        and right(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g'), 10) = right(regexp_replace($2, '[^0-9]', '', 'g'), 10)
+      order by te.created_at desc, te.id desc
+      limit 1
+      `,
+      [tenantId, from]
+    )
+
+    const routedCustomer = customerConversation.rows[0] || latest
+
+    // An active customer SMS conversation must not be intercepted as crew SMS.
     const { resolveInboundCrew } = await import("../services/workforceSmsRouter")
-    const crew = await resolveInboundCrew(tenantId, from)
+    const crew = customerConversation.rowCount
+      ? null
+      : await resolveInboundCrew(tenantId, from)
 
     if (crew) {
       const { recordWorkforceSmsNote } = await import("../services/workforceSmsNotes")
@@ -1271,15 +1302,66 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       return reply.send({ ok: true, workforce: true, recorded: true })
     }
 
-    if (!latest) {
-      return reply.send({ ok: true, skipped: true, reason: "job_not_found_for_phone" })
+    if (!routedCustomer) {
+      // No job match must never silently discard a legitimate customer reply.
+      if (await isPhoneDnc(tenantId, from)) {
+        return reply.send({ ok: true, skipped: true, reason: "phone_marked_dnc" })
+      }
+
+      const { getDeveloperSettingsByTenantSlug } =
+        await import("../services/devSettingsService")
+      const { sendAlertEmail } = await import("../services/emailService")
+
+      const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
+      const alertEmail = String(
+        settings.alert_email_to ||
+        process.env.ALERT_EMAIL_TO ||
+        process.env.ESCALATION_EMAIL_TO ||
+        ""
+      ).trim()
+
+      let emailSent = false
+      let acknowledgmentSent = false
+
+      if (alertEmail) {
+        try {
+          await sendAlertEmail(
+            alertEmail,
+            "Customer SMS needs attention — unmatched phone",
+            `Customer phone: ${from}\\nMessage: ${message}\\nAction: Contact customer and identify the correct job.`
+          )
+          emailSent = true
+        } catch (error) {
+          req.log.error({ error }, "Unmatched customer SMS staff email failed")
+        }
+      } else {
+        req.log.error("Unmatched customer SMS: staff alert email not configured")
+      }
+
+      try {
+        await sendSMS(
+          from,
+          "Thanks for contacting Good2Go Roofing. We received your message and will have someone follow up.",
+          to
+        )
+        acknowledgmentSent = true
+      } catch (error) {
+        req.log.error({ error }, "Unmatched customer SMS acknowledgment failed")
+      }
+
+      return reply.send({
+        ok: true,
+        unmatched_customer: true,
+        customer_acknowledgment_sent: acknowledgmentSent,
+        staff_email_sent: emailSent,
+      })
     }
 
-    const dnc = await isPhoneDnc(Number(latest.tenant_id), from)
+    const dnc = await isPhoneDnc(Number(routedCustomer.tenant_id), from)
     if (dnc) {
       await addTimelineEvent(
-        Number(latest.tenant_id),
-        Number(latest.job_id),
+        Number(routedCustomer.tenant_id),
+        Number(routedCustomer.job_id),
         "customer_reply",
         message,
         {
@@ -1295,8 +1377,8 @@ async function registerTwilioWebhook(app: FastifyInstance) {
     const { handleInboundMessageByTenantSlug } = await import("../services/followupEngine")
 
     const response = await handleInboundMessageByTenantSlug(
-      String(latest.tenant_slug),
-      Number(latest.job_id),
+      String(routedCustomer.tenant_slug),
+      Number(routedCustomer.job_id),
       message,
       from,
       to
