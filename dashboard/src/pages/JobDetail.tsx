@@ -792,6 +792,13 @@ export default function JobDetail() {
     ) return "Task Activity"
 
     if (!kind) return meta.author ? `Team Note — ${meta.author}` : "Team Note"
+
+    if (kind === "workforce_sms") {
+      const sender = String(meta.sender_name || meta.staff_name || meta.author || meta.from_role || "Workforce").trim()
+      const recipient = String(meta.recipient_label || meta.to_name || meta.to_role || "Office").trim()
+      const roleLabel = sender.toLowerCase() === "crew" ? "Crew SMS" : "Workforce SMS"
+      return `${roleLabel} — ${sender} → ${recipient}`
+    }
     if (
       kind.includes("ai_message") ||
       kind.includes("ai_inbound") ||
@@ -869,6 +876,8 @@ export default function JobDetail() {
       "Task Activity": "Actividad de tareas",
       "Team Note": "Nota del equipo",
       "Staff SMS": "SMS del personal",
+      "Crew SMS": "SMS de cuadrilla",
+      "Workforce SMS": "SMS del equipo",
       "Stage Change": "Cambio de etapa",
       "Staff Note": "Nota del personal",
       "Voice AI Transcript": "Transcripción de voz de IA",
@@ -910,6 +919,10 @@ export default function JobDetail() {
       meta.author ||
       null
 
+    if (actor && (kind === "staff_note" || kind === "manual_note" || !kind)) {
+      return `Entered by ${actor}`
+    }
+
     if (
       (
         kind === "calendar_stage_event_rescheduled" ||
@@ -949,6 +962,20 @@ export default function JobDetail() {
         background: "#1d4ed8",
         color: "#ffffff",
       }
+    }
+
+    // Preserve historical event metadata while distinguishing communication roles.
+    if (kind === "workforce_sms") {
+      return { ...badge, background: "#7c3aed", color: "#ffffff" }
+    }
+    if (kind.includes("customer_reply")) {
+      return { ...badge, background: "#0f766e", color: "#ffffff" }
+    }
+    if (meta.note_type === "manual_sms_sent" || kind.includes("manual_sms")) {
+      return { ...badge, background: "#0369a1", color: "#ffffff" }
+    }
+    if (kind.includes("staff_note") || kind.includes("manual_note") || !kind) {
+      return { ...badge, background: "#15803d", color: "#ffffff" }
     }
 
     const eventStage =
@@ -3864,7 +3891,7 @@ export default function JobDetail() {
 
                   <div style={{ marginTop: 8, marginBottom: 8 }}>
                     <span style={getActivityBadgeStyle(note)}>
-                      {getActivityLabel(note)}
+                      {getWorkforceActivityDisplayLabel(note)}
                     </span>
                     {getActivityAttribution(note) && (
                       <div style={{
