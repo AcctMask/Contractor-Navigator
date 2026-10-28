@@ -1431,7 +1431,8 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
 
         if (
           mimeType !== "image/jpeg" &&
-          mimeType !== "image/jpg"
+          mimeType !== "image/jpg" &&
+          mimeType !== "image/png"
         ) {
           reply.code(400)
           return {
