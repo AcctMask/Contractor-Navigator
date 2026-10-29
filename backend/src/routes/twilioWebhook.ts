@@ -491,8 +491,16 @@ async function getLatestJobByPhone(
         te.job_id,
         max(te.created_at) as last_outbound_at
       from timeline_events te, normalized_input ni
-      where te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
-        and regexp_replace(coalesce(te.meta->>'to', ''), '\\D', '', 'g') = ni.phone_digits
+      where (
+        te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
+        or (
+          te.kind = 'staff_note'
+          and te.meta->>'note_type' = 'manual_sms_sent'
+          and te.meta->>'recipient_type' = 'customer'
+        )
+      )
+        and right(regexp_replace(coalesce(te.meta->>'to', ''), '[^0-9]', '', 'g'), 10)
+          = right(ni.phone_digits, 10)
       group by te.tenant_id, te.job_id
     )
     select
@@ -510,8 +518,13 @@ async function getLatestJobByPhone(
       on lo.tenant_id = j.tenant_id
      and lo.job_id = j.id
     where j.tenant_id = $2
-      and regexp_replace(c.phone, '\\D', '', 'g')
-        = regexp_replace($1, '\\D', '', 'g')
+      and right(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g'), 10)
+        = right(regexp_replace($1, '[^0-9]', '', 'g'), 10)
+      and length(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g')) in (10, 11)
+      and (
+        length(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g')) = 10
+        or left(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g'), 1) = '1'
+      )
     order by
       case when lo.last_outbound_at is not null then 0 else 1 end,
       lo.last_outbound_at desc nulls last,
@@ -1267,7 +1280,14 @@ async function registerTwilioWebhook(app: FastifyInstance) {
       join customers c on c.id = j.customer_id and c.tenant_id = j.tenant_id
       join tenants t on t.id = j.tenant_id
       where te.tenant_id = $1
-        and te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
+        and (
+          te.kind in ('ai_message_sent', 'ai_inbound_response_sent')
+          or (
+            te.kind = 'staff_note'
+            and te.meta->>'note_type' = 'manual_sms_sent'
+            and te.meta->>'recipient_type' = 'customer'
+          )
+        )
         and te.created_at >= now() - interval '14 days'
         and right(regexp_replace(coalesce(te.meta->>'to', ''), '[^0-9]', '', 'g'), 10) = right(regexp_replace($2, '[^0-9]', '', 'g'), 10)
         and right(regexp_replace(coalesce(c.phone, ''), '[^0-9]', '', 'g'), 10) = right(regexp_replace($2, '[^0-9]', '', 'g'), 10)
