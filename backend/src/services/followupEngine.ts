@@ -2596,6 +2596,18 @@ export async function handleInboundMessageByTenantSlug(
   const settings = await getDeveloperSettingsByTenantSlug(tenantSlug)
   const alertTargets = resolveAlertTargets(settings)
   const job = await getJob(tenantId, jobId)
+
+  // Archived jobs are closed to automated inbound conversations. An external
+  // autoresponder can otherwise keep exchanging SMS and emailing the office
+  // after the bot was paused and the job was archived.
+  if (String(job.stage || "").toLowerCase() === "archived") {
+    console.info("Navigator inbound SMS suppressed for archived job", {
+      tenantSlug,
+      jobId,
+    })
+    return { ok: true, suppressed: true, reason: "job_archived" }
+  }
+
   const trimmed = inboundMessage.trim()
   const callbackNumber = (await getCustomerPhone(tenantId, job.customer_id)) || normalizePhone(from)
 
