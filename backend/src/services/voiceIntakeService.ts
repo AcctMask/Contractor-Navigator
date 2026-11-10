@@ -255,6 +255,7 @@ async function updateCustomerPhone(tenantId: number, customerId: number | null, 
       updated_at = now()
     where tenant_id = $1
       and id = $2
+      and (phone is null or btrim(phone) = '')
     `,
     [tenantId, customerId, phone]
   )
@@ -272,6 +273,7 @@ async function updateJobAddress(tenantId: number, jobId: number, spokenAddress: 
       updated_at = now()
     where tenant_id = $1
       and id = $2
+      and (address1 is null or btrim(address1) = '')
     `,
     [tenantId, jobId, spokenAddress, zip]
   )
