@@ -114,6 +114,7 @@ export default function JobDetail() {
   const [completingTarp, setCompletingTarp] = useState(false)
   const [tarpOverrideReason, setTarpOverrideReason] = useState("")
   const [closingTarpAdministratively, setClosingTarpAdministratively] = useState(false)
+  const [creatingAdditionalTarp, setCreatingAdditionalTarp] = useState(false)
   const [crmSubstatus, setCrmSubstatus] = useState("")
   const [botPaused, setBotPaused] = useState(false)
   const [botPauseReason, setBotPauseReason] = useState("")
@@ -202,6 +203,38 @@ export default function JobDetail() {
     }
 
     setNotes(Array.isArray(result.notes) ? result.notes : [])
+  }
+
+  async function createAdditionalTarpJob() {
+    if (!id || creatingAdditionalTarp || !job) return
+    const confirmed = window.confirm(
+      `Create a separate additional tarp job for the same customer and property as Job #${id}?\n\nThe original job and its financial records will stay unchanged. The new tarp job starts with its AI bot paused until staff approves follow-up.`
+    )
+    if (!confirmed) return
+
+    setCreatingAdditionalTarp(true)
+    try {
+      const response = await fetch(
+        `${API_BASE}/admin/job/${getTenantSlug()}/${id}/additional-tarp`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        }
+      )
+      const result = await response.json()
+      if (!response.ok || !result.ok) {
+        throw new Error(result.error || "Additional tarp job could not be created")
+      }
+      window.location.assign(`/job/${result.job_id}`)
+    } catch (err: any) {
+      errorToast(err?.message || "Additional tarp job could not be created")
+    } finally {
+      setCreatingAdditionalTarp(false)
+    }
   }
 
   async function loadJob() {
@@ -2891,7 +2924,22 @@ export default function JobDetail() {
           flexWrap: "wrap",
         }}
       >
-        <h1 style={{ color: "white" }}>Job #{id}</h1>
+        <h1 style={{ color: "white" }}>Job #{id}{job?.external_crm === "navigator_repeat_tarp" && job?.external_job_id ? ` · ${job.external_job_id}` : ""}</h1>
+        {getTenantSlug() === "g2g-roofing" &&
+          currentUser &&
+          ["platform_owner", "tenant_admin", "admin", "manager"].includes(currentUser.role) &&
+          job ? (
+            <button
+              type="button"
+              style={button}
+              disabled={creatingAdditionalTarp}
+              onClick={() => void createAdditionalTarpJob()}
+            >
+              {creatingAdditionalTarp
+                ? "Creating additional tarp..."
+                : "Create Additional Tarp Job"}
+            </button>
+          ) : null}
         <button
           type="button"
           style={linkStyle}
