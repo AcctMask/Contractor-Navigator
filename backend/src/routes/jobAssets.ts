@@ -2714,37 +2714,61 @@ export async function registerJobAssetsRoutes(app: FastifyInstance) {
         throw new Error("Job not found")
       }
 
-      const result = await pool.query(
-        `
-        insert into timeline_events
-          (tenant_id, job_id, kind, message, meta, created_at)
-        values
-          ($1,$2,'staff_note',$3,$4::jsonb,now())
-        returning
-          id,
-          message,
-          meta,
-          created_at
-        `,
-        [
-          tenantId,
-          numericJobId,
-          String(message).trim(),
-          JSON.stringify({
-            author: noteAuthor,
-            author_app_user_id: Number(user.id),
-            stage_at_event: noteStageResult.rows[0].stage || null,
-            ...(subcontractorCompanyId !== null
-              ? {
-                  communication_scope: "workforce",
-                  subcontractor_company_id: subcontractorCompanyId,
-                }
-              : {}),
-          }),
-        ]
-      )
-
-      return { ok: true, note: result.rows[0] }
+      // Long forwarded emails can exceed the single-note storage policy.
+      // Preserve the complete text in ordered parts, never truncate. The
+      // transaction prevents a partial multi-part note after a failure.
+      const fullNote = String(message).trim()
+      const maxPartLength = 2500
+      const parts: string[] = []
+      for (let offset = 0; offset < fullNote.length; offset += maxPartLength) {
+        parts.push(fullNote.slice(offset, offset + maxPartLength))
+      }
+      if (parts.length > 40) {
+        reply.code(413)
+        return { ok: false, error: "Note too long (maximum 100,000 characters)" }
+      }
+      const client = await pool.connect()
+      try {
+        await client.query("BEGIN")
+        const records: any[] = []
+        for (let index = 0; index < parts.length; index++) {
+          const multipart = parts.length > 1
+          const content = multipart
+            ? `Long Note — Part ${index + 1} of ${parts.length}\n\n${parts[index]}`
+            : parts[index]
+          const result = await client.query(
+            `insert into timeline_events
+              (tenant_id, job_id, kind, message, meta, created_at)
+             values ($1,$2,'staff_note',$3,$4::jsonb,now())
+             returning id,message,meta,created_at`,
+            [
+              tenantId,
+              numericJobId,
+              content,
+              JSON.stringify({
+                author: noteAuthor,
+                author_app_user_id: Number(user.id),
+                stage_at_event: noteStageResult.rows[0].stage || null,
+                ...(multipart ? { long_note_part: index + 1, long_note_total: parts.length } : {}),
+                ...(subcontractorCompanyId !== null
+                  ? {
+                      communication_scope: "workforce",
+                      subcontractor_company_id: subcontractorCompanyId,
+                    }
+                  : {}),
+              }),
+            ]
+          )
+          records.push(result.rows[0])
+        }
+        await client.query("COMMIT")
+        return { ok: true, note: records[0], notes: records, parts: records.length }
+      } catch(error) {
+        try { await client.query("ROLLBACK") } catch {}
+        throw error
+      } finally {
+        client.release()
+      }
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || "Add note failed" }
