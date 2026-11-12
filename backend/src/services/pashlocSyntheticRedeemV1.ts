@@ -22,13 +22,16 @@ export async function redeemPashLocSynthetic(input:{
       p.redemption_nonce_hash,p.redemption_nonce_expires_at,
       p.redemption_nonce_consumed_at,p.synthetic_envelope,
       p.synthetic_redeem_proof_hash,p.browser_approved_at,
+      p.synthetic_retry_nonce_hash,p.synthetic_retry_nonce_expires_at,
+      p.synthetic_recovery_expires_at,p.synthetic_retry_attempts,
       c.tenant_id,c.app_user_id,c.purpose
      from pashloc_mfa_pairings p
      join pashloc_mfa_challenges c on c.id=p.challenge_id
     where p.pairing_hash=$1 and p.claim_id_hash=$2 and p.claimant_hash=$3
       and p.claimed_at is not null and p.browser_approved_at is not null
-      and p.denied_at is null and p.expires_at>now()
-      and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
+      and p.denied_at is null
+      and (p.expires_at>now() or (p.synthetic_envelope is not null and p.synthetic_recovery_expires_at>now()))
+      and c.purpose='enroll' and c.consumed_at is null
     for update of p,c`,
    [sha(input.pairing_ref),sha(input.claim_id),sha(input.claimant_proof)]
   )
@@ -49,10 +52,24 @@ export async function redeemPashLocSynthetic(input:{
   }
   const proofHash=sha(input.redeem_nonce+"."+input.redeem_signature)
   if(p.synthetic_envelope){
-   // Byte-identical retries only for the original signed redemption.
-   if(p.synthetic_redeem_proof_hash!==proofHash){
+   // Fresh signed same-device nonce required; the original proof cannot be replayed.
+   if(!p.synthetic_retry_nonce_hash||
+      p.synthetic_retry_nonce_hash!==sha(input.redeem_nonce)||
+      !p.synthetic_retry_nonce_expires_at||
+      new Date(p.synthetic_retry_nonce_expires_at).getTime()<=Date.now()||
+      !p.synthetic_recovery_expires_at||
+      new Date(p.synthetic_recovery_expires_at).getTime()<=Date.now()||
+      p.synthetic_retry_attempts>5){
     await client.query("ROLLBACK");return null
    }
+   const consumed=await client.query(
+    `update pashloc_mfa_pairings
+      set synthetic_retry_nonce_hash=null,synthetic_retry_nonce_expires_at=null
+      where id=$1 and synthetic_retry_nonce_hash=$2
+        and synthetic_recovery_expires_at>now()
+      returning id`,[p.id,sha(input.redeem_nonce)]
+   )
+   if(consumed.rowCount!==1){await client.query("ROLLBACK");return null}
    await client.query("COMMIT")
    return p.synthetic_envelope
   }
@@ -85,7 +102,8 @@ export async function redeemPashLocSynthetic(input:{
        set synthetic_envelope=$2::jsonb,
            synthetic_redeem_proof_hash=$3,
            redemption_nonce_consumed_at=now(),
-           redeemed_at=now()
+           redeemed_at=now(),
+           synthetic_recovery_expires_at=now()+interval '5 minutes'
      where id=$1 and synthetic_envelope is null and redeemed_at is null
      returning id`,
    [p.id,JSON.stringify(envelope),proofHash]
