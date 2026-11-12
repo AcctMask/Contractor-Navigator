@@ -1136,11 +1136,11 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         "select distinct j.id from jobs j left join customers c on c.id=j.customer_id " +
         "and c.tenant_id=j.tenant_id where j.tenant_id=$1 " +
         "and ((nullif($2::text,'') is not null and lower(trim(j.claim_number))=lower(trim($2::text))) " +
-        "or (nullif($3::text,'') is not null and lower(regexp_replace(coalesce(j.address1,''),'[^a-z0-9]','','g')) " +
-        "= lower(regexp_replace($3::text,'[^a-z0-9]','','g')) " +
+        "or (nullif($3::text,'') is not null and regexp_replace(lower(coalesce(j.address1,'')),'[^a-z0-9]','','g') " +
+        "= regexp_replace(lower($3::text),'[^a-z0-9]','','g') " +
         "and nullif($4::text,'') is not null and lower(trim(c.full_name))=lower(trim($4::text)))) " +
         "order by j.id desc limit 3",
-        [tenantIdForMatching,claimNumber,parsed.propertyAddress,parsed.customerName]
+        [tenantIdForMatching,claimNumber,parsed.propertyAddress?.split(',')[0]?.trim() || null,parsed.customerName]
       )
       if (candidates.rows.length > 1) {
         return {ok:true,manual_review_required:true,
@@ -1170,6 +1170,19 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
 
       const tenantId = await getTenantIdBySlug(TENANT_SLUG)
       const jobId = Number(created.job_id)
+
+      // Write the receipt before nonessential dispatch, notification and
+      // document work. If those downstream actions fail and Resend retries,
+      // the email must never create a second lead.
+      await intakeLock.query(
+        "insert into timeline_events(tenant_id,job_id,kind,message,meta,created_at) " +
+        "values($1,$2,'claims_email_intake_received',$3,$4::jsonb,now())",
+        [tenantId,jobId,"Claims email received; assigned to Job #"+jobId,
+         JSON.stringify({email_fingerprint:emailFingerprint,
+           received_email_id:receivedEmail?.id || initialPayload.raw?.email_id || null,
+           subject:parsedPayload.subject,source:"claims_email",
+           intake_status:"created_new_job",no_customer_automation:false})]
+      )
 
       await pool.query(
         `
