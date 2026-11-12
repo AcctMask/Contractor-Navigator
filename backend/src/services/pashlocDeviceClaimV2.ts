@@ -37,7 +37,7 @@ export async function claimPashLocDevice(input: {
   const client = await pool.connect()
   try {
     await client.query("BEGIN")
-    const nonceUsed = await client.query(\`update pashloc_mfa_device_claim_nonces set consumed_at=now() where pairing_hash=$1 and nonce_hash=$2 and consumed_at is null and expires_at>now() returning id\`,[hash(input.pairing_ref),hash(input.proof_nonce)])
+    const nonceUsed = await client.query(`update pashloc_mfa_device_claim_nonces set consumed_at=now() where pairing_hash=$1 and nonce_hash=$2 and consumed_at is null and expires_at>now() returning id`,[hash(input.pairing_ref),hash(input.proof_nonce)])
     if(nonceUsed.rowCount!==1){await client.query("ROLLBACK");return null}
     const claimed = await client.query(
       `update pashloc_mfa_pairings p
