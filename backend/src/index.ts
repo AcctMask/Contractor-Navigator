@@ -17,6 +17,7 @@ import { registerDevSettingsRoutes } from "./routes/devSettings"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerPashLocIsolatedClaimRoutes } from "./routes/pashlocIsolatedClaim"
 import { registerPashLocIsolatedBrowserApprovalRoutes } from "./routes/pashlocIsolatedBrowserApproval"
+import { registerPashLocIsolatedEnrollmentStartRoutes } from "./routes/pashlocIsolatedEnrollmentStart"
 import { registerWorkforceCrewRoutes } from "./routes/workforceCrew"
 import { registerJobSearchRoutes } from "./routes/jobSearch"
 import { registerDocumentPipelineRoutes } from "./routes/documentPipeline"
@@ -82,6 +83,7 @@ await registerDevSettingsRoutes(app)
 await registerAuthRoutes(app)
 await registerPashLocIsolatedClaimRoutes(app)
 await registerPashLocIsolatedBrowserApprovalRoutes(app)
+await registerPashLocIsolatedEnrollmentStartRoutes(app)
 await registerWorkforceCrewRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
