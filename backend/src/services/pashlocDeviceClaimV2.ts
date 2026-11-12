@@ -3,7 +3,7 @@
  * Performs a real database transaction. No TOTP secret or session is returned.
  * Requires the isolated pairing-protocol schema migration.
  */
-import { createHash, createPublicKey, randomBytes, verify as verifySignature } from "node:crypto"
+import { createHash, createPublicKey, randomBytes, randomInt, verify as verifySignature } from "node:crypto"
 import { pool } from "../db/db"
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex")
@@ -32,7 +32,7 @@ export async function claimPashLocDevice(input: {
 
   const claimId = randomBytes(32).toString("base64url")
   const claimantProof = randomBytes(32).toString("base64url")
-  const confirmationCode = String(randomBytes(4).readUInt32BE() % 100000000).padStart(8,"0")
+  const confirmationCode = String(randomInt(0, 100000000)).padStart(8,"0")
   const fingerprint = hash(JSON.stringify({ kty:"EC",crv:"P-256",x:jwk.x,y:jwk.y }))
   const client = await pool.connect()
   try {
