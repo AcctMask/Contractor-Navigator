@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "rootDir": "./src"
+  },
+  "include": [
+    "src/pashlocIsolatedServer.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
