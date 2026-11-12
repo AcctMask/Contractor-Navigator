@@ -12,6 +12,12 @@ export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
   if (process.env.PASHLOC_ISOLATED_CLAIM_API !== "enabled" ||
       process.env.NODE_ENV === "production") return
 
+  // Fail closed until a single approved PashLoc HTTPS origin is configured.
+  const approvedOrigin = process.env.PASHLOC_ISOLATED_PHONE_ORIGIN
+  if (!approvedOrigin || !/^https:\/\/[a-z0-9.-]+(?::443)?$/i.test(approvedOrigin)) return
+  const originAllowed = (request: any) =>
+    request.headers.origin === approvedOrigin &&
+    request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() === "application/json"
   const headers = {
     "Cache-Control": "no-store, private",
     "Pragma": "no-cache",
@@ -20,6 +26,7 @@ export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
   }
   app.post("/auth/mfa/device/claim-challenge", async (request: any, reply) => {
     reply.headers(headers)
+    if (!originAllowed(request)) return reply.code(403).send({ok:false,error:"forbidden"})
     const pairingRef = request.body?.pairing_ref
     if (typeof pairingRef !== "string") return reply.code(400).send({ok:false,error:"invalid_request"})
     const result = await issuePashLocDeviceClaimNonce(pairingRef)
@@ -28,6 +35,7 @@ export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
   })
   app.post("/auth/mfa/device/claim", async (request: any, reply) => {
     reply.headers(headers)
+    if (!originAllowed(request)) return reply.code(403).send({ok:false,error:"forbidden"})
     const b = request.body
     if (!b || typeof b !== "object" || typeof b.pairing_ref !== "string" ||
         typeof b.proof_nonce !== "string" || typeof b.proof_signature !== "string" ||
