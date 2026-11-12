@@ -5,6 +5,8 @@ on:
       - "backend/src/services/pashlocEnrollV1Crypto.ts"
       - "backend/src/services/pashlocDeviceClaimV2.ts"
       - "backend/scripts/verifyPashlocEnrollV1Synthetic.ts"
+      - "backend/src/services/pashlocRestrictedBrowserV1.ts"
+      - "backend/scripts/verifyPashlocRestrictedBrowserV1.ts"
       - ".github/workflows/pashloc-v1-synthetic.yml"
   workflow_dispatch:
 permissions:
@@ -24,3 +26,5 @@ jobs:
         run: npm ci
       - name: Run V1 synthetic cryptographic acceptance
         run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
+      - name: Run restricted browser boundary acceptance
+        run: npx tsx scripts/verifyPashlocRestrictedBrowserV1.ts
