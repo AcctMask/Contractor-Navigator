@@ -39,9 +39,37 @@ export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
   }
+  // Cross-origin JSON POST from the PashLoc phone PWA requires a browser
+  // OPTIONS preflight. Permit ONLY the explicitly configured isolated origin.
+  // No wildcard, credentials, authorization headers, or production fallback.
+  const phonePaths = [
+    "/auth/mfa/device/claim-challenge",
+    "/auth/mfa/device/claim",
+  ]
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": approvedOrigin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "300",
+    "Vary": "Origin",
+  }
+  for (const path of phonePaths) {
+    app.options(path, async (request: any, reply) => {
+      reply.headers(headers)
+      if (request.headers.origin !== approvedOrigin ||
+          request.headers["access-control-request-method"] !== "POST" ||
+          !/^content-type$/i.test(
+            String(request.headers["access-control-request-headers"] || "").trim()
+          )) {
+        return reply.code(403).send()
+      }
+      return reply.headers(corsHeaders).code(204).send()
+    })
+  }
   app.post("/auth/mfa/device/claim-challenge", async (request: any, reply) => {
     reply.headers(headers)
     if (!originAllowed(request)) return reply.code(403).send({ok:false,error:"forbidden"})
+    reply.headers(corsHeaders)
     if (limited(request)) return reply.code(429).send({ok:false,error:"rate_limited"})
     const pairingRef = request.body?.pairing_ref
     if (typeof pairingRef !== "string") return reply.code(400).send({ok:false,error:"invalid_request"})
@@ -52,6 +80,7 @@ export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
   app.post("/auth/mfa/device/claim", async (request: any, reply) => {
     reply.headers(headers)
     if (!originAllowed(request)) return reply.code(403).send({ok:false,error:"forbidden"})
+    reply.headers(corsHeaders)
     if (limited(request)) return reply.code(429).send({ok:false,error:"rate_limited"})
     const b = request.body
     if (!b || typeof b !== "object" || typeof b.pairing_ref !== "string" ||
