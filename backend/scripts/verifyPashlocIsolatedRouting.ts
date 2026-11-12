@@ -2,12 +2,15 @@
  * No database calls, credential issuance, or production endpoints.
  */
 import assert from "node:assert/strict"
-import {buildPashLocIsolatedServer} from "../src/pashlocIsolatedServer"
 process.env.NODE_ENV="test"
 process.env.PASHLOC_ISOLATED_CLAIM_API="enabled"
 process.env.PASHLOC_ISOLATED_SHARED_RATE_LIMITS_VERIFIED="yes"
 process.env.PASHLOC_ISOLATED_NAVIGATOR_ORIGIN="https://navigator-isolated.example.test"
 process.env.PASHLOC_ISOLATED_PHONE_ORIGIN="https://pashloc-isolated.example.test"
+// Database pool initializes on import; provide an unreachable disposable address.
+// These smoke tests must never query the database.
+process.env.DATABASE_URL="postgresql://isolated_test:isolated_test@127.0.0.1:1/isolated_test"
+const {buildPashLocIsolatedServer}=await import("../src/pashlocIsolatedServer")
 const app=await buildPashLocIsolatedServer()
 try {
  const health=await app.inject({method:"GET",url:"/healthz"})
