@@ -10,7 +10,7 @@ import { claimPashLocDevice } from "../services/pashlocDeviceClaimV2"
 
 export async function registerPashLocIsolatedClaimRoutes(app: FastifyInstance) {
   if (process.env.PASHLOC_ISOLATED_CLAIM_API !== "enabled" ||
-      process.env.NODE_ENV === "production") return
+      !["development", "test"].includes(process.env.NODE_ENV || "")) return
 
   // Fail closed until a single approved PashLoc HTTPS origin is configured.
   const approvedOrigin = process.env.PASHLOC_ISOLATED_PHONE_ORIGIN
