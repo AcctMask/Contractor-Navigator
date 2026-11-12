@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify"
+import { createHash } from "node:crypto"
+import type { PoolClient } from "pg"
 import { Webhook } from "svix"
 import { pool } from "../db/db"
 import { createLeadFromInboundCallByTenantSlug } from "../services/followupEngine"
@@ -849,6 +851,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       },
     },
     async (request: any, reply) => {
+      let intakeLock: PoolClient | null = null
       try {
         const signingSecret =
           process.env.RESEND_CLAIMS_WEBHOOK_SECRET ||
@@ -969,6 +972,74 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
         }
       }
 
+
+      // Resend can retry the same email; serialize by content even when
+      // delivery identifiers differ. A retry must not create another lead.
+      const emailFingerprint = createHash("sha256")
+        .update(parsedPayload.subject.trim().toLowerCase() + "\n")
+        .update(parsedPayload.from.trim().toLowerCase() + "\n")
+        .update(parsedPayload.text.trim().replace(/\r\n/g, "\n"))
+        .digest("hex")
+      const tenantIdForMatching = await getTenantIdBySlug(TENANT_SLUG)
+      intakeLock = await pool.connect()
+      const lockKeyA = parseInt(emailFingerprint.slice(0, 8), 16) | 0
+      const lockKeyB = parseInt(emailFingerprint.slice(8, 16), 16) | 0
+      await intakeLock.query("select pg_advisory_lock($1::integer,$2::integer)", [lockKeyA,lockKeyB])
+
+      const already = await intakeLock.query(
+        "select job_id from timeline_events where tenant_id=$1 and " +
+        "meta->>'email_fingerprint'=$2 and created_at > now()-interval '24 hours' " +
+        "order by id desc limit 1", [tenantIdForMatching,emailFingerprint]
+      )
+      if (already.rowCount) {
+        return {ok:true, duplicate:true, job_id:Number(already.rows[0].job_id),
+          reason:"email_already_processed"}
+      }
+
+      const forwardedSubject = /^(?:(?:fw|fwd|re):\s*)+/i.test(parsedPayload.subject)
+      const contractCorrespondence = /(?:insurance\s+contract|proposal\s*\/?\s*contract|roofing\s+agreement)/i.test(parsedPayload.subject)
+      const officeSender = /@g2groofing\.com\b/i.test(parsedPayload.from)
+      const suppliedName = parsedPayload.subject
+        .replace(/^(?:(?:fw|fwd|re):\s*)+/gi,"")
+        .replace(/^.*?(?:insurance\s+contract|proposal\s*\/?\s*contract|roofing\s+agreement)\s*[-:]\s*/i,"")
+        .trim()
+      const fromForward = parsedPayload.text.match(
+        /(?:^|\n)\s*From:\s*[^\n<]*<\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i
+      )
+      const forwardedCustomerEmail = fromForward?.[1]?.toLowerCase() || null
+
+      if (officeSender && forwardedSubject && contractCorrespondence) {
+        // Never treat forwarded contract correspondence as a fresh EMS dispatch.
+        const matches = await intakeLock.query(
+          "select distinct j.id from jobs j left join customers c " +
+          "on c.id=j.customer_id and c.tenant_id=j.tenant_id " +
+          "where j.tenant_id=$1 and j.stage not in ('archived','disqualified') " +
+          "and ((nullif($2::text,'') is not null and lower(trim(c.full_name))=lower(trim($2::text))) " +
+          "or (nullif($3::text,'') is not null and lower(trim(c.email))=$3::text)) " +
+          "order by j.id desc limit 3",
+          [tenantIdForMatching,suppliedName,forwardedCustomerEmail]
+        )
+        if (matches.rows.length !== 1) {
+          console.warn("CLAIMS_OFFICE_CORRESPONDENCE_REVIEW_REQUIRED",{
+            subject:parsedPayload.subject,matches:matches.rows.length
+          })
+          return {ok:true,ignored:true,manual_review_required:true,
+            reason: matches.rows.length ? "ambiguous_existing_job" : "existing_job_not_found",
+            no_new_lead:true}
+        }
+        const targetJobId=Number(matches.rows[0].id)
+        await intakeLock.query(
+          "insert into timeline_events(tenant_id,job_id,kind,message,meta,created_at) " +
+          "values($1,$2,'staff_note',$3,$4::jsonb,now())",
+          [tenantIdForMatching,targetJobId,parsedPayload.text,
+           JSON.stringify({source:"office_forwarded_correspondence",
+             author:parsedPayload.from,subject:parsedPayload.subject,
+             received_email_id:receivedEmail?.id || initialPayload.raw?.email_id || null,
+             email_fingerprint:emailFingerprint,no_customer_automation:true})]
+        )
+        return {ok:true,existing_job_id:targetJobId,note_added:true,no_new_lead:true}
+      }
+
       const parsed = parseClaimsEmail(parsedPayload.text)
 
       console.log("EMS_INTAKE_PARSE_DEBUG_JSON", JSON.stringify({
@@ -1058,6 +1129,37 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
                       }
 
       const isEmsTarp = serviceType === "Emergency Tarp"
+
+      // Existing job wins: genuine claims assignments are notes if identity
+      // matches unambiguously. Do not overwrite stage or re-trigger AI.
+      const candidates = await intakeLock.query(
+        "select distinct j.id from jobs j left join customers c on c.id=j.customer_id " +
+        "and c.tenant_id=j.tenant_id where j.tenant_id=$1 " +
+        "and ((nullif($2::text,'') is not null and lower(trim(j.claim_number))=lower(trim($2::text))) " +
+        "or (nullif($3::text,'') is not null and lower(regexp_replace(coalesce(j.address1,''),'[^a-z0-9]','','g')) " +
+        "= lower(regexp_replace($3::text,'[^a-z0-9]','','g')) " +
+        "and nullif($4::text,'') is not null and lower(trim(c.full_name))=lower(trim($4::text)))) " +
+        "order by j.id desc limit 3",
+        [tenantIdForMatching,claimNumber,parsed.propertyAddress,parsed.customerName]
+      )
+      if (candidates.rows.length > 1) {
+        return {ok:true,manual_review_required:true,
+          reason:"ambiguous_existing_claim_assignment",no_new_lead:true,
+          match_count:candidates.rows.length}
+      }
+      if (candidates.rows.length === 1) {
+        const targetId = Number(candidates.rows[0].id)
+        await intakeLock.query(
+          "insert into timeline_events(tenant_id,job_id,kind,message,meta,created_at) " +
+          "values($1,$2,'staff_note',$3,$4::jsonb,now())",
+          [tenantIdForMatching,targetId,parsedPayload.text,
+           JSON.stringify({source:"claims_email_existing_job",author:parsedPayload.from,
+             subject:parsedPayload.subject,
+             received_email_id:receivedEmail?.id || initialPayload.raw?.email_id || null,
+             email_fingerprint:emailFingerprint,no_customer_automation:true})]
+        )
+        return {ok:true,existing_job_id:targetId,note_added:true,no_new_lead:true}
+      }
 
       const created = await createLeadFromInboundCallByTenantSlug(TENANT_SLUG, {
         callerPhone: parsed.customerPhone,
@@ -1354,6 +1456,7 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
           package_id: documentPackage?.id || null,
           send_result: sendResult,
           received_email_id: receivedEmail?.id || initialPayload.raw?.email_id || null,
+          email_fingerprint: emailFingerprint,
         }
       )
 
@@ -1369,6 +1472,11 @@ export async function registerClaimsEmailIntakeRoutes(app: FastifyInstance) {
       console.error("EMS tarp inbound email failed", err)
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }
+    } finally {
+      if (intakeLock) {
+        try { await intakeLock.query("select pg_advisory_unlock_all()") } catch {}
+        intakeLock.release()
+      }
     }
   })
 }
