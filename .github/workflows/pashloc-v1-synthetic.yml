@@ -1,0 +1,26 @@
+name: PashLoc V1 isolated synthetic verification
+on:
+  pull_request:
+    paths:
+      - "backend/src/services/pashlocEnrollV1Crypto.ts"
+      - "backend/src/services/pashlocDeviceClaimV2.ts"
+      - "backend/scripts/verifyPashlocEnrollV1Synthetic.ts"
+      - ".github/workflows/pashloc-v1-synthetic.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-crypto:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run V1 synthetic cryptographic acceptance
+        run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
