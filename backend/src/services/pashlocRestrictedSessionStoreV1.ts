@@ -15,7 +15,7 @@ export async function stageRestrictedBrowserSession(input:{
  const result=await pool.query(
   `insert into pashloc_mfa_restricted_browser_sessions
     (session_hash,csrf_hash,tenant_id,app_user_id,challenge_hash,purpose,expires_at)
-   select $1,$2,c.tenant_id,c.app_user_id,c.challenge_hash,c.purpose,$3::timestamptz
+   select $1,$2,c.tenant_id,c.app_user_id,c.challenge_hash,c.purpose,least($3::timestamptz,c.expires_at)
    from pashloc_mfa_challenges c
    where c.challenge_hash=$4 and c.tenant_id=$5 and c.app_user_id=$6
      and c.purpose=$7 and c.consumed_at is null and c.expires_at>now()
@@ -25,7 +25,7 @@ export async function stageRestrictedBrowserSession(input:{
    input.tenantId,input.userId,input.purpose]
  )
  if(result.rowCount!==1) throw new Error("Restricted challenge unavailable")
- return {sessionId:secrets.sessionId,csrfToken:secrets.csrfToken,expiresAt:secrets.expiresAt}
+ return {sessionId:secrets.sessionId,csrfToken:secrets.csrfToken,expiresAt:new Date(result.rows[0].expires_at).toISOString()}
 }
 export async function authorizeRestrictedBrowserRequest(input:{
  cookieHeader:unknown;csrfHeader:unknown;origin:unknown;expectedOrigin:string;
