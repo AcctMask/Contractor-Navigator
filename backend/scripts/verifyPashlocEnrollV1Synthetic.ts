@@ -27,8 +27,9 @@ const redeemSig=b64(sign("sha256",redeem,{key:sig.privateKey,dsaEncoding:"ieee-p
 assert.equal(verifyP1363Proof(signing,redeem,redeemSig),true)
 const ctx={version:"AA-PASHLOC-ENROLL-V1",environment:"isolated",application:"Navigator",tenantId:"12",userId:"34",accountId:"account_123",pairingRef:pair,claimId:claim,signingFingerprint:publicKeyFingerprint(signing),agreementFingerprint:publicKeyFingerprint(agreementJwk),redeemNonce:nonce,approvalId:"approval_789"} as const
 const encoded=encodeCanonicalContext(ctx)
-assert.equal(encoded.subarray(0,26).toString(),"AA-PASHLOC-ENROLL-V1/CONTEXT")
-assert.equal(encoded.readUInt32BE(26),ctx.version.length)
+const domain=Buffer.from("AA-PASHLOC-ENROLL-V1/CONTEXT")
+assert.deepEqual(encoded.subarray(0,domain.length),domain)
+assert.equal(encoded.readUInt32BE(domain.length),ctx.version.length)
 assert.throws(()=>encodeCanonicalContext({...ctx,tenantId:"bad\nvalue"}))
 assert.throws(()=>encodeCanonicalContext({...ctx,unexpected:"extra"} as any))
 const env=encryptSyntheticEnrollmentV1({syntheticSecret:"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",deviceEcdhPublicJwk:agreementJwk,context:ctx})
