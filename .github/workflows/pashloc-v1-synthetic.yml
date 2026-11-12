@@ -8,6 +8,8 @@ on:
       - "backend/src/services/pashloc*.ts"
       - "backend/tsconfig.pashloc-isolated.json"
       - "backend/scripts/verifyPashlocIsolatedRouting.ts"
+      - "backend/scripts/verifyPashlocPostgresIntegration.ts"
+      - "backend/sql/pashloc_iv_mfa_*.sql"
       - "backend/src/services/pashlocDeviceClaimV2.ts"
       - "backend/scripts/verifyPashlocEnrollV1Synthetic.ts"
       - "backend/src/services/pashlocRestrictedBrowserV1.ts"
@@ -19,6 +21,24 @@ permissions:
 jobs:
   synthetic-crypto:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: isolated_test
+          POSTGRES_PASSWORD: isolated_test
+          POSTGRES_DB: isolated_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U isolated_test -d isolated_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://isolated_test:isolated_test@127.0.0.1:5432/isolated_test
+      NODE_ENV: test
+      PASHLOC_ISOLATED_PG_NO_SSL: "yes"
     defaults:
       run:
         working-directory: backend
@@ -33,6 +53,8 @@ jobs:
         run: npx tsc -p tsconfig.pashloc-isolated.json
       - name: Run isolated HTTP boundary smoke tests
         run: npx tsx scripts/verifyPashlocIsolatedRouting.ts
+      - name: Run disposable PostgreSQL MFA integration acceptance
+        run: npx tsx scripts/verifyPashlocPostgresIntegration.ts
       - name: Run V1 synthetic cryptographic acceptance
         run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
       - name: Run restricted browser boundary acceptance
