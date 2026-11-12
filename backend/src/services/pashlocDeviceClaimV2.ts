@@ -13,6 +13,7 @@ type PublicJwk = { kty: string; crv: string; x: string; y: string }
 export async function claimPashLocDevice(input: {
   pairing_ref: string
   device_public_key_jwk: PublicJwk
+  device_ecdh_public_key_jwk: PublicJwk
   proof_nonce: string
   proof_signature: string
 }): Promise<{ claim_id: string; claimant_proof: string; confirmation_code: string; expires_at: string } | null> {
@@ -22,9 +23,15 @@ export async function claimPashLocDevice(input: {
   if (!jwk || jwk.kty !== "EC" || jwk.crv !== "P-256" ||
       !/^[A-Za-z0-9_-]{43}$/.test(jwk.x) ||
       !/^[A-Za-z0-9_-]{43}$/.test(jwk.y)) return null
+  const agreement = input.device_ecdh_public_key_jwk
+  if (!agreement || agreement.kty !== "EC" || agreement.crv !== "P-256" ||
+      !/^[A-Za-z0-9_-]{43}$/.test(agreement.x) ||
+      !/^[A-Za-z0-9_-]{43}$/.test(agreement.y)) return null
   let publicKey
   try {
     publicKey = createPublicKey({ key: jwk as any, format: "jwk" })
+    // Reject malformed or off-curve agreement points at claim time.
+    createPublicKey({ key: agreement as any, format: "jwk" })
     const signature = Buffer.from(input.proof_signature, "base64url")
     const transcript = Buffer.from("PASHLOC-IV-MFA-CLAIM-v1\n" + input.pairing_ref + "\n" + input.proof_nonce)
     if (!verifySignature("sha256", transcript, { key: publicKey, dsaEncoding: "ieee-p1363" }, signature)) return null
@@ -34,6 +41,7 @@ export async function claimPashLocDevice(input: {
   const claimantProof = randomBytes(32).toString("base64url")
   const confirmationCode = String(randomInt(0, 100000000)).padStart(8,"0")
   const fingerprint = hash(JSON.stringify({ kty:"EC",crv:"P-256",x:jwk.x,y:jwk.y }))
+  const agreementFingerprint = hash(JSON.stringify({ kty:"EC",crv:"P-256",x:agreement.x,y:agreement.y }))
   const client = await pool.connect()
   try {
     await client.query("BEGIN")
@@ -42,7 +50,8 @@ export async function claimPashLocDevice(input: {
     const claimed = await client.query(
       `update pashloc_mfa_pairings p
          set claimant_hash=$2, claimed_at=now(), device_public_jwk=$3::jsonb,
-             device_key_fingerprint=$4, claim_id_hash=$5, confirmation_code_hash=$6
+             device_key_fingerprint=$4, claim_id_hash=$5, confirmation_code_hash=$6,
+             device_ecdh_public_jwk=$7::jsonb, device_ecdh_key_fingerprint=$8
         from pashloc_mfa_challenges c
        where p.challenge_id=c.id and p.pairing_hash=$1
          and p.claimant_hash is null and p.claimed_at is null
@@ -52,7 +61,7 @@ export async function claimPashLocDevice(input: {
          and c.expires_at>now() and c.attempts<c.max_attempts
        returning p.expires_at`,
       [hash(input.pairing_ref),hash(claimantProof),JSON.stringify(jwk),fingerprint,
-       hash(claimId),hash(confirmationCode)]
+       hash(claimId),hash(confirmationCode),JSON.stringify(agreement),agreementFingerprint]
     )
     if (claimed.rowCount !== 1) { await client.query("ROLLBACK"); return null }
     await client.query("COMMIT")
