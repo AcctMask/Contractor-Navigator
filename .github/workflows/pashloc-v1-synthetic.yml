@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - "backend/src/services/pashlocEnrollV1Crypto.ts"
+      - "backend/src/pashlocIsolatedServer.ts"
+      - "backend/src/routes/pashlocIsolated*.ts"
+      - "backend/src/services/pashloc*.ts"
+      - "backend/tsconfig.pashloc-isolated.json"
+      - "backend/scripts/verifyPashlocIsolatedRouting.ts"
       - "backend/src/services/pashlocDeviceClaimV2.ts"
       - "backend/scripts/verifyPashlocEnrollV1Synthetic.ts"
       - "backend/src/services/pashlocRestrictedBrowserV1.ts"
@@ -25,7 +30,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Typecheck Navigator backend
-        run: npx tsc --noEmit
+        run: npx tsc -p tsconfig.pashloc-isolated.json
+      - name: Run isolated HTTP boundary smoke tests
+        run: npx tsx scripts/verifyPashlocIsolatedRouting.ts
       - name: Run V1 synthetic cryptographic acceptance
         run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
       - name: Run restricted browser boundary acceptance
