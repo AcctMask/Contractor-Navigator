@@ -3,7 +3,8 @@
  * Performs a real database transaction. No TOTP secret or session is returned.
  * Requires the isolated pairing-protocol schema migration.
  */
-import { createHash, createPublicKey, randomBytes, randomInt, verify as verifySignature } from "node:crypto"
+import { createHash, randomBytes, randomInt } from "node:crypto"
+import { claimTranscript, normalizedP256PublicKey, publicKeyFingerprint, verifyP1363Proof } from "./pashlocEnrollV1Crypto"
 import { pool } from "../db/db"
 
 const hash = (s: string) => createHash("sha256").update(s).digest("hex")
@@ -16,32 +17,30 @@ export async function claimPashLocDevice(input: {
   device_ecdh_public_key_jwk: PublicJwk
   proof_nonce: string
   proof_signature: string
+  protocol_version: "AA-PASHLOC-ENROLL-V1"
 }): Promise<{ claim_id: string; claimant_proof: string; confirmation_code: string; expires_at: string } | null> {
   if (!token.test(input.pairing_ref) || !token.test(input.proof_nonce) ||
       !/^[A-Za-z0-9_-]{64,256}$/.test(input.proof_signature)) return null
-  const jwk = input.device_public_key_jwk
-  if (!jwk || jwk.kty !== "EC" || jwk.crv !== "P-256" ||
-      !/^[A-Za-z0-9_-]{43}$/.test(jwk.x) ||
-      !/^[A-Za-z0-9_-]{43}$/.test(jwk.y)) return null
-  const agreement = input.device_ecdh_public_key_jwk
-  if (!agreement || agreement.kty !== "EC" || agreement.crv !== "P-256" ||
-      !/^[A-Za-z0-9_-]{43}$/.test(agreement.x) ||
-      !/^[A-Za-z0-9_-]{43}$/.test(agreement.y)) return null
-  let publicKey
+  if (input.protocol_version !== "AA-PASHLOC-ENROLL-V1") return null
+  let jwk: ReturnType<typeof normalizedP256PublicKey>
+  let agreement: ReturnType<typeof normalizedP256PublicKey>
   try {
-    publicKey = createPublicKey({ key: jwk as any, format: "jwk" })
-    // Reject malformed or off-curve agreement points at claim time.
-    createPublicKey({ key: agreement as any, format: "jwk" })
-    const signature = Buffer.from(input.proof_signature, "base64url")
-    const transcript = Buffer.from("PASHLOC-IV-MFA-CLAIM-v1\n" + input.pairing_ref + "\n" + input.proof_nonce)
-    if (!verifySignature("sha256", transcript, { key: publicKey, dsaEncoding: "ieee-p1363" }, signature)) return null
+    jwk = normalizedP256PublicKey(input.device_public_key_jwk)
+    agreement = normalizedP256PublicKey(input.device_ecdh_public_key_jwk)
+    const transcript = claimTranscript({
+      pairingRef: input.pairing_ref,
+      nonce: input.proof_nonce,
+      signingKey: jwk,
+      agreementKey: agreement,
+    })
+    if (!verifyP1363Proof(jwk, transcript, input.proof_signature)) return null
   } catch { return null }
 
   const claimId = randomBytes(32).toString("base64url")
   const claimantProof = randomBytes(32).toString("base64url")
   const confirmationCode = String(randomInt(0, 100000000)).padStart(8,"0")
-  const fingerprint = hash(JSON.stringify({ kty:"EC",crv:"P-256",x:jwk.x,y:jwk.y }))
-  const agreementFingerprint = hash(JSON.stringify({ kty:"EC",crv:"P-256",x:agreement.x,y:agreement.y }))
+  const fingerprint = publicKeyFingerprint(jwk)
+  const agreementFingerprint = publicKeyFingerprint(agreement)
   const client = await pool.connect()
   try {
     await client.query("BEGIN")
