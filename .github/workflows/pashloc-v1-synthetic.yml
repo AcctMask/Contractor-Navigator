@@ -24,6 +24,8 @@ jobs:
           node-version: "22"
       - name: Install locked dependencies
         run: npm ci
+      - name: Typecheck Navigator backend
+        run: npx tsc --noEmit
       - name: Run V1 synthetic cryptographic acceptance
         run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
       - name: Run restricted browser boundary acceptance
