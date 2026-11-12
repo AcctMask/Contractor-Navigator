@@ -21,7 +21,7 @@
    Offer "Using one device?" accessible alternative, plus recovery instructions.
 4. PashLoc IV opens on the other device, explicitly confirms the requested Navigator account, and enrolls the protected account only after user consent and unlock.
 5. Navigator verifies the six-digit code server-side, atomically marks enrollment complete, and issues the normal session.
-6. Later sign-ins: after password check, display only six-digit verification (no new QR unless resetting enrollment).
+6. Later sign-ins: after password check, display a six-digit verification field AND a returning-account QR. This QR opens the previously enrolled PashLoc account on the other device. It contains NO reusable TOTP secret, does not create a new enrollment, and does not authorize a session. Direct manual opening of PashLoc must also work.
 7. Clear error, expiry, rate-limit, time-drift and recovery flows; never leak enrollment secrets to client-side logs.
 
 ## Security acceptance gates
@@ -38,3 +38,10 @@
 
 ## Current scope
 Design specification only. No implementation of Navigator sign-in hooks, backend MFA, migrations, enrollment QR, or real user pilot has been authorized as complete. PashLoc IV remains synthetic-only until acceptance.
+
+## ATLAS 4.2 correction — mandatory acceptance scope (2026-11-12)
+- First enrollment: Navigator displays the enrollment QR on the computer after password verification, before full-session issuance. The other device scans and opens PashLoc. Secure short-lived one-time handoff must never place reusable TOTP secrets in ordinary URL query strings, navigation logs, analytics or referrers. Enroll only with explicit account confirmation and server-side first-code verification.
+- Returning login: display a different QR at EVERY MFA-protected login. It only identifies an already registered account for PashLoc to open. Missing local account must enter approved recovery, not silently enroll or disable MFA.
+- Single-device enrollment requires a separate secure handoff. Never auto-approve based only on opening a QR/link.
+- Real acceptance must include the physical phone and desktop, code rejection, expiry, replay prevention, limited retries, tenant isolation, account deletion, recovery, English/Spanish, and bypass prevention.
+- All MFA enforcement remains disabled in production until independent Security Assurance approval and Chairman authorization.
