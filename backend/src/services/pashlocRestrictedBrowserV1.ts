@@ -48,7 +48,7 @@ export function validateRestrictedBrowserRequest(input: {
   expiresAtMs: number; nowMs?: number;
 }): boolean {
   if(!originPattern.test(input.expectedOrigin) || input.origin!==input.expectedOrigin) return false
-  if(input.secFetchSite!==undefined && input.secFetchSite!=="same-origin") return false
+  // Navigator dashboard and Render API are different origins. The restricted\n  // token is supplied in a custom header, never ambient cookies; strict Origin\n  // and CSRF binding are required for every cross-origin request.\n  if(input.secFetchSite!==undefined && !["same-origin","same-site","cross-site"].includes(String(input.secFetchSite))) return false
   if(typeof input.contentType!=="string" || input.contentType.split(";")[0].trim().toLowerCase()!=="application/json") return false
   if(!Number.isFinite(input.expiresAtMs) || input.expiresAtMs<=(input.nowMs??Date.now())) return false
   if(typeof input.cookieSession!=="string" || typeof input.csrfHeader!=="string") return false
