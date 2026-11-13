@@ -96,7 +96,7 @@ export default function LoginPage() {
               <>
                 <p>Open PashLoc on your iPhone and enter the current six-digit code. You do not need to scan another QR.</p>
                 <label style={labelStyle} htmlFor="pashloc-code">Six-digit PashLoc code</label>
-                <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\\D/g,"").slice(0,6))}
+                <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))}
                   inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" required style={inputStyle}/>
                 <button type="submit" disabled={submitting || mfaCode.length!==6} style={buttonStyle}>Verify and open Navigator</button>
               </>
