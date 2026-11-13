@@ -31,7 +31,8 @@ export async function authorizeRestrictedBrowserRequest(input:{
  cookieHeader:unknown;csrfHeader:unknown;origin:unknown;expectedOrigin:string;
  secFetchSite:unknown;contentType:unknown;challengeId:string;purpose:"enroll"|"verify"
 }):Promise<{tenantId:number;userId:number;challengeId:string}|null>{
- const cookie=readRestrictedSessionCookie(input.cookieHeader) ||\n   (typeof input.cookieHeader==="string" && /^[A-Za-z0-9_-]{43}$/.test(input.cookieHeader) ? input.cookieHeader : null)
+ const cookie=readRestrictedSessionCookie(input.cookieHeader) ||
+   (typeof input.cookieHeader==="string" && /^[A-Za-z0-9_-]{43}$/.test(input.cookieHeader) ? input.cookieHeader : null)
  if(!cookie||!/^[A-Za-z0-9_-]{43}$/.test(input.challengeId))return null
  const result=await pool.query(
   `select s.tenant_id,s.app_user_id,s.session_hash,s.csrf_hash,s.expires_at
