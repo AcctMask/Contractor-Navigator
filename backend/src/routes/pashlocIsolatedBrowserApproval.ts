@@ -20,7 +20,7 @@ export async function registerPashLocIsolatedBrowserApprovalRoutes(app:FastifyIn
   const body=request.body
   if(!body||typeof body!=="object"||
      typeof body.challenge_id!=="string"||
-     typeof body.claim_id!=="string"||
+     ((typeof body.claim_id==="string")===(typeof body.pairing_ref==="string"))||
      typeof body.confirmation_code!=="string")
    return reply.code(400).send({ok:false,error:"invalid_request"})
   const session=await authorizeRestrictedBrowserRequest({
@@ -37,6 +37,7 @@ export async function registerPashLocIsolatedBrowserApprovalRoutes(app:FastifyIn
   const result=await approvePashLocDeviceClaim({
    challengeId:session.challengeId,
    claimId:body.claim_id,
+   pairingRef:body.pairing_ref,
    confirmationCode:body.confirmation_code,
    tenantId:session.tenantId,
    userId:session.userId

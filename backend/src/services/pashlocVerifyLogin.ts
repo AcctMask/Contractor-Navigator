@@ -1,17 +1,13 @@
-/**
- * PashLoc IV MFA — transactional returning-user verification.
- * ISOLATED: no route calls this yet; no feature activation.
- * Requires approved schema, encryption key, and a fully confirmed enrollment.
- */
+/** Isolated returning-user verification and disposable session issuance. */
 import { pool } from "../db/db"
 import { decryptPashLocSecret } from "./pashlocSecretCrypto"
 import { verifyPashLocTotp } from "./pashlocTotp"
-import { createHash } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 
 export async function verifyPashLocReturningLogin(
   challengeId: string,
   suppliedCode: string
-): Promise<{ tenantId: number; userId: number } | null> {
+): Promise<{ tenantId: number; userId: number; sessionToken: string } | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\d{6}$/.test(suppliedCode)) return null
   const hash = createHash("sha256").update(challengeId).digest("hex")
   const client = await pool.connect()
@@ -33,17 +29,18 @@ export async function verifyPashLocReturningLogin(
       [c.id]
     )
     const enrolled = await client.query(
-      `select e.encrypted_secret,e.last_accepted_step
+      `select e.id,e.account_id,e.encrypted_secret,e.last_accepted_step
        from pashloc_mfa_enrollments e
        join app_users u on u.id=e.app_user_id and u.tenant_id=e.tenant_id
        where e.tenant_id=$1 and e.app_user_id=$2
          and e.status='confirmed' and u.is_active=true
+         and e.delivery_pairing_id is not null and e.encryption_key_version='isolated-account-v1'
        for update of e`,
       [c.tenant_id,c.app_user_id]
     )
     if (!enrolled.rowCount) { await client.query("COMMIT"); return null }
     const e = enrolled.rows[0]
-    const secret = decryptPashLocSecret(e.encrypted_secret,Number(c.tenant_id),Number(c.app_user_id))
+    const secret = decryptPashLocSecret(e.encrypted_secret,Number(c.tenant_id),Number(c.app_user_id),e.account_id)
     const match = verifyPashLocTotp(secret,suppliedCode,{
       lastAcceptedStep: e.last_accepted_step === null ? null : Number(e.last_accepted_step)
     })
@@ -62,8 +59,14 @@ export async function verifyPashLocReturningLogin(
        returning id`,[c.id]
     )
     if (consumed.rowCount !== 1) { await client.query("ROLLBACK"); return null }
+    const sessionToken = randomBytes(32).toString("base64url")
+    await client.query(
+      `insert into pashloc_mfa_disposable_sessions(session_hash,enrollment_id,expires_at)
+       values ($1,$2,now()+interval '10 minutes')`,
+      [createHash("sha256").update(sessionToken).digest("hex"),e.id]
+    )
     await client.query("COMMIT")
-    return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id)}
+    return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),sessionToken}
   } catch (error) {
     await client.query("ROLLBACK")
     throw error

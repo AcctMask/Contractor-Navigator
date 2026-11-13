@@ -3,7 +3,7 @@
  */
 import assert from "node:assert/strict"
 import {readFileSync} from "node:fs"
-import {createHash,generateKeyPairSync,randomBytes,sign} from "node:crypto"
+import {createHash,createDecipheriv,createPublicKey,diffieHellman,generateKeyPairSync,hkdfSync,randomBytes,sign} from "node:crypto"
 import bcrypt from "bcryptjs"
 const dbUrl=process.env.DATABASE_URL||""
 const u=new URL(dbUrl)
@@ -17,14 +17,15 @@ process.env.PASHLOC_ISOLATED_PHONE_ORIGIN="https://pashloc-isolated.example.test
 process.env.PASHLOC_MFA_ENCRYPTION_KEY_BASE64=randomBytes(32).toString("base64")
 const {pool}=await import("../src/db/db")
 const {buildPashLocIsolatedServer}=await import("../src/pashlocIsolatedServer")
-const {claimTranscript,redeemTranscript}=await import("../src/services/pashlocEnrollV1Crypto")
+const {claimTranscript,redeemTranscript,encodeCanonicalContext,publicKeyFingerprint}=await import("../src/services/pashlocEnrollV1Crypto")
 const sha=(x:string)=>createHash("sha256").update(x).digest("hex")
 for(const sql of [
  "pashloc_iv_mfa_isolated_schema_20261112.sql",
  "pashloc_iv_mfa_pairing_protocol_isolated_20261112.sql",
  "pashloc_iv_mfa_device_claim_nonces_isolated_20261112.sql",
  "pashloc_iv_mfa_restricted_browser_sessions_isolated_20261112.sql",
- "pashloc_iv_mfa_synthetic_redemption_isolated_20261112.sql"
+ "pashloc_iv_mfa_synthetic_redemption_isolated_20261112.sql",
+ "pashloc_iv_mfa_disposable_activation_isolated_20261113.sql"
 ]) {
  if(sql==="pashloc_iv_mfa_isolated_schema_20261112.sql"){
   await pool.query(`create table tenants(id bigserial primary key,slug text unique not null);
@@ -61,6 +62,29 @@ try {
  const st=started.json()
  const cookie=String(started.headers["set-cookie"]).split(";")[0]
  assert.equal(typeof st.pairing_ref,"string")
+ const browser=await app.inject({method:"GET",url:"/isolated/mfa"})
+ assert.equal(browser.statusCode,200)
+ assert.match(browser.body,/Navigator MFA acceptance test/)
+ const spanish=await app.inject({method:"GET",url:"/isolated/mfa?lang=es"})
+ assert.equal(spanish.headers["content-language"],"es")
+ assert.match(spanish.body,/Prueba de aceptación de MFA de Navigator/)
+ assert.match(spanish.body,/Cerrar sesión/)
+ const javascript=await app.inject({method:"GET",url:"/isolated/mfa/browser.js"})
+ assert.equal(javascript.statusCode,200)
+ assert.doesNotThrow(()=>new Function(javascript.body))
+ assert.match(javascript.body,/Demasiados intentos/)
+ const enrollmentQr=await post("/auth/mfa/browser-qr",{
+  mode:"enroll",challenge_id:st.challenge_id,pairing_ref:st.pairing_ref
+ },{...browserHeaders,cookie,"x-pashloc-csrf":st.csrf_token})
+ assert.equal(enrollmentQr.statusCode,200)
+ assert.match(enrollmentQr.json().image,/^data:image\/png;base64,/)
+ const expired=await post("/auth/mfa/enrollment/start",{
+  tenant_slug:"isolated-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
+ },browserHeaders)
+ assert.equal(expired.statusCode,200)
+ const expiredPair=expired.json().pairing_ref
+ await pool.query("update pashloc_mfa_pairings set expires_at=now()-interval '1 second' where pairing_hash=$1",[sha(expiredPair)])
+ assert.equal((await post("/auth/mfa/device/claim-challenge",{pairing_ref:expiredPair},phoneHeaders)).statusCode,404)
  const device=makeDevice()
  const nonce=await post("/auth/mfa/device/claim-challenge",{pairing_ref:st.pairing_ref},phoneHeaders)
  assert.equal(nonce.statusCode,200,nonce.body)
@@ -89,7 +113,7 @@ try {
  },approvedHeaders)
  assert.equal(wrong.statusCode,409,"wrong approval must fail")
  const approval=await post("/auth/mfa/enrollment/approve-device",{
-  challenge_id:st.challenge_id,claim_id:claim.claim_id,confirmation_code:claim.confirmation_code
+  challenge_id:st.challenge_id,pairing_ref:st.pairing_ref,confirmation_code:claim.confirmation_code
  },approvedHeaders)
  assert.equal(approval.statusCode,200,approval.body)
  const redemptionChallenge=await post("/auth/mfa/device/redeem-challenge",{
@@ -139,54 +163,72 @@ try {
   tenant_slug:"wrong-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
  },browserHeaders)
  assert.equal(scope.statusCode,401,"cross-tenant password attempt denied")
- // Test existing isolated TOTP custody/activation primitives with a disposable
- // secret. This is NOT the PashLoc-delivered synthetic envelope credential.
- const {confirmPashLocFirstCode}=await import("../src/services/pashlocConfirmEnrollment")
  const {decryptPashLocSecret}=await import("../src/services/pashlocSecretCrypto")
  const {pashLocTotpAtStep}=await import("../src/services/pashlocTotp")
- const {createDecipheriv,hkdfSync,diffieHellman,createPublicKey}=await import("node:crypto")
- const context=Buffer.from(envelope.context,"base64url")
- const shared=diffieHellman({privateKey:device.agreement.privateKey,publicKey:createPublicKey({key:envelope.ephemeral_public_key_jwk,format:"jwk"})})
- const key=Buffer.from(hkdfSync("sha256",shared,Buffer.from(envelope.salt,"base64url"),Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/HKDF-AES256GCM\0"),context]),32))
- const {publicKeyFingerprint}=await import("../src/services/pashlocEnrollV1Crypto")
- const fingerprint=publicKeyFingerprint(envelope.ephemeral_public_key_jwk)
- const decipher=createDecipheriv("aes-256-gcm",key,Buffer.from(envelope.nonce,"base64url"))
- decipher.setAAD(Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/AES-GCM\0"),context,Buffer.from(fingerprint,"hex")]))
- decipher.setAuthTag(Buffer.from(envelope.tag,"base64url"))
- const phoneSecret=Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,"base64url")),decipher.final()]).toString("utf8")
- key.fill(0);shared.fill(0)
  const secretRow=await pool.query(
-  "select encrypted_secret,status,account_id from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
-  [tenantId,userId])
- assert.equal(secretRow.rows[0].status,"pending")
- const isolatedSecret=decryptPashLocSecret(secretRow.rows[0].encrypted_secret,Number(tenantId),Number(userId))
- assert.equal(isolatedSecret,phoneSecret,"phone envelope seed must equal encrypted Navigator seed")
- assert.ok(!secretRow.rows[0].encrypted_secret.includes(Buffer.from(isolatedSecret)))
+  `select e.*,p.browser_approval_id from pashloc_mfa_enrollments e
+    join pashloc_mfa_pairings p on p.id=e.delivery_pairing_id
+    where e.tenant_id=$1 and e.app_user_id=$2 and p.pairing_hash=$3`,[tenantId,userId,sha(st.pairing_ref)])
+ assert.equal(secretRow.rowCount,1)
+ const row=secretRow.rows[0]
+ assert.equal(row.status,"pending","delivery must not activate MFA")
+ const context=encodeCanonicalContext({
+  version:"AA-PASHLOC-ENROLL-V1",environment:"isolated",application:"Navigator",
+  tenantId:String(tenantId),userId:String(userId),accountId:row.account_id,approvalId:row.browser_approval_id,
+  pairingRef:st.pairing_ref,claimId:claim.claim_id,redeemNonce:firstNonce,
+  signingFingerprint:publicKeyFingerprint(device.publicSign),agreementFingerprint:publicKeyFingerprint(device.publicAgree)
+ })
+ const recovered=retry.json().envelope
+ assert.equal(recovered.context,context.toString("base64url"))
+ const open=(privateKey:typeof device.agreement.privateKey,transcript:Buffer)=>{
+  const peer=createPublicKey({key:recovered.ephemeral_public_key_jwk,format:"jwk"})
+  const shared=diffieHellman({privateKey,publicKey:peer})
+  const key=Buffer.from(hkdfSync("sha256",shared,Buffer.from(recovered.salt,"base64url"),
+   Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/HKDF-AES256GCM\0"),transcript]),32))
+  const cipher=createDecipheriv("aes-256-gcm",key,Buffer.from(recovered.nonce,"base64url"))
+  cipher.setAAD(Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/AES-GCM\0"),transcript,
+   Buffer.from(publicKeyFingerprint(recovered.ephemeral_public_key_jwk),"hex")]))
+  cipher.setAuthTag(Buffer.from(recovered.tag,"base64url"))
+  return Buffer.concat([cipher.update(Buffer.from(recovered.ciphertext,"base64url")),cipher.final()]).toString()
+ }
+ assert.throws(()=>open(alien.agreement.privateKey,context),"wrong ECDH key must fail")
+ assert.throws(()=>open(device.agreement.privateKey,Buffer.concat([context,Buffer.from("altered")])),"altered context must fail")
+ const phoneSecret=open(device.agreement.privateKey,context)
+ assert.match(phoneSecret,/^[A-Z2-7]{32}$/)
+ assert.ok(!row.encrypted_secret.includes(Buffer.from(phoneSecret)))
+ assert.ok(phoneSecret===decryptPashLocSecret(row.encrypted_secret,Number(tenantId),Number(userId),row.account_id))
+ assert.throws(()=>decryptPashLocSecret(row.encrypted_secret,Number(tenantId)+1,Number(userId),row.account_id))
+ assert.throws(()=>decryptPashLocSecret(row.encrypted_secret,Number(tenantId),Number(userId),"A".repeat(32)))
+ for(const response of [started,approval,first,retry])assert.ok(!response.body.includes(phoneSecret))
+ const activate=(code:string,headers=approvedHeaders)=>post("/auth/mfa/enrollment/confirm",{
+  challenge_id:st.challenge_id,pairing_ref:st.pairing_ref,code
+ },headers)
  const nowStep=Math.floor(Date.now()/30000)
- const badFirst=await confirmPashLocFirstCode({
-  challengeId:st.challenge_id,pairingId:st.pairing_ref,
-  claimantToken:claim.claimant_proof,code:"000000"
- })
- assert.equal(badFirst,null,"incorrect first TOTP must not activate")
- const firstCode=pashLocTotpAtStep(phoneSecret,nowStep-1)
- const confirmed=await confirmPashLocFirstCode({
-  challengeId:st.challenge_id,pairingId:st.pairing_ref,
-  claimantToken:claim.claimant_proof,code:firstCode
- })
- assert.equal(confirmed?.accountId,secretRow.rows[0].account_id,"first valid TOTP activates same account")
- const duplicate=await confirmPashLocFirstCode({
-  challengeId:st.challenge_id,pairingId:st.pairing_ref,
-  claimantToken:claim.claimant_proof,code:firstCode
- })
- assert.equal(duplicate,null,"duplicate activation must fail")
+ const firstCode=pashLocTotpAtStep(phoneSecret,nowStep)
+ const incorrect=Array.from({length:8},(_,i)=>String(i).padStart(6,"0")).find(
+  candidate=>![-1,0,1,2].some(offset=>pashLocTotpAtStep(phoneSecret,nowStep+offset)===candidate))!
+ assert.equal((await activate(firstCode,{...approvedHeaders,origin:phoneOrigin})).statusCode,403)
+ assert.equal((await activate(incorrect)).statusCode,401,"incorrect first TOTP must not activate")
+ const confirmed=await activate(firstCode)
+ assert.equal(confirmed.statusCode,200)
+ assert.equal(confirmed.json().account_id,row.account_id)
+ assert.ok(!confirmed.body.includes(phoneSecret))
+ assert.equal((await activate(firstCode)).statusCode,403,"duplicate activation must fail")
+ assert.equal((await pool.query("select synthetic_envelope from pashloc_mfa_pairings where pairing_hash=$1",[sha(st.pairing_ref)])).rows[0].synthetic_envelope,null)
  const loginStarted=await post("/auth/mfa/login/start",{
   tenant_slug:"isolated-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
  },browserHeaders)
  assert.equal(loginStarted.statusCode,200,loginStarted.body)
  const loginData=loginStarted.json()
  assert.equal(loginData.requires_mfa,true)
+ assert.equal(loginData.account_id,row.account_id)
  const loginCookie=String(loginStarted.headers["set-cookie"]).split(";")[0]
  const loginHeaders={...browserHeaders,cookie:loginCookie,"x-pashloc-csrf":loginData.csrf_token}
+ const returningQr=await post("/auth/mfa/browser-qr",{
+  mode:"login",challenge_id:loginData.challenge_id,account_id:loginData.account_id
+ },loginHeaders)
+ assert.equal(returningQr.statusCode,200)
+ assert.match(returningQr.json().image,/^data:image\/png;base64,/)
  const invalidCsrf=await post("/auth/mfa/login/verify",{
   challenge_id:loginData.challenge_id,code:firstCode
  },{...loginHeaders,"x-pashloc-csrf":"wrong"})
@@ -195,12 +237,27 @@ try {
   challenge_id:loginData.challenge_id,code:firstCode
  },loginHeaders)
  assert.equal(otpReplayResponse.statusCode,401,"already accepted enrollment step must not verify login")
+ const protectedRoute=(cookie:string)=>app.inject({method:"GET",url:"/isolated/mfa/session-check",headers:{cookie}})
+ assert.equal((await protectedRoute(loginCookie)).statusCode,401,"restricted cookie must not grant a session")
+ assert.equal((await app.inject({method:"GET",url:"/jobs",headers:{cookie:loginCookie}})).statusCode,404)
+ const nextStep=nowStep+1
+ // Wait for the later step on the real clock. Never reset persisted replay state.
+ await new Promise(resolve=>setTimeout(resolve,Math.max(0,nextStep*30000-Date.now()+50)))
  const verifiedResponse=await post("/auth/mfa/login/verify",{
-  challenge_id:loginData.challenge_id,code:pashLocTotpAtStep(phoneSecret,nowStep)
+  challenge_id:loginData.challenge_id,code:pashLocTotpAtStep(phoneSecret,nextStep)
  },loginHeaders)
  assert.equal(verifiedResponse.statusCode,200,verifiedResponse.body)
- assert.equal(verifiedResponse.json().mfa_verified,true)
- assert.equal(verifiedResponse.json().session_issued,false,"isolated MFA must not issue Navigator JWT")
+ assert.equal(verifiedResponse.json().session_scope,"isolated-test-only")
+ const setCookies=verifiedResponse.headers["set-cookie"]
+ assert.ok(Array.isArray(setCookies))
+ const operationalCookie=setCookies.find(v=>v.startsWith("__Host-pashloc_disposable="))!.split(";")[0]
+ const authorized=await protectedRoute(operationalCookie)
+ assert.equal(authorized.statusCode,200)
+ assert.equal(authorized.json().account_id,row.account_id)
+ assert.equal((await app.inject({method:"GET",url:"/jobs",headers:{cookie:operationalCookie}})).statusCode,404)
+ assert.equal((await pool.query("select last_accepted_step from pashloc_mfa_enrollments where id=$1",[row.id])).rows[0].last_accepted_step,String(nextStep))
+ assert.equal((await post("/auth/mfa/login/sign-out",{}, {...browserHeaders,cookie:operationalCookie})).statusCode,200)
+ assert.equal((await protectedRoute(operationalCookie)).statusCode,401)
  const reusedResponse=await post("/auth/mfa/login/verify",{
   challenge_id:loginData.challenge_id,code:firstCode
  },loginHeaders)
@@ -209,7 +266,24 @@ try {
   tenant_slug:"isolated-tenant",email:"isolated@example.test",password:"incorrect-password"
  },browserHeaders)
  assert.equal(badLogin.statusCode,401)
- console.log("PASS: disposable encrypted TOTP custody; wrong first code rejected; first valid activation; duplicate rejected; returning login challenge; TOTP replay rejection; consumed challenge rejection")
+ for(const [path,headers] of [
+  ["/auth/mfa/enrollment/start",browserHeaders],["/auth/mfa/login/start",browserHeaders],
+  ["/auth/mfa/device/claim-challenge",phoneHeaders],["/auth/mfa/enrollment/approve-device",browserHeaders],
+  ["/auth/mfa/device/redeem",phoneHeaders],["/auth/mfa/enrollment/confirm",browserHeaders],
+  ["/auth/mfa/login/verify",browserHeaders]
+ ] as const){
+  // Seed the previous hits in this minute so the HTTP assertion cannot straddle a window.
+  const ip=sha("127.0.0.1")
+  await pool.query(
+   `insert into pashloc_mfa_request_limits(bucket,window_start,hits) values ($1,date_trunc('minute',now()),20)
+    on conflict(bucket,window_start) do update set hits=20`,[path+"|"+ip])
+  let limited=await post(path,{},headers)
+  for(let attempt=0;attempt<20&&limited.statusCode!==429;attempt++)limited=await post(path,{},headers)
+  assert.equal(limited.statusCode,429,path+" must enforce throttling")
+  assert.equal(limited.headers["retry-after"],"60")
+ }
+ console.log("PASS: exact-origin enrollment and returning QR; observed HTTP throttling across password, claim, approval, redemption and TOTP")
+ console.log("PASS: one delivered disposable seed for encrypted custody, first-code activation and later returning login; restricted and isolated test session boundaries; TOTP replay rejected without resetting state")
  console.log("PASS: disposable PostgreSQL migration; password-scoped enrollment; signed device claim; wrong approval; original browser approval; signed synthetic redemption; wrong signer; replay rejection; fresh same-device retry; concurrent same-nonce serialization; immutable envelope; cross-tenant denial")
 } finally {
  await app.close()

@@ -44,8 +44,8 @@ export async function issuePashLocSyntheticRedeemNonce(input:{
        and p.redeemed_at is not null and p.browser_approved_at is not null
        and p.denied_at is null and p.synthetic_retry_attempts<5
        and p.synthetic_recovery_expires_at>now()
-       and p.synthetic_retry_nonce_hash is null
-       and c.purpose='enroll' and c.consumed_at is null
+       and (p.synthetic_retry_nonce_hash is null or p.synthetic_retry_nonce_expires_at<=now())
+       and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
      returning p.synthetic_retry_nonce_expires_at`,
     [sha(input.pairingRef),sha(input.claimId),sha(input.claimantProof),sha(nonce)]
    )

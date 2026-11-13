@@ -4,8 +4,9 @@
  */
 import {createHash,randomBytes} from "node:crypto"
 import {pool} from "../db/db"
-import {encryptPashLocSecret} from "./pashlocSecretCrypto"
 import {normalizedP256PublicKey,publicKeyFingerprint,redeemTranscript,verifyP1363Proof,encryptSyntheticEnrollmentV1} from "./pashlocEnrollV1Crypto"
+import {generatePashLocTotpSecret} from "./pashlocTotp"
+import {encryptPashLocSecret} from "./pashlocSecretCrypto"
 const sha=(v:string)=>createHash("sha256").update(v,"utf8").digest("hex")
 const token=/^[A-Za-z0-9_-]{43}$/
 export async function redeemPashLocSynthetic(input:{
@@ -25,14 +26,14 @@ export async function redeemPashLocSynthetic(input:{
       p.synthetic_redeem_proof_hash,p.browser_approved_at,
       p.synthetic_retry_nonce_hash,p.synthetic_retry_nonce_expires_at,
       p.synthetic_recovery_expires_at,p.synthetic_retry_attempts,
-      c.tenant_id,c.app_user_id,c.purpose
+      c.tenant_id,c.app_user_id,c.purpose,p.browser_approval_id
      from pashloc_mfa_pairings p
      join pashloc_mfa_challenges c on c.id=p.challenge_id
     where p.pairing_hash=$1 and p.claim_id_hash=$2 and p.claimant_hash=$3
       and p.claimed_at is not null and p.browser_approved_at is not null
       and p.denied_at is null
       and (p.expires_at>now() or (p.synthetic_envelope is not null and p.synthetic_recovery_expires_at>now()))
-      and c.purpose='enroll' and c.consumed_at is null
+      and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
     for update of p,c`,
    [sha(input.pairing_ref),sha(input.claim_id),sha(input.claimant_proof)]
   )
@@ -80,21 +81,19 @@ export async function redeemPashLocSynthetic(input:{
      new Date(p.redemption_nonce_expires_at).getTime()<=Date.now()){
    await client.query("ROLLBACK");return null
   }
-  // Synthetic, random, disposable test-only Base32 secret; not sourced
-  // from a real enrollment, user account, environment, or credential store.
-  const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-  const raw=randomBytes(32)
-  const syntheticSecret=Array.from(raw,b=>alphabet[b&31]).join("")
-  raw.fill(0)
-  const accountId="synthetic_"+String(p.id)
-  const userLock=await client.query(
-   "select id from app_users where id=$1 and tenant_id=$2 and is_active=true for update",
-   [p.app_user_id,p.tenant_id])
-  if(userLock.rowCount!==1){await client.query("ROLLBACK");return null}
-  const existing=await client.query(
-   "select id from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
-   [p.tenant_id,p.app_user_id])
-  if(existing.rowCount){await client.query("ROLLBACK");return null}
+  if(!p.browser_approval_id){await client.query("ROLLBACK");return null}
+  const accountId=randomBytes(24).toString("base64url")
+  const syntheticSecret=generatePashLocTotpSecret()
+  const encrypted=encryptPashLocSecret(syntheticSecret,Number(p.tenant_id),Number(p.app_user_id),accountId)
+  const pending=await client.query(
+   `insert into pashloc_mfa_enrollments
+      (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status,delivery_pairing_id)
+     select tenant_id,id,$3,$4,'isolated-account-v1','pending',$5
+       from app_users where tenant_id=$1 and id=$2 and is_active=true
+     on conflict (tenant_id,app_user_id) do nothing returning id`,
+   [p.tenant_id,p.app_user_id,accountId,encrypted,p.id]
+  )
+  if(pending.rowCount!==1){await client.query("ROLLBACK");return null}
   const context={
    version:"AA-PASHLOC-ENROLL-V1",environment:"isolated",
    application:"Navigator",tenantId:String(p.tenant_id),
@@ -102,15 +101,11 @@ export async function redeemPashLocSynthetic(input:{
    pairingRef:input.pairing_ref,claimId:input.claim_id,
    signingFingerprint:p.device_key_fingerprint,
    agreementFingerprint:p.device_ecdh_key_fingerprint,
-   redeemNonce:input.redeem_nonce,approvalId:"approval_"+String(p.id)
+   redeemNonce:input.redeem_nonce,approvalId:String(p.browser_approval_id)
   }
   const envelope=encryptSyntheticEnrollmentV1({
    syntheticSecret,deviceEcdhPublicJwk:agree,context
   })
-  const encrypted=encryptPashLocSecret(syntheticSecret,Number(p.tenant_id),Number(p.app_user_id))
-  await client.query(
-   "insert into pashloc_mfa_enrollments (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status) values ($1,$2,$3,$4,'v1','pending')",
-   [p.tenant_id,p.app_user_id,accountId,encrypted])
   const update=await client.query(
    `update pashloc_mfa_pairings
        set synthetic_envelope=$2::jsonb,
