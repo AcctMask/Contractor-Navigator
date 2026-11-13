@@ -40,3 +40,5 @@ jobs:
         working-directory: backend
       - run: npx tsc --noEmit --module commonjs --moduleResolution node --target es2021 --esModuleInterop --skipLibCheck src/routes/auth.ts src/services/authService.ts src/services/pashloc*.ts
         working-directory: backend
+      - run: npx tsx --test tests/pashlocTotp.test.ts
+        working-directory: backend
