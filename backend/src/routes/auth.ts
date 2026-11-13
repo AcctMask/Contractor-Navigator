@@ -519,7 +519,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const restricted=await stageRestrictedBrowserSession({tenantId:account.tenantId,userId:account.userId,challengeId:challenge.challengeId,purpose:"enroll"})
     reply.header("Set-Cookie",restrictedCookie(restricted.sessionId))
     return {ok:true,challenge_id:challenge.challengeId,pairing_ref:pairing.pairingId,
-      csrf_token:restricted.csrfToken,expires_at:pairing.expiresAt}
+      csrf_token:restricted.csrfToken,restricted_session:restricted.sessionId,expires_at:pairing.expiresAt}
   })
 
   app.post("/auth/mfa/enrollment/approve-device",async(request:any,reply)=>{
@@ -531,7 +531,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.confirmation_code!=="string")
       return reply.code(400).send({ok:false})
     const session=await authorizeRestrictedBrowserRequest({
-      cookieHeader:request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      cookieHeader:request.headers["x-pashloc-restricted-session"] || request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
       origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
       secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
       challengeId:b.challenge_id,purpose:"enroll"
@@ -552,7 +552,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.code!=="string")
       return reply.code(400).send({ok:false})
     const session=await authorizeRestrictedBrowserRequest({
-      cookieHeader:request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      cookieHeader:request.headers["x-pashloc-restricted-session"] || request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
       origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
       secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
       challengeId:b.challenge_id,purpose:"enroll"
