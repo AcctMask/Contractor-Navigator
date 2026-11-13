@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import { randomBytes } from "crypto"
+import { createPashLocLoginChallenge } from "./pashlocChallenge"
+import { verifyPashLocReturningLogin } from "./pashlocVerifyLogin"
 import { pool } from "../db/db"
 
 type AppUser = {
@@ -141,7 +143,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export function signToken(user: AppUser) {
+export function signToken(user: AppUser, mfaVerified = false) {
   return jwt.sign(
     {
       sub: user.id,
@@ -149,6 +151,7 @@ export function signToken(user: AppUser) {
       email: user.email,
       full_name: user.full_name,
       role: user.role,
+      mfa_verified: mfaVerified,
     },
     JWT_SECRET,
     { expiresIn: "7d" }
@@ -164,6 +167,7 @@ export function verifyToken(token: string) {
     role: string
     iat: number
     exp: number
+    mfa_verified?: boolean
   }
 }
 
@@ -823,16 +827,27 @@ export async function loginUserByTenantSlug(
     is_active: row.is_active,
   }
 
-  // Fail closed before any usable Navigator session is issued.
-  // A restricted challenge and PashLoc verification endpoint must be wired
-  // before enabling this flag for any production user.
+  // Account-specific MFA: password alone cannot mint a Navigator JWT.
   const mfaPolicy = await pool.query(
     `select pashloc_mfa_required from app_users
      where id = $1 and tenant_id = $2 and is_active = true`,
     [user.id, user.tenant_id]
   )
   if (mfaPolicy.rows[0]?.pashloc_mfa_required) {
-    return { user, mfa_required: true, token: null }
+    const enrollment = await pool.query(
+      `select id from pashloc_mfa_enrollments
+       where tenant_id=$1 and app_user_id=$2 and status='confirmed'
+         and delivery_pairing_id is not null limit 1`,
+      [user.tenant_id,user.id]
+    )
+    if (enrollment.rowCount !== 1) {
+      return { mfa_required: true, enrollment_required: true, token: null }
+    }
+    const challenge = await createPashLocLoginChallenge({
+      tenantId:user.tenant_id,userId:user.id,purpose:"verify"
+    })
+    return { mfa_required:true, challenge_id:challenge.challengeId,
+      expires_at:challenge.expiresAt, token:null }
   }
 
   const token = signToken(user)
@@ -841,6 +856,26 @@ export async function loginUserByTenantSlug(
     user,
     token,
   }
+}
+
+/** Only the PashLoc verifier may issue an MFA-assured Navigator token.
+ * Verification consumes a challenge and TOTP replay step transactionally.
+ */
+export async function completePashLocNavigatorLogin(challengeId: string, code: string) {
+  if (typeof challengeId !== "string" || typeof code !== "string")
+    throw new Error("Invalid MFA verification request")
+  const verified = await verifyPashLocReturningLogin(challengeId,code)
+  if (!verified) throw new Error("Invalid or expired PashLoc code")
+  // Recheck account and policy after the verifier's transaction completes.
+  const result = await pool.query(
+    `select id,tenant_id,email,full_name,mobile_phone,role,is_active
+     from app_users where id=$1 and tenant_id=$2 and is_active=true
+       and pashloc_mfa_required=true limit 1`,
+    [verified.userId,verified.tenantId]
+  )
+  if (result.rowCount !== 1) throw new Error("MFA policy changed; sign in again")
+  const user: AppUser = result.rows[0]
+  return {user,token:signToken(user,true)}
 }
 
 export async function updateOwnPreferredLanguage(
@@ -911,7 +946,7 @@ export async function getCurrentUserFromToken(token: string) {
      where id = $1 and tenant_id = $2 and is_active = true`,
     [decoded.sub, decoded.tenant_id]
   )
-  if (policy.rows[0]?.pashloc_mfa_required) {
+  if (policy.rows[0]?.pashloc_mfa_required && decoded.mfa_verified !== true) {
     throw new Error("PashLoc verification required")
   }
 
