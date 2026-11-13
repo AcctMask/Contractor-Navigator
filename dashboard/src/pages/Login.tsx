@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login, verifyPashLocLogin } from "../lib/auth"
+import { login, verifyPashLocLogin, startPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment } from "../lib/auth"
+import type { PashLocEnrollment } from "../lib/auth"
 import {
   getTenantSlug,
   setTenantSlug,
@@ -25,6 +26,9 @@ export default function LoginPage() {
   const [mfaChallenge, setMfaChallenge] = useState("")
   const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(false)
   const [mfaCode, setMfaCode] = useState("")
+  const [enrollment, setEnrollment] = useState<PashLocEnrollment | null>(null)
+  const [deviceCode, setDeviceCode] = useState("")
+  const [deviceApproved, setDeviceApproved] = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -43,6 +47,10 @@ export default function LoginPage() {
       )
 
       const result = await login(email.trim(), password)
+      if (result?.mfa_required && result.enrollment_required) {
+        const session = await startPashLocEnrollment(tenantSlug,email.trim(),password)
+        setEnrollment(session)
+      }
       if (result?.mfa_required) {
         setMfaChallenge(result.challenge_id)
         setMfaEnrollmentRequired(Boolean(result.enrollment_required))
@@ -91,7 +99,26 @@ export default function LoginPage() {
           <form onSubmit={handleMfaVerify} style={{display:"grid",gap:"14px",marginTop:"18px"}}>
             <h2 style={{margin:0}}>PashLoc security verification</h2>
             {mfaEnrollmentRequired ? (
-              <p>First-time PashLoc enrollment is not available yet. Your account has not been signed in. Contact your administrator to complete secure enrollment.</p>
+              <div style={{display:"grid",gap:"12px"}}>
+                <p>Connect your PashLoc iPhone account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
+                {enrollment ? <>
+                  <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
+                  <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
+                  <p>Open PashLoc on your iPhone to claim this pairing. Enter the eight-digit number shown on the phone here.</p>
+                  <label style={labelStyle}>Eight-digit device approval</label>
+                  <input value={deviceCode} onChange={e=>setDeviceCode(e.target.value.replace(/\D/g,"").slice(0,8))} inputMode="numeric" maxLength={8} style={inputStyle}/>
+                  <button type="button" style={buttonStyle} disabled={submitting || deviceCode.length!==8} onClick={async()=>{
+                    setSubmitting(true);setError("");try{await approvePashLocEnrollment(enrollment,deviceCode);setDeviceApproved(true)}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                  }}>Approve this iPhone</button>
+                  {deviceApproved ? <>
+                    <label style={labelStyle}>First six-digit PashLoc code</label>
+                    <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
+                    <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
+                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrolled. Sign in again with a fresh code.")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                    }}>Complete PashLoc enrollment</button>
+                  </> : null}
+                </> : <p>Enrollment is unavailable. Please try signing in again.</p>}
+              </div>
             ) : (
               <>
                 <p>Open PashLoc on your iPhone and enter the current six-digit code. You do not need to scan another QR.</p>
@@ -101,7 +128,7 @@ export default function LoginPage() {
                 <button type="submit" disabled={submitting || mfaCode.length!==6} style={buttonStyle}>Verify and open Navigator</button>
               </>
             )}
-            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false)}}>Back to sign in</button>
+            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false);setEnrollment(null);setDeviceApproved(false);setDeviceCode("")}}>Back to sign in</button>
             {error ? <div style={errorStyle}>{error}</div> : null}
           </form>
         ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
