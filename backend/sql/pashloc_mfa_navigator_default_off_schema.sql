@@ -89,6 +89,17 @@ CREATE TABLE IF NOT EXISTS pashloc_mfa_restricted_browser_sessions (
 CREATE INDEX IF NOT EXISTS pashloc_mfa_restricted_browser_scope_idx
  ON pashloc_mfa_restricted_browser_sessions(tenant_id,app_user_id,expires_at)
  WHERE revoked_at IS NULL;
+CREATE TABLE IF NOT EXISTS pashloc_mfa_recovery_codes (
+ id bigserial PRIMARY KEY,
+ tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ app_user_id bigint NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+ code_hash text NOT NULL UNIQUE,
+ consumed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pashloc_mfa_recovery_account_idx
+ ON pashloc_mfa_recovery_codes(tenant_id,app_user_id)
+ WHERE consumed_at IS NULL;
 CREATE TABLE IF NOT EXISTS pashloc_mfa_audit_events (
  id bigserial PRIMARY KEY,
  tenant_id bigint NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
