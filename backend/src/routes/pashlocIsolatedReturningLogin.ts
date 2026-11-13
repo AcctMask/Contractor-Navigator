@@ -22,7 +22,9 @@ export async function registerPashLocIsolatedReturningLoginRoutes(app:FastifyIns
   reply.header("Cache-Control","no-store, private")
   if(!allowed(req))return reply.code(403).send({ok:false})
   const b=req.body
-  if(!b||typeof b!=="object")return reply.code(400).send({ok:false})
+  if(!b||typeof b!=="object"||typeof b.tenant_slug!=="string"||
+     typeof b.email!=="string"||typeof b.password!=="string")
+   return reply.code(400).send({ok:false})
   const account=await verifyPashLocRestrictedCredentials({
    tenantSlug:b.tenant_slug,email:b.email,password:b.password
   })
