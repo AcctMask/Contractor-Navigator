@@ -3,6 +3,8 @@ import { createHmac, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
 import { createPashLocLoginChallenge } from "../services/pashlocChallenge"
 import { createPashLocPairing } from "../services/pashlocPairing"
+import { issuePashLocDeviceClaimNonce } from "../services/pashlocDeviceClaimChallenge"
+import { claimPashLocDevice } from "../services/pashlocDeviceClaimV2"
 import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from "../services/pashlocRestrictedSessionStoreV1"
 import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
 import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
@@ -489,6 +491,27 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   })
 
+
+  // Phone-facing endpoints are intentionally disabled until shared limits,
+  // origin policy, and genuine encrypted credential redemption are proven.
+  app.post("/auth/mfa/device/claim-challenge",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const nonce=await issuePashLocDeviceClaimNonce(b.pairing_ref)
+    return nonce?{ok:true,proof_nonce:nonce}:reply.code(404).send({ok:false,error:"unavailable"})
+  })
+  app.post("/auth/mfa/device/claim",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const result=await claimPashLocDevice(b)
+    return result?{ok:true,...result}:reply.code(409).send({ok:false,error:"unavailable"})
+  })
 
   // First-time enrollment uses password verification without a Navigator JWT.
   // The restricted session is separate from all CRM bearer-token authorities.
