@@ -14,6 +14,7 @@ process.env.PASHLOC_ISOLATED_CLAIM_API="enabled"
 process.env.PASHLOC_ISOLATED_SHARED_RATE_LIMITS_VERIFIED="yes"
 process.env.PASHLOC_ISOLATED_NAVIGATOR_ORIGIN="https://navigator-isolated.example.test"
 process.env.PASHLOC_ISOLATED_PHONE_ORIGIN="https://pashloc-isolated.example.test"
+process.env.PASHLOC_MFA_ENCRYPTION_KEY_BASE64=randomBytes(32).toString("base64")
 const {pool}=await import("../src/db/db")
 const {buildPashLocIsolatedServer}=await import("../src/pashlocIsolatedServer")
 const {claimTranscript,redeemTranscript}=await import("../src/services/pashlocEnrollV1Crypto")
@@ -138,6 +139,53 @@ try {
   tenant_slug:"wrong-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
  },browserHeaders)
  assert.equal(scope.statusCode,401,"cross-tenant password attempt denied")
+ // Test existing isolated TOTP custody/activation primitives with a disposable
+ // secret. This is NOT the PashLoc-delivered synthetic envelope credential.
+ const {stagePashLocEnrollment}=await import("../src/services/pashlocEnrollment")
+ const {confirmPashLocFirstCode}=await import("../src/services/pashlocConfirmEnrollment")
+ const {verifyPashLocReturningLogin}=await import("../src/services/pashlocVerifyLogin")
+ const {decryptPashLocSecret}=await import("../src/services/pashlocSecretCrypto")
+ const {pashLocTotpAtStep}=await import("../src/services/pashlocTotp")
+ const {createPashLocLoginChallenge}=await import("../src/services/pashlocChallenge")
+ const staged=await stagePashLocEnrollment({tenantId:Number(tenantId),userId:Number(userId)})
+ assert.equal(staged.status,"pending")
+ const secretRow=await pool.query(
+  "select encrypted_secret,status from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
+  [tenantId,userId])
+ assert.equal(secretRow.rows[0].status,"pending")
+ const isolatedSecret=decryptPashLocSecret(secretRow.rows[0].encrypted_secret,Number(tenantId),Number(userId))
+ assert.ok(!secretRow.rows[0].encrypted_secret.includes(Buffer.from(isolatedSecret)))
+ const nowStep=Math.floor(Date.now()/30000)
+ const badFirst=await confirmPashLocFirstCode({
+  challengeId:st.challenge_id,pairingId:st.pairing_ref,
+  claimantToken:claim.claimant_proof,code:"000000"
+ })
+ assert.equal(badFirst,null,"incorrect first TOTP must not activate")
+ const firstCode=pashLocTotpAtStep(isolatedSecret,nowStep)
+ const confirmed=await confirmPashLocFirstCode({
+  challengeId:st.challenge_id,pairingId:st.pairing_ref,
+  claimantToken:claim.claimant_proof,code:firstCode
+ })
+ assert.equal(confirmed?.accountId,staged.accountId,"first valid TOTP activates same account")
+ const duplicate=await confirmPashLocFirstCode({
+  challengeId:st.challenge_id,pairingId:st.pairing_ref,
+  claimantToken:claim.claimant_proof,code:firstCode
+ })
+ assert.equal(duplicate,null,"duplicate activation must fail")
+ const login=await createPashLocLoginChallenge({
+  tenantId:Number(tenantId),userId:Number(userId),purpose:"verify"
+ })
+ const replay=await verifyPashLocReturningLogin(login.challengeId,firstCode)
+ assert.equal(replay,null,"already accepted activation step must not verify login")
+ // Use a future step by updating only disposable test replay boundary.
+ // No time spoofing in production: a current step is then accepted.
+ await pool.query("update pashloc_mfa_enrollments set last_accepted_step=$3 where tenant_id=$1 and app_user_id=$2",
+  [tenantId,userId,nowStep-2])
+ const verified=await verifyPashLocReturningLogin(login.challengeId,firstCode)
+ assert.equal(verified?.tenantId,Number(tenantId))
+ const reused=await verifyPashLocReturningLogin(login.challengeId,firstCode)
+ assert.equal(reused,null,"consumed login challenge must not be reusable")
+ console.log("PASS: disposable encrypted TOTP custody; wrong first code rejected; first valid activation; duplicate rejected; returning login challenge; TOTP replay rejection; consumed challenge rejection")
  console.log("PASS: disposable PostgreSQL migration; password-scoped enrollment; signed device claim; wrong approval; original browser approval; signed synthetic redemption; wrong signer; replay rejection; fresh same-device retry; concurrent same-nonce serialization; immutable envelope; cross-tenant denial")
 } finally {
  await app.close()
