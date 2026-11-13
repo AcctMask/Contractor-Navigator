@@ -841,16 +841,9 @@ export async function loginUserByTenantSlug(
       [user.tenant_id,user.id]
     )
     if (enrollment.rowCount !== 1) {
-      // Never issue an ordinary session while enrollment is incomplete.
-      // Create a short-lived enrollment challenge bound to this password-
-      // verified tenant and account; pairing requires restricted browser
-      // session issuance by the dedicated enrollment route.
-      const challenge = await createPashLocLoginChallenge({
-        tenantId:user.tenant_id,userId:user.id,purpose:"enroll"
-      })
-      return { mfa_required:true, enrollment_required:true,
-        challenge_id:challenge.challengeId,
-        expires_at:challenge.expiresAt, token:null }
+      // Enrollment is a separate, password-verified restricted flow.
+      // Do not create an orphaned enrollment challenge in the normal login.
+      return { mfa_required:true, enrollment_required:true, token:null }
     }
     const challenge = await createPashLocLoginChallenge({
       tenantId:user.tenant_id,userId:user.id,purpose:"verify"
