@@ -66,7 +66,7 @@ export function encodeCanonicalContext(c:ContextFields):Buffer {
  if(c.version!==V || c.application!=="Navigator") throw new Error("Invalid context authority")
  const fields=[
   ascii("version",c.version,/^AA-PASHLOC-ENROLL-V1$/),
-  ascii("environment",c.environment,/^(isolated|test|development)$/),
+  ascii("environment",c.environment,/^(isolated|test|development|production)$/),
   ascii("application",c.application,/^Navigator$/),
   ascii("tenant",c.tenantId,id),ascii("user",c.userId,id),ascii("account",c.accountId,id),
   ascii("pairing",c.pairingRef,b64),ascii("claim",c.claimId,b64),
@@ -80,6 +80,7 @@ const hkdfDomain=Buffer.from(V+"/HKDF-AES256GCM\0","ascii")
 const aadDomain=Buffer.from(V+"/AES-GCM\0","ascii")
 export type SyntheticEnvelope = { version:typeof V; salt:string; context:string; ephemeral_public_key_jwk:DevicePublicJwk; nonce:string; ciphertext:string; tag:string }
 export function encryptSyntheticEnrollmentV1(input:{syntheticSecret:string; deviceEcdhPublicJwk:unknown;context:ContextFields}):SyntheticEnvelope {
+ if(input.context.environment==="production") throw new Error("Synthetic enrollment is forbidden in production")
  if(!/^[A-Z2-7]{16,128}$/.test(input.syntheticSecret)) throw new Error("Synthetic Base32 test credential required")
  const device=normalizedP256PublicKey(input.deviceEcdhPublicJwk)
  if(publicKeyFingerprint(device)!==input.context.agreementFingerprint) throw new Error("Device agreement-key mismatch")
