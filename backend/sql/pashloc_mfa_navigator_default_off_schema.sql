@@ -65,12 +65,12 @@ CREATE TABLE IF NOT EXISTS pashloc_mfa_pairings (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS pashloc_pairings_claim_id_unique
  ON pashloc_mfa_pairings(claim_id_hash) WHERE claim_id_hash IS NOT NULL;
-DO $ BEGIN
+DO $mfa$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='pashloc_mfa_enrollments_delivery_pairing_fk') THEN
   ALTER TABLE pashloc_mfa_enrollments ADD CONSTRAINT pashloc_mfa_enrollments_delivery_pairing_fk
    FOREIGN KEY (delivery_pairing_id) REFERENCES pashloc_mfa_pairings(id);
  END IF;
-END $;
+END $mfa$;
 CREATE UNIQUE INDEX IF NOT EXISTS pashloc_mfa_delivery_pairing_unique
  ON pashloc_mfa_enrollments(delivery_pairing_id) WHERE delivery_pairing_id IS NOT NULL;
 -- Device proof nonces must be single-use before an iPhone claim can be accepted.
