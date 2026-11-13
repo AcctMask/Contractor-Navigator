@@ -73,6 +73,18 @@ DO $ BEGIN
 END $;
 CREATE UNIQUE INDEX IF NOT EXISTS pashloc_mfa_delivery_pairing_unique
  ON pashloc_mfa_enrollments(delivery_pairing_id) WHERE delivery_pairing_id IS NOT NULL;
+-- Device proof nonces must be single-use before an iPhone claim can be accepted.
+CREATE TABLE IF NOT EXISTS pashloc_mfa_device_claim_nonces (
+ id bigserial PRIMARY KEY,
+ pairing_hash text NOT NULL,
+ nonce_hash text NOT NULL,
+ expires_at timestamptz NOT NULL,
+ consumed_at timestamptz,
+ created_at timestamptz NOT NULL DEFAULT now(),
+ UNIQUE(pairing_hash,nonce_hash)
+);
+CREATE INDEX IF NOT EXISTS pashloc_mfa_device_claim_nonces_expiry
+ ON pashloc_mfa_device_claim_nonces(expires_at);
 CREATE TABLE IF NOT EXISTS pashloc_mfa_restricted_browser_sessions (
  id bigserial PRIMARY KEY,
  session_hash text NOT NULL UNIQUE CHECK(session_hash ~ '^[a-f0-9]{64}$'),
