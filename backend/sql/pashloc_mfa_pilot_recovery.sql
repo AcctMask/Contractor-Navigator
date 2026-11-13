@@ -4,6 +4,7 @@
 --   \set pilot_tenant_id 123
 --   \set pilot_user_id 456
 -- Review target identity using a separate read-only query before execution.
+-- Also supply: \\set recovery_reason 'Chairman-approved emergency recovery'
 -- Do not execute for other users. No global authentication changes.
 \set ON_ERROR_STOP on
 BEGIN;
@@ -12,7 +13,7 @@ CREATE TABLE IF NOT EXISTS pashloc_mfa_admin_recovery_audit (
   tenant_id bigint NOT NULL,
   app_user_id bigint NOT NULL,
   action text NOT NULL CHECK (action = 'disable_pilot_mfa'),
-  reason text NOT NULL,
+  reason text NOT NULL CHECK (length(trim(reason)) >= 12),
   performed_at timestamptz NOT NULL DEFAULT now()
 );
 DO $$
@@ -24,6 +25,11 @@ BEGIN
    RAISE EXCEPTION 'MFA policy column not deployed; abort recovery';
  END IF;
 END $$;
+CREATE TEMP TABLE pashloc_recovery_exactly_one (n integer NOT NULL CHECK (n = 1)) ON COMMIT DROP;
+INSERT INTO pashloc_recovery_exactly_one(n)
+SELECT count(*) FROM app_users
+WHERE tenant_id = :pilot_tenant_id AND id = :pilot_user_id
+  AND is_active = true AND pashloc_mfa_required = true;
 WITH target AS (
  SELECT id,tenant_id FROM app_users
  WHERE id = :pilot_user_id AND tenant_id = :pilot_tenant_id
@@ -38,7 +44,7 @@ WITH target AS (
 INSERT INTO pashloc_mfa_admin_recovery_audit
  (tenant_id,app_user_id,action,reason)
 SELECT tenant_id,id,'disable_pilot_mfa',
- 'Chairman-authorized emergency account-specific recovery'
+ :'recovery_reason'
 FROM disabled
 RETURNING tenant_id,app_user_id,performed_at;
 COMMIT;
