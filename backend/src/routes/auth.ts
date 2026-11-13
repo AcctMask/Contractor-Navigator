@@ -493,6 +493,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // First-time enrollment uses password verification without a Navigator JWT.
   // The restricted session is separate from all CRM bearer-token authorities.
   app.post("/auth/mfa/enrollment/start",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
     reply.header("Cache-Control","no-store, private")
     reply.header("Referrer-Policy","no-referrer")
     const origin=process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
@@ -520,6 +523,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   })
 
   app.post("/auth/mfa/enrollment/approve-device",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
     reply.header("Cache-Control","no-store, private")
     const b=request.body||{}
     if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.confirmation_code!=="string")
@@ -538,6 +544,9 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   })
 
   app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
     reply.header("Cache-Control","no-store, private")
     const b=request.body||{}
     if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.code!=="string")
