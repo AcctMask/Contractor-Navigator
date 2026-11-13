@@ -71,7 +71,7 @@ export async function login(email: string, password: string) {
 /** Completes a password-verified PashLoc challenge; only this response may
  * provide a usable Navigator session for an MFA-enabled account. */
 export async function verifyPashLocLogin(challengeId: string, code: string) {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\\d{6}$/.test(code)) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\d{6}$/.test(code)) {
     throw new Error("Enter a valid six-digit PashLoc code")
   }
   const res = await fetch(`${API_BASE}/auth/mfa/login/verify`, {
