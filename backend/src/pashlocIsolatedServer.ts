@@ -3,6 +3,7 @@
  * Never deploy this entrypoint against a production database.
  */
 import Fastify from "fastify"
+import {registerPashLocIsolatedReturningLoginRoutes} from "./routes/pashlocIsolatedReturningLogin"
 import {registerPashLocIsolatedClaimRoutes} from "./routes/pashlocIsolatedClaim"
 import {registerPashLocIsolatedBrowserApprovalRoutes} from "./routes/pashlocIsolatedBrowserApproval"
 import {registerPashLocIsolatedEnrollmentStartRoutes} from "./routes/pashlocIsolatedEnrollmentStart"
@@ -20,6 +21,7 @@ export async function buildPashLocIsolatedServer() {
  // No global wildcard CORS. Phone routes each enforce exact origin.
  app.get("/healthz",async()=>({ok:true,service:"pashloc-isolated"}))
  await registerPashLocIsolatedEnrollmentStartRoutes(app)
+ await registerPashLocIsolatedReturningLoginRoutes(app)
  await registerPashLocIsolatedClaimRoutes(app)
  await registerPashLocIsolatedBrowserApprovalRoutes(app)
  await registerPashLocIsolatedSyntheticRedeemRoutes(app)
