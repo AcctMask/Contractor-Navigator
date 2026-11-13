@@ -18,7 +18,7 @@ const pageEn=`<!doctype html><html lang="en"><meta charset="utf-8">
  <button value="enroll">Start enrollment</button>
  <button value="login">Sign in with saved account</button>
 </form>
-<p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden></p>
+<p id="enrollmentHint" hidden>First-time setup: scan this QR using the phone where you want PashLoc.</p><p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden></p><p id="loginHint" hidden><strong>PashLoc IV MFA required</strong><br>Open PashLoc on your enrolled device, read your six-digit code, and enter it below. No QR is needed.<br><a href="__PHONE_ORIGIN__/" target="_blank" rel="noopener noreferrer">Open PashLoc IV to get code</a></p>
 <form id="approve" method="post" hidden><label>Eight-digit approval <input name="code" inputmode="numeric" pattern="[0-9]{8}" required></label><button>Approve device</button></form>
 <form id="totp" method="post" hidden><label>Six-digit code <input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button>Verify code</button></form>
 <p><button id="signout" type="button" hidden>Sign out</button></p>
@@ -43,7 +43,7 @@ const translations: Record<string,string> = {
  "Sign out":"Cerrar sesión",
  "Too many attempts. Wait a minute and try again.":"Demasiados intentos. Espera un minuto y vuelve a intentarlo.",
  "Request declined. Check the code or start a new test.":"Solicitud rechazada. Revisa el código o inicia una nueva prueba.",
- "Scan to open your saved Navigator account, then enter its current code.":"Escanea para abrir tu cuenta guardada de Navigator e ingresa el código actual.",
+ "Open PashLoc IV on your enrolled device, then enter its current six-digit code. No QR is needed.":"Escanea para abrir tu cuenta guardada de Navigator e ingresa el código actual.",
  "Scan in PashLoc and enter its eight-digit code to approve this device.":"Escanea en PashLoc e ingresa su código de ocho dígitos para aprobar este dispositivo.",
  "Device approved. Finish retrieval in PashLoc, then enter its six-digit code here.":"Dispositivo aprobado. Completa la recepción en PashLoc e ingresa aquí su código de seis dígitos.",
  "Test session was not established.":"No se pudo iniciar la sesión de prueba.",
@@ -62,7 +62,7 @@ const byId=id=>document.getElementById(id);
 const translations=${JSON.stringify(translations)};
 const message=text=>{const known=Object.hasOwn(translations,text)?text:"Request declined. Check the code or start a new test.";byId("status").textContent=document.documentElement.lang==="es"?translations[known]:known;};
 let state=null,mode=null;
-const hide=()=>{for(const id of ["approve","totp","qr","signout"])byId(id).hidden=true;byId("qr").removeAttribute("src");};
+const hide=()=>{for(const id of ["approve","totp","qr","signout","loginHint","enrollmentHint"])byId(id).hidden=true;byId("qr").removeAttribute("src");};
 async function post(path,body){
  const headers={"Content-Type":"application/json"};
  if(state?.csrf_token)headers["X-Pashloc-Csrf"]=state.csrf_token;
@@ -85,9 +85,7 @@ run("credentials",async e=>{
  const fields=Object.fromEntries(new FormData(e.currentTarget));
  e.currentTarget.elements.password.value="";
  state=await post(mode==="login"?"/auth/mfa/login/start":"/auth/mfa/enrollment/start",fields);
- const qr=await post("/auth/mfa/browser-qr",{mode,challenge_id:state.challenge_id,pairing_ref:state.pairing_ref,account_id:state.account_id});
- byId("qr").src=qr.image;byId("qr").hidden=false;
- byId(mode==="login"?"totp":"approve").hidden=false;
+ if(mode==="enroll"){\n  const qr=await post("/auth/mfa/browser-qr",{mode,challenge_id:state.challenge_id,pairing_ref:state.pairing_ref,account_id:state.account_id});\n  byId("qr").src=qr.image;byId("qr").hidden=false;byId("enrollmentHint").hidden=false;\n }else byId("loginHint").hidden=false;\n byId(mode==="login"?"totp":"approve").hidden=false;
  message(mode==="login"?"Scan to open your saved Navigator account, then enter its current code.":"Scan in PashLoc and enter its eight-digit code to approve this device.");
 });
 run("approve",async e=>{
@@ -121,7 +119,7 @@ export function registerPashLocIsolatedBrowserUi(app:FastifyInstance){
   const selected=(req.query as {lang?:string})?.lang
   const language=selected==="es"||(!selected&&/^es(?:[-,;]|$)/i.test(req.headers["accept-language"]||""))?"es":"en"
   return reply.headers(headers).header("Content-Language",language).type("text/html; charset=utf-8")
-   .send(language==="es"?pageEs:pageEn)
+   .send((language==="es"?pageEs:pageEn).replace("__PHONE_ORIGIN__",phoneOrigin))
  })
  app.get("/isolated/mfa/browser.js",async(_req,reply)=>reply.headers(headers).type("application/javascript; charset=utf-8").send(script))
  app.post("/auth/mfa/browser-qr",async(req,reply)=>{
