@@ -12,7 +12,7 @@ const expectedDb="pashloc_iv_disposable_mfa_isolated"
 if(parsed.protocol!=="postgresql:" && parsed.protocol!=="postgres:")
  throw new Error("PostgreSQL URL required")
 if(decodeURIComponent(parsed.pathname.slice(1))!==expectedDb ||
-   !parsed.hostname.endsWith(".internal") ||
+   !parsed.hostname.startsWith("dpg-dbrfo7ec6qcc73dp7g00-a") ||
    process.env.NODE_ENV!=="development" ||
    process.env.PASHLOC_ISOLATED_CLAIM_API!=="enabled")
  throw new Error("Refusing non-isolated database or environment")
