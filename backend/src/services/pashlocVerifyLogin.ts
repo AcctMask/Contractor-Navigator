@@ -1,4 +1,4 @@
-/** Isolated returning-user verification and disposable session issuance. */
+/** Production-compatible one-time PashLoc verification. Never issues a session. */
 import { pool } from "../db/db"
 import { decryptPashLocSecret } from "./pashlocSecretCrypto"
 import { verifyPashLocTotp } from "./pashlocTotp"
@@ -28,6 +28,18 @@ export async function verifyPashLocReturningLogin(
       "update pashloc_mfa_challenges set attempts=attempts+1 where id=$1",
       [c.id]
     )
+    // Lock the account policy in the same transaction as OTP consumption.
+    // Recovery or account deactivation must invalidate pending challenges.
+    const policy = await client.query(
+      `select pashloc_mfa_required,pashloc_mfa_activated_at
+       from app_users where id=$1 and tenant_id=$2 and is_active=true
+       for share`,
+      [c.app_user_id,c.tenant_id]
+    )
+    if (policy.rowCount !== 1 || policy.rows[0].pashloc_mfa_required !== true ||
+        !policy.rows[0].pashloc_mfa_activated_at) {
+      await client.query("ROLLBACK"); return null
+    }
     const enrolled = await client.query(
       `select e.id,e.account_id,e.encrypted_secret,e.last_accepted_step
        from pashloc_mfa_enrollments e
