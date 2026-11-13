@@ -38,7 +38,7 @@ export async function verifyPashLocReturningLogin(
     )
     if (policy.rowCount !== 1 || policy.rows[0].pashloc_mfa_required !== true ||
         !policy.rows[0].pashloc_mfa_activated_at) {
-      await client.query("ROLLBACK"); return null
+      await client.query("COMMIT"); return null
     }
     const enrolled = await client.query(
       `select e.id,e.account_id,e.encrypted_secret,e.last_accepted_step
