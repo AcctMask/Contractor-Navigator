@@ -156,7 +156,7 @@ try {
  const phoneSecret=Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,"base64url")),decipher.final()]).toString("utf8")
  key.fill(0);shared.fill(0)
  const secretRow=await pool.query(
-  "select encrypted_secret,status from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
+  "select encrypted_secret,status,account_id from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
   [tenantId,userId])
  assert.equal(secretRow.rows[0].status,"pending")
  const isolatedSecret=decryptPashLocSecret(secretRow.rows[0].encrypted_secret,Number(tenantId),Number(userId))
@@ -173,7 +173,7 @@ try {
   challengeId:st.challenge_id,pairingId:st.pairing_ref,
   claimantToken:claim.claimant_proof,code:firstCode
  })
- assert.equal(confirmed?.accountId,"synthetic_"+String(persisted.rows[0].id),"first valid TOTP activates same account")
+ assert.equal(confirmed?.accountId,secretRow.rows[0].account_id,"first valid TOTP activates same account")
  const duplicate=await confirmPashLocFirstCode({
   challengeId:st.challenge_id,pairingId:st.pairing_ref,
   claimantToken:claim.claimant_proof,code:firstCode
