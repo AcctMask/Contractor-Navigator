@@ -1,6 +1,13 @@
 import type { FastifyInstance } from "fastify"
 import { createHmac, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
+import { createPashLocLoginChallenge } from "../services/pashlocChallenge"
+import { createPashLocPairing } from "../services/pashlocPairing"
+import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from "../services/pashlocRestrictedSessionStoreV1"
+import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
+import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
+import { confirmPashLocFirstCode } from "../services/pashlocConfirmEnrollment"
+import { verifyPashLocRestrictedCredentials } from "../services/pashlocRestrictedCredentialsV1"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
@@ -482,6 +489,72 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   })
 
+
+  // First-time enrollment uses password verification without a Navigator JWT.
+  // The restricted session is separate from all CRM bearer-token authorities.
+  app.post("/auth/mfa/enrollment/start",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store, private")
+    reply.header("Referrer-Policy","no-referrer")
+    const origin=process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
+    if(request.headers.origin!==origin ||
+       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase()!=="application/json")
+      return reply.code(403).send({ok:false,error:"forbidden"})
+    const b=request.body||{}
+    if(typeof b.tenant_slug!=="string"||typeof b.email!=="string"||typeof b.password!=="string")
+      return reply.code(400).send({ok:false,error:"invalid_request"})
+    const account=await verifyPashLocRestrictedCredentials({tenantSlug:b.tenant_slug,email:b.email,password:b.password})
+    if(!account)return reply.code(401).send({ok:false,error:"invalid_credentials"})
+    const policy=await pool.query(`select pashloc_mfa_required from app_users
+      where id=$1 and tenant_id=$2 and is_active=true`,[account.userId,account.tenantId])
+    if(policy.rowCount!==1||policy.rows[0].pashloc_mfa_required!==true)
+      return reply.code(403).send({ok:false,error:"mfa_not_enabled"})
+    const enrolled=await pool.query(`select id from pashloc_mfa_enrollments
+      where app_user_id=$1 and tenant_id=$2 and status='confirmed' limit 1`,[account.userId,account.tenantId])
+    if(enrolled.rowCount)return reply.code(409).send({ok:false,error:"already_enrolled"})
+    const challenge=await createPashLocLoginChallenge({tenantId:account.tenantId,userId:account.userId,purpose:"enroll"})
+    const pairing=await createPashLocPairing({challengeId:challenge.challengeId,tenantId:account.tenantId,userId:account.userId})
+    const restricted=await stageRestrictedBrowserSession({tenantId:account.tenantId,userId:account.userId,challengeId:challenge.challengeId,purpose:"enroll"})
+    reply.header("Set-Cookie",restrictedCookie(restricted.sessionId))
+    return {ok:true,challenge_id:challenge.challengeId,pairing_ref:pairing.pairingId,
+      csrf_token:restricted.csrfToken,expires_at:pairing.expiresAt}
+  })
+
+  app.post("/auth/mfa/enrollment/approve-device",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.confirmation_code!=="string")
+      return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    const result=await approvePashLocDeviceClaim({challengeId:session.challengeId,
+      pairingRef:b.pairing_ref,confirmationCode:b.confirmation_code,
+      tenantId:session.tenantId,userId:session.userId})
+    return result.approved?{ok:true,approved:true}:reply.code(409).send({ok:false})
+  })
+
+  app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.code!=="string")
+      return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    const confirmed=await confirmPashLocFirstCode({challengeId:session.challengeId,
+      pairingId:b.pairing_ref,tenantId:session.tenantId,userId:session.userId,code:b.code})
+    if(!confirmed)return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
+    reply.header("Set-Cookie",clearRestrictedCookie())
+    return {ok:true,enrollment_confirmed:true}
+  })
 
   // A successful, one-time PashLoc TOTP verification is the only path
   // from a restricted challenge to a normal Navigator bearer token.
