@@ -88,6 +88,39 @@ export async function verifyPashLocLogin(challengeId: string, code: string) {
   return json
 }
 
+export type PashLocEnrollment = {
+  challenge_id: string; pairing_ref: string; csrf_token: string;
+  restricted_session: string; expires_at: string
+}
+
+async function enrollmentRequest(path: string, payload: Record<string,string>, session?: PashLocEnrollment) {
+  const res = await fetch(`${API_BASE}/auth/mfa/enrollment/${path}`, {
+    method:"POST", cache:"no-store",
+    headers:{ "Content-Type":"application/json",
+      ...(session ? {"X-PashLoc-CSRF":session.csrf_token,
+        "X-PashLoc-Restricted-Session":session.restricted_session} : {}) },
+    body:JSON.stringify(payload)
+  })
+  const json=await res.json()
+  if(!res.ok || !json?.ok) throw new Error(json?.error || "PashLoc enrollment unavailable")
+  return json
+}
+
+export async function startPashLocEnrollment(tenantSlug:string,email:string,password:string):Promise<PashLocEnrollment> {
+  return enrollmentRequest("start",{tenant_slug:tenantSlug,email,password})
+}
+export async function approvePashLocEnrollment(session:PashLocEnrollment,confirmationCode:string) {
+  return enrollmentRequest("approve-device",{
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,
+    confirmation_code:confirmationCode
+  },session)
+}
+export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
+  return enrollmentRequest("confirm",{
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,code
+  },session)
+}
+
 export async function acceptInvite(inviteToken: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/accept-invite/${inviteToken}`, {
     method: "POST",
