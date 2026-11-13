@@ -76,17 +76,26 @@ function run(id,handler){
   e.preventDefault();
   const buttons=[...node.querySelectorAll("button")];
   for(const button of buttons)button.disabled=true;
-  try{await handler(e);}catch(error){message(error.message);}finally{for(const button of buttons)button.disabled=false;}
+  try{await handler(e);}catch(error){message(error.message);}finally{for(const button of buttons)button.disabled=false;updateEnrollmentAvailability();}
  });
 }
-const isPhoneSized=()=>window.matchMedia("(max-width: 767px) and (pointer: coarse)").matches;\nconst enrollButton=document.querySelector(\u0027#credentials button[value="enroll"]\u0027);\nfunction updateEnrollmentAvailability(){const blocked=isPhoneSized();enrollButton.disabled=blocked;byId("desktopOnly").hidden=!blocked;}\nupdateEnrollmentAvailability();window.addEventListener("resize",updateEnrollmentAvailability);\nrun("credentials",async e=>{\n if(e.submitter?.value!=="login"&&isPhoneSized()){byId("desktopOnly").hidden=false;message("First-time enrollment requires a Mac or PC.");return;}
+const isPhoneSized=()=>window.matchMedia("(max-width: 767px) and (pointer: coarse)").matches;
+const enrollButton=document.querySelector('#credentials button[value="enroll"]');
+function updateEnrollmentAvailability(){const blocked=isPhoneSized();enrollButton.disabled=blocked;byId("desktopOnly").hidden=!blocked;}
+updateEnrollmentAvailability();window.addEventListener("resize",updateEnrollmentAvailability);
+run("credentials",async e=>{
+ if(e.submitter?.value!=="login"&&isPhoneSized()){byId("desktopOnly").hidden=false;message("First-time enrollment requires a Mac or PC.");return;}
  mode=e.submitter?.value==="login"?"login":"enroll";
  state=null;hide();
  const fields=Object.fromEntries(new FormData(e.currentTarget));
  e.currentTarget.elements.password.value="";
  state=await post(mode==="login"?"/auth/mfa/login/start":"/auth/mfa/enrollment/start",fields);
- if(mode==="enroll"){\n  const qr=await post("/auth/mfa/browser-qr",{mode,challenge_id:state.challenge_id,pairing_ref:state.pairing_ref,account_id:state.account_id});\n  byId("qr").src=qr.image;byId("qr").hidden=false;byId("enrollmentHint").hidden=false;\n }else byId("loginHint").hidden=false;\n byId(mode==="login"?"totp":"approve").hidden=false;
- message(mode==="login"?"Scan to open your saved Navigator account, then enter its current code.":"Scan in PashLoc and enter its eight-digit code to approve this device.");
+ if(mode==="enroll"){
+  const qr=await post("/auth/mfa/browser-qr",{mode,challenge_id:state.challenge_id,pairing_ref:state.pairing_ref,account_id:state.account_id});
+  byId("qr").src=qr.image;byId("qr").hidden=false;byId("enrollmentHint").hidden=false;
+ }else byId("loginHint").hidden=false;
+ byId(mode==="login"?"totp":"approve").hidden=false;
+ message(mode==="login"?"Open PashLoc IV on your enrolled device, then enter its current six-digit code. No QR is needed.":"Scan in PashLoc and enter its eight-digit code to approve this device.");
 });
 run("approve",async e=>{
  const code=e.currentTarget.elements.code.value;e.currentTarget.reset();
