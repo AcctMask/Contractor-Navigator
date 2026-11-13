@@ -155,7 +155,7 @@ run("signout",async()=>{await post("/auth/mfa/login/sign-out",{});state=null;hid
 export function registerPashLocIsolatedBrowserUi(app:FastifyInstance){
  const navigatorOrigin=process.env.PASHLOC_ISOLATED_NAVIGATOR_ORIGIN!
  const phoneOrigin=process.env.PASHLOC_ISOLATED_PHONE_ORIGIN!
- const policy="default-src 'none'; script-src 'self'; connect-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+ const policy="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
  const headers={"Cache-Control":"no-store, private","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff","Content-Security-Policy":policy}
  app.get("/isolated/mfa",async(req,reply)=>{
   const selected=(req.query as {lang?:string})?.lang
