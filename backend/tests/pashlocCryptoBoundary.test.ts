@@ -1,0 +1,13 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import { randomBytes, generateKeyPairSync } from "node:crypto"
+import { encodeCanonicalContext, encryptSyntheticEnrollmentV1, publicKeyFingerprint } from "../src/services/pashlocEnrollV1Crypto"
+
+test("production context can be represented but synthetic delivery remains forbidden",()=>{
+ const sign=generateKeyPairSync("ec",{namedCurve:"prime256v1"}).publicKey.export({format:"jwk"})
+ const agree=generateKeyPairSync("ec",{namedCurve:"prime256v1"}).publicKey.export({format:"jwk"})
+ const token=()=>randomBytes(32).toString("base64url")
+ const context={version:"AA-PASHLOC-ENROLL-V1",environment:"production",application:"Navigator",tenantId:"1",userId:"2",accountId:token().slice(0,32),pairingRef:token(),claimId:token(),signingFingerprint:publicKeyFingerprint(sign),agreementFingerprint:publicKeyFingerprint(agree),redeemNonce:token(),approvalId:token().slice(0,32)}
+ assert.ok(encodeCanonicalContext(context).length>0)
+ assert.throws(()=>encryptSyntheticEnrollmentV1({syntheticSecret:"A".repeat(32),deviceEcdhPublicJwk:agree,context}),/forbidden in production/)
+})
