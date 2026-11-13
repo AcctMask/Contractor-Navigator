@@ -42,6 +42,9 @@ export async function buildPashLocIsolatedServer() {
  return app
 }
 if(process.argv[1]&&/pashlocIsolatedServer\.(?:ts|js)$/.test(process.argv[1])){
+ if(process.env.PASHLOC_ISOLATED_SCHEMA_INIT==="explicit-one-time") {
+  await import("../scripts/initializePashlocRenderIsolated")
+ }
  const app=await buildPashLocIsolatedServer()
  await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||8788)})
 }
