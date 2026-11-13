@@ -5,29 +5,62 @@ import {createHash} from "node:crypto"
 import {pool} from "../db/db"
 import {authorizeRestrictedBrowserRequest} from "../services/pashlocRestrictedSessionStoreV1"
 
-const pageEn=`<!doctype html><html lang="en"><meta charset="utf-8">
+const pageEn=`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Navigator · Isolated MFA</title>
-<nav aria-label="Language"><a href="?lang=en" lang="en">English</a> · <a href="?lang=es" lang="es">Español</a></nav>
-<h1>Navigator MFA acceptance test</h1>
-<p>Use your disposable test account only. This page is separate from production Navigator.</p>
+<title>Navigator · Secure Sign In</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#0b1424;color:#edf4ff}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at top,#182d4b 0%,#0b1424 58%);line-height:1.5}
+header{border-bottom:1px solid #30445e;padding:18px max(24px,calc((100vw - 960px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{font-size:20px;font-weight:800;letter-spacing:.01em}.brand span{color:#79b7ff}
+nav{font-size:13px}a{color:#9ccaff}main{width:min(100% - 32px,540px);margin:54px auto 64px}
+.eyebrow{font-size:12px;font-weight:750;letter-spacing:.12em;color:#9ccaff;text-transform:uppercase}
+h1{font-size:30px;line-height:1.2;margin:10px 0 10px}h2{font-size:20px;margin:0 0 12px}
+.sub{color:#b5c7df;margin:0 0 22px}.panel{border:1px solid #30445e;border-radius:16px;padding:28px;background:#192c46;box-shadow:0 18px 55px #0004}
+label{display:block;font-size:14px;font-weight:600;margin:16px 0 6px}input{display:block;width:100%;border:1px solid #637791;border-radius:8px;padding:12px 13px;background:#0d1b2e;color:#fff;font:inherit;margin-top:6px}
+input:focus{outline:2px solid #73b5ff;outline-offset:1px}button{font:inherit;font-weight:700;cursor:pointer;border:1px solid #56759a;border-radius:9px;padding:12px 17px;background:#263d5a;color:#f4f8ff}
+button.primary{background:#367bd5;border-color:#367bd5}button:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}.muted{font-size:13px;color:#b5c7df}
+details{margin-top:22px;color:#b5c7df;font-size:13px}summary{cursor:pointer}
+.notice{margin-top:20px;border:1px solid #58769b;border-radius:10px;padding:14px;background:#11233a}
+#qr{display:block;margin:20px auto;background:white;padding:10px;border-radius:12px;max-width:100%}
+#status:not(:empty){margin-top:20px;border-left:3px solid #7abaff;padding:12px 14px;background:#10233b;border-radius:5px}
+[hidden]{display:none!important}@media(max-width:600px){main{margin:28px auto}.panel{padding:20px}h1{font-size:26px}header{padding:16px}}
+</style></head><body>
+<header><div class="brand">Actual <span>Assistant</span> · Navigator</div><nav aria-label="Language"><a href="?lang=en" lang="en">English</a> · <a href="?lang=es" lang="es">Español</a></nav></header>
+<main><div class="eyebrow">Secure access · Test environment</div><h1>Sign in to Navigator</h1>
+<p class="sub">This is a safe demonstration of PashLoc verification. Your live Navigator account is not affected.</p>
+<section class="panel">
 <form id="credentials" method="post">
- <p><label>Test tenant <input name="tenant_slug" required></label></p>
- <p><label>Email <input name="email" type="email" required></label></p>
- <p><label>Password <input name="password" type="password" required></label></p>
- <button value="enroll">Start enrollment</button>
- <button value="login">Sign in with saved account</button>
+ <label>Email address<input name="email" type="email" autocomplete="username" required></label>
+ <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+ <details><summary>Test account settings</summary><label>Test organization<input name="tenant_slug" required autocomplete="off"></label><p class="muted">Only disposable engineering accounts work here.</p></details>
+ <div class="actions"><button class="primary" value="enroll">Set up PashLoc</button><button value="login">Sign in with PashLoc</button></div>
 </form>
-<p id="desktopOnly" hidden role="alert">For security, first-time enrollment must be started on a Mac or PC. Open Navigator on your computer, then scan its QR with your phone.</p>\n<p id="enrollmentHint" hidden>First-time setup: scan this QR using the phone where you want PashLoc.</p><p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden></p><p id="loginHint" hidden><strong>PashLoc IV MFA required</strong><br>Open PashLoc on your enrolled device, read your six-digit code, and enter it below. No QR is needed.<br><a href="__PHONE_ORIGIN__/" target="_blank" rel="noopener noreferrer">Open PashLoc IV to get code</a></p>
-<form id="approve" method="post" hidden><label>Eight-digit approval <input name="code" inputmode="numeric" pattern="[0-9]{8}" required></label><button>Approve device</button></form>
-<form id="totp" method="post" hidden><label>Six-digit code <input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button>Verify code</button></form>
+<p id="desktopOnly" class="notice" hidden role="alert">For security, first-time enrollment must be started on a Mac or PC. Open Navigator on your computer, then scan its QR with your phone.</p>
+<p id="enrollmentHint" class="notice" hidden>First-time setup: scan this QR using the phone where you want PashLoc.</p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden>
+<p id="loginHint" class="notice" hidden><strong>PashLoc IV MFA required</strong> Open PashLoc on your enrolled device, read your six-digit code, and enter it below. No QR is needed. <a href="__PHONE_ORIGIN__/" target="_blank" rel="noopener noreferrer">Open PashLoc IV to get code</a></p>
+<form id="approve" method="post" hidden><label>Eight-digit approval<input name="code" inputmode="numeric" pattern="[0-9]{8}" required></label><button class="primary">Approve device</button></form>
+<form id="totp" method="post" hidden><label>Six-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button class="primary">Verify code</button></form>
 <p><button id="signout" type="button" hidden>Sign out</button></p>
-<p id="status" role="status"></p>
-<script src="/isolated/mfa/browser.js" defer></script></html>`
+<p id="status" role="status" aria-live="polite"></p>
+</section><p class="muted" style="text-align:center;margin-top:18px">Isolated acceptance environment · No production customer data</p></main>
+<script src="/isolated/mfa/browser.js" defer></script></body></html>`
 
 const translations: Record<string,string> = {
  "Language":"Idioma",
- "Navigator · Isolated MFA":"Navigator · MFA aislada",
+ "Navigator · Secure Sign In":"Navigator · Acceso seguro",
+ "Sign in to Navigator":"Iniciar sesión en Navigator",
+ "Secure access · Test environment":"Acceso seguro · Entorno de prueba",
+ "This is a safe demonstration of PashLoc verification. Your live Navigator account is not affected.":"Esta es una demostración segura de PashLoc. Tu cuenta real de Navigator no se ve afectada.",
+ "Email address":"Correo electrónico",
+ "Test account settings":"Configuración de cuenta de prueba",
+ "Test organization":"Organización de prueba",
+ "Only disposable engineering accounts work here.":"Solo funcionan cuentas de ingeniería temporales.",
+ "Set up PashLoc":"Configurar PashLoc",
+ "Sign in with PashLoc":"Entrar con PashLoc",
+ "Isolated acceptance environment · No production customer data":"Entorno de prueba aislado · Sin datos de clientes reales",
+ "Open PashLoc IV on your enrolled device, then enter its current six-digit code. No QR is needed.":"Abre PashLoc IV en tu dispositivo registrado e introduce el código actual de seis dígitos. No necesitas un QR.",
  "Navigator MFA acceptance test":"Prueba de aceptación de MFA de Navigator",
  "Use your disposable test account only. This page is separate from production Navigator.":"Usa solo tu cuenta desechable de prueba. Esta página está separada de Navigator en producción.",
  "Test tenant":"Organización de prueba",
