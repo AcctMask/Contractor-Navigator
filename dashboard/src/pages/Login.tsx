@@ -47,12 +47,14 @@ export default function LoginPage() {
       )
 
       const result = await login(email.trim(), password)
+      let enrollmentChallenge = ""
       if (result?.mfa_required && result.enrollment_required) {
         const session = await startPashLocEnrollment(tenantSlug,email.trim(),password)
         setEnrollment(session)
+        enrollmentChallenge = session.challenge_id
       }
       if (result?.mfa_required) {
-        setMfaChallenge(result.challenge_id)
+        setMfaChallenge(result.enrollment_required ? enrollmentChallenge : result.challenge_id)
         setMfaEnrollmentRequired(Boolean(result.enrollment_required))
         setPassword("")
         setStatus(result.enrollment_required ? "PashLoc enrollment required" : "Enter your PashLoc code")
