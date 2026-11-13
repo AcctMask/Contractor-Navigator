@@ -864,6 +864,8 @@ export async function loginUserByTenantSlug(
 export async function completePashLocNavigatorLogin(challengeId: string, code: string) {
   if (typeof challengeId !== "string" || typeof code !== "string")
     throw new Error("Invalid MFA verification request")
+  // A verification request must never mint a token for a disabled MFA policy.
+  // The PashLoc verifier itself enforces challenge scope and one-time TOTP.
   const verified = await verifyPashLocReturningLogin(challengeId,code)
   if (!verified) throw new Error("Invalid or expired PashLoc code")
   // Recheck account and policy after the verifier's transaction completes.
