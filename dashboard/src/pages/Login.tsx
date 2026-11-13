@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login } from "../lib/auth"
+import { login, verifyPashLocLogin } from "../lib/auth"
 import {
   getTenantSlug,
   setTenantSlug,
@@ -22,6 +22,9 @@ export default function LoginPage() {
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [mfaChallenge, setMfaChallenge] = useState("")
+  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(false)
+  const [mfaCode, setMfaCode] = useState("")
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -39,12 +42,35 @@ export default function LoginPage() {
         )}...`,
       )
 
-      await login(email.trim(), password)
+      const result = await login(email.trim(), password)
+      if (result?.mfa_required) {
+        setMfaChallenge(result.challenge_id)
+        setMfaEnrollmentRequired(Boolean(result.enrollment_required))
+        setPassword("")
+        setStatus(result.enrollment_required ? "PashLoc enrollment required" : "Enter your PashLoc code")
+        return
+      }
       setStatus("Login successful")
       navigate("/")
     } catch (err: any) {
       setError(err?.message || "Login failed")
       setStatus("Login failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleMfaVerify(e: React.FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError("")
+    try {
+      await verifyPashLocLogin(mfaChallenge, mfaCode.trim())
+      setMfaChallenge("")
+      setMfaCode("")
+      navigate("/")
+    } catch (err: any) {
+      setError(err?.message || "PashLoc verification failed")
     } finally {
       setSubmitting(false)
     }
@@ -61,7 +87,24 @@ export default function LoginPage() {
           Sign in to manage invitations, jobs, and staff controls.
         </p>
 
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+        {mfaChallenge ? (
+          <form onSubmit={handleMfaVerify} style={{display:"grid",gap:"14px",marginTop:"18px"}}>
+            <h2 style={{margin:0}}>PashLoc security verification</h2>
+            {mfaEnrollmentRequired ? (
+              <p>First-time PashLoc enrollment is not available yet. Your account has not been signed in. Contact your administrator to complete secure enrollment.</p>
+            ) : (
+              <>
+                <p>Open PashLoc on your iPhone and enter the current six-digit code. You do not need to scan another QR.</p>
+                <label style={labelStyle} htmlFor="pashloc-code">Six-digit PashLoc code</label>
+                <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\\D/g,"").slice(0,6))}
+                  inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" required style={inputStyle}/>
+                <button type="submit" disabled={submitting || mfaCode.length!==6} style={buttonStyle}>Verify and open Navigator</button>
+              </>
+            )}
+            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false)}}>Back to sign in</button>
+            {error ? <div style={errorStyle}>{error}</div> : null}
+          </form>
+        ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
           <div>
             <label style={labelStyle}>
               Company Workspace
@@ -117,7 +160,7 @@ export default function LoginPage() {
           </div>
 
           {error ? <div style={errorStyle}>{error}</div> : null}
-        </form>
+        </form>}
       </div>
     </div>
   )
