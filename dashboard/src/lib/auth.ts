@@ -53,6 +53,9 @@ export async function login(email: string, password: string) {
   }
   if (json.mfa_required === true) {
     // No session is stored while the PashLoc challenge is pending.
+    if (json.enrollment_required === true) {
+      return json as {ok:true;mfa_required:true;enrollment_required:true;token:null}
+    }
     if (typeof json.challenge_id !== "string" || !json.challenge_id) {
       throw new Error("Secure sign-in is temporarily unavailable")
     }
