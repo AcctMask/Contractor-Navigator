@@ -87,7 +87,7 @@ jobs:
           DATABASE_URL: postgres://test:test@localhost:5432/navigator_mfa_test
           PASHLOC_DISPOSABLE_DB_TEST: 'yes'
           NODE_ENV: test
-        run: npx tsx --test tests/pashlocDatabase.integration.test.ts
+        run: npx tsx --test tests/pashlocDatabase.integration.test.ts tests/pashlocDeviceClaim.integration.test.ts
         working-directory: backend
       - name: Verify MFA default is off
         run: |
