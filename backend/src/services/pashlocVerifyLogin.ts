@@ -2,12 +2,12 @@
 import { pool } from "../db/db"
 import { decryptPashLocSecret } from "./pashlocSecretCrypto"
 import { verifyPashLocTotp } from "./pashlocTotp"
-import { createHash, randomBytes } from "node:crypto"
+import { createHash } from "node:crypto"
 
 export async function verifyPashLocReturningLogin(
   challengeId: string,
   suppliedCode: string
-): Promise<{ tenantId: number; userId: number; sessionToken: string } | null> {
+): Promise<{ tenantId: number; userId: number } | null> {
   if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\d{6}$/.test(suppliedCode)) return null
   const hash = createHash("sha256").update(challengeId).digest("hex")
   const client = await pool.connect()
@@ -59,14 +59,8 @@ export async function verifyPashLocReturningLogin(
        returning id`,[c.id]
     )
     if (consumed.rowCount !== 1) { await client.query("ROLLBACK"); return null }
-    const sessionToken = randomBytes(32).toString("base64url")
-    await client.query(
-      `insert into pashloc_mfa_disposable_sessions(session_hash,enrollment_id,expires_at)
-       values ($1,$2,now()+interval '10 minutes')`,
-      [createHash("sha256").update(sessionToken).digest("hex"),e.id]
-    )
     await client.query("COMMIT")
-    return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),sessionToken}
+    return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id)}
   } catch (error) {
     await client.query("ROLLBACK")
     throw error
