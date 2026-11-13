@@ -20,7 +20,7 @@ async function provisionHostedFixture() {
  process.env.PASHLOC_ISOLATED_SCHEMA_INIT!=="disabled"||process.env.PASHLOC_ISOLATED_CLAIM_API!=="enabled"||
  !["postgres:","postgresql:"].includes(url.protocol)||!["dpg-dbrfo7ec6qcc73dp7g00-a","dpg-dbrfo7ec6qcc73dp7g00-a.internal"].includes(url.hostname)||
  url.pathname!=="/"+dbName||decodeURIComponent(url.username)!==dbUser||
- !/^pashloc-hosted-[0-9a-f]{12}$/.test(tenant)||!new RegExp('^\\$2b\\$12\\$[./A-Za-z0-9]{53})throw Error("Fixture target rejected");
+ !/^pashloc-hosted-[0-9a-f]{12}$/.test(tenant)||hash.length!==60||!hash.startsWith("$2b$12$"))throw Error("Fixture target rejected");
  const {pool}=await import("./db/db");const client=await pool.connect();
  try{await client.query("BEGIN");await client.query("SET LOCAL search_path TO public, pg_catalog");
  await client.query("SELECT pg_advisory_xact_lock(20261113,45)");
@@ -73,7 +73,7 @@ if(process.argv[1]&&/pashlocIsolatedServer\.(?:ts|js)$/.test(process.argv[1])){
  const app=await buildPashLocIsolatedServer()
  await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||8788)})
 }
-).test(hash))throw Error("Fixture target rejected");
+ !/^pashloc-hosted-[0-9a-f]{12}$/.test(tenant)||hash.length!==60||!hash.startsWith("$2b$12$"))throw Error("Fixture target rejected");
  const {pool}=await import("./db/db");const client=await pool.connect();
  try{await client.query("BEGIN");await client.query("SET LOCAL search_path TO public, pg_catalog");
  await client.query("SELECT pg_advisory_xact_lock(20261113,45)");
