@@ -175,8 +175,8 @@ try {
  const login=await createPashLocLoginChallenge({
   tenantId:Number(tenantId),userId:Number(userId),purpose:"verify"
  })
- const replay=await verifyPashLocReturningLogin(login.challengeId,firstCode)
- assert.equal(replay,null,"already accepted activation step must not verify login")
+ const otpReplay=await verifyPashLocReturningLogin(login.challengeId,firstCode)
+ assert.equal(otpReplay,null,"already accepted activation step must not verify login")
  // Use a future step by updating only disposable test replay boundary.
  // No time spoofing in production: a current step is then accepted.
  await pool.query("update pashloc_mfa_enrollments set last_accepted_step=$3 where tenant_id=$1 and app_user_id=$2",
