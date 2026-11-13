@@ -38,5 +38,5 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
         working-directory: backend
-      - run: npx tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --skipLibCheck src/routes/auth.ts src/services/authService.ts src/services/pashloc*.ts
+      - run: npx tsc --noEmit --module commonjs --moduleResolution node --target es2020 --esModuleInterop --skipLibCheck src/routes/auth.ts src/services/authService.ts src/services/pashloc*.ts
         working-directory: backend
