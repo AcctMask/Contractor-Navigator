@@ -50,7 +50,7 @@ const makeDevice=()=>{
  const agreement=generateKeyPairSync("ec",{namedCurve:"prime256v1"})
  const publicSign=signing.publicKey.export({format:"jwk"}) as any
  const publicAgree=agreement.publicKey.export({format:"jwk"}) as any
- return {signing,publicSign,publicAgree}
+ return {signing,agreement,publicSign,publicAgree}
 }
 const signTranscript=(key:any,transcript:Buffer)=>sign("sha256",transcript,{key:key.privateKey,dsaEncoding:"ieee-p1363"}).toString("base64url")
 try {
@@ -141,19 +141,25 @@ try {
  assert.equal(scope.statusCode,401,"cross-tenant password attempt denied")
  // Test existing isolated TOTP custody/activation primitives with a disposable
  // secret. This is NOT the PashLoc-delivered synthetic envelope credential.
- const {stagePashLocEnrollment}=await import("../src/services/pashlocEnrollment")
  const {confirmPashLocFirstCode}=await import("../src/services/pashlocConfirmEnrollment")
- const {verifyPashLocReturningLogin}=await import("../src/services/pashlocVerifyLogin")
  const {decryptPashLocSecret}=await import("../src/services/pashlocSecretCrypto")
  const {pashLocTotpAtStep}=await import("../src/services/pashlocTotp")
- const {createPashLocLoginChallenge}=await import("../src/services/pashlocChallenge")
- const staged=await stagePashLocEnrollment({tenantId:Number(tenantId),userId:Number(userId)})
- assert.equal(staged.status,"pending")
+ const {createDecipheriv,hkdfSync,diffieHellman,createPublicKey}=await import("node:crypto")
+ const context=Buffer.from(envelope.context,"base64url")
+ const shared=diffieHellman({privateKey:device.agreement.privateKey,publicKey:createPublicKey({key:envelope.ephemeral_public_key_jwk,format:"jwk"})})
+ const key=Buffer.from(hkdfSync("sha256",shared,Buffer.from(envelope.salt,"base64url"),Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/HKDF-AES256GCM\\0"),context]),32))
+ const fingerprint=sha(JSON.stringify(envelope.ephemeral_public_key_jwk))
+ const decipher=createDecipheriv("aes-256-gcm",key,Buffer.from(envelope.nonce,"base64url"))
+ decipher.setAAD(Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/AES-GCM\\0"),context,Buffer.from(fingerprint,"hex")]))
+ decipher.setAuthTag(Buffer.from(envelope.tag,"base64url"))
+ const phoneSecret=Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext,"base64url")),decipher.final()]).toString("utf8")
+ key.fill(0);shared.fill(0)
  const secretRow=await pool.query(
   "select encrypted_secret,status from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
   [tenantId,userId])
  assert.equal(secretRow.rows[0].status,"pending")
  const isolatedSecret=decryptPashLocSecret(secretRow.rows[0].encrypted_secret,Number(tenantId),Number(userId))
+ assert.equal(isolatedSecret,phoneSecret,"phone envelope seed must equal encrypted Navigator seed")
  assert.ok(!secretRow.rows[0].encrypted_secret.includes(Buffer.from(isolatedSecret)))
  const nowStep=Math.floor(Date.now()/30000)
  const badFirst=await confirmPashLocFirstCode({
@@ -161,12 +167,12 @@ try {
   claimantToken:claim.claimant_proof,code:"000000"
  })
  assert.equal(badFirst,null,"incorrect first TOTP must not activate")
- const firstCode=pashLocTotpAtStep(isolatedSecret,nowStep)
+ const firstCode=pashLocTotpAtStep(phoneSecret,nowStep-1)
  const confirmed=await confirmPashLocFirstCode({
   challengeId:st.challenge_id,pairingId:st.pairing_ref,
   claimantToken:claim.claimant_proof,code:firstCode
  })
- assert.equal(confirmed?.accountId,staged.accountId,"first valid TOTP activates same account")
+ assert.equal(confirmed?.accountId,"synthetic_"+String(persisted.rows[0].id),"first valid TOTP activates same account")
  const duplicate=await confirmPashLocFirstCode({
   challengeId:st.challenge_id,pairingId:st.pairing_ref,
   claimantToken:claim.claimant_proof,code:firstCode
@@ -188,11 +194,8 @@ try {
   challenge_id:loginData.challenge_id,code:firstCode
  },loginHeaders)
  assert.equal(otpReplayResponse.statusCode,401,"already accepted enrollment step must not verify login")
- // Only disposable test data: adjust replay boundary to simulate a new TOTP step.
- await pool.query("update pashloc_mfa_enrollments set last_accepted_step=$3 where tenant_id=$1 and app_user_id=$2",
-  [tenantId,userId,nowStep-2])
  const verifiedResponse=await post("/auth/mfa/login/verify",{
-  challenge_id:loginData.challenge_id,code:firstCode
+  challenge_id:loginData.challenge_id,code:pashLocTotpAtStep(phoneSecret,nowStep)
  },loginHeaders)
  assert.equal(verifiedResponse.statusCode,200,verifiedResponse.body)
  assert.equal(verifiedResponse.json().mfa_verified,true)
