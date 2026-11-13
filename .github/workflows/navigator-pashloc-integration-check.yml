@@ -42,3 +42,41 @@ jobs:
         working-directory: backend
       - run: npx tsx --test tests/pashlocTotp.test.ts
         working-directory: backend
+
+  schema-dry-run:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: navigator_mfa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d navigator_mfa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: test
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: test
+      PGDATABASE: navigator_mfa_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create minimum Navigator tenant and user tables in disposable DB
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE tenants (id bigserial PRIMARY KEY);"
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE app_users (id bigserial PRIMARY KEY, tenant_id bigint NOT NULL REFERENCES tenants(id), is_active boolean NOT NULL DEFAULT true);"
+      - name: Apply PashLoc schema
+        run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - name: Verify schema is repeatable
+        run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - name: Verify MFA default is off
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO tenants DEFAULT VALUES;"
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO app_users(tenant_id) VALUES (1);"
+          psql -v ON_ERROR_STOP=1 -Atc "SELECT pashloc_mfa_required FROM app_users WHERE id=1" | grep -qx f
