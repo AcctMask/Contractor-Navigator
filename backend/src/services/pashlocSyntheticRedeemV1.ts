@@ -4,6 +4,7 @@
  */
 import {createHash,randomBytes} from "node:crypto"
 import {pool} from "../db/db"
+import {encryptPashLocSecret} from "./pashlocSecretCrypto"
 import {normalizedP256PublicKey,publicKeyFingerprint,redeemTranscript,verifyP1363Proof,encryptSyntheticEnrollmentV1} from "./pashlocEnrollV1Crypto"
 const sha=(v:string)=>createHash("sha256").update(v,"utf8").digest("hex")
 const token=/^[A-Za-z0-9_-]{43}$/
@@ -85,10 +86,19 @@ export async function redeemPashLocSynthetic(input:{
   const raw=randomBytes(32)
   const syntheticSecret=Array.from(raw,b=>alphabet[b&31]).join("")
   raw.fill(0)
+  const accountId="synthetic_"+String(p.id)
+  const userLock=await client.query(
+   "select id from app_users where id=$1 and tenant_id=$2 and is_active=true for update",
+   [p.app_user_id,p.tenant_id])
+  if(userLock.rowCount!==1){await client.query("ROLLBACK");return null}
+  const existing=await client.query(
+   "select id from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",
+   [p.tenant_id,p.app_user_id])
+  if(existing.rowCount){await client.query("ROLLBACK");return null}
   const context={
    version:"AA-PASHLOC-ENROLL-V1",environment:"isolated",
    application:"Navigator",tenantId:String(p.tenant_id),
-   userId:String(p.app_user_id),accountId:"synthetic_"+String(p.id),
+   userId:String(p.app_user_id),accountId,
    pairingRef:input.pairing_ref,claimId:input.claim_id,
    signingFingerprint:p.device_key_fingerprint,
    agreementFingerprint:p.device_ecdh_key_fingerprint,
@@ -97,6 +107,10 @@ export async function redeemPashLocSynthetic(input:{
   const envelope=encryptSyntheticEnrollmentV1({
    syntheticSecret,deviceEcdhPublicJwk:agree,context
   })
+  const encrypted=encryptPashLocSecret(syntheticSecret,Number(p.tenant_id),Number(p.app_user_id))
+  await client.query(
+   "insert into pashloc_mfa_enrollments (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status) values ($1,$2,$3,$4,'v1','pending')",
+   [p.tenant_id,p.app_user_id,accountId,encrypted])
   const update=await client.query(
    `update pashloc_mfa_pairings
        set synthetic_envelope=$2::jsonb,
