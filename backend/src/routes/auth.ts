@@ -558,10 +558,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       challengeId:b.challenge_id,purpose:"enroll"
     })
     if(!session)return reply.code(403).send({ok:false})
-    // The imported first-code verifier explicitly requires a synthetic
-    // disposable envelope. Never present it as production enrollment.
-    if (process.env.PASHLOC_PRODUCTION_CREDENTIAL_DELIVERY_VERIFIED !== "yes")
-      return reply.code(503).send({ok:false,error:"secure_credential_delivery_unavailable"})
+    // The current verifier accepts only isolated synthetic delivery.
+    // An environment toggle cannot turn synthetic enrollment into real MFA.
+    // Replace the verifier with reviewed genuine credential delivery before
+    // this route can confirm a production account.
+    return reply.code(503).send({ok:false,error:"secure_credential_delivery_unavailable"})
     const confirmed=await confirmPashLocFirstCode({challengeId:session.challengeId,
       pairingId:b.pairing_ref,tenantId:session.tenantId,userId:session.userId,code:b.code})
     if(!confirmed)return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
