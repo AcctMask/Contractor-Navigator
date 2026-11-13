@@ -75,6 +75,20 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
       - name: Verify schema is repeatable
         run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Exercise enrollment challenge and pairing in disposable DB
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/navigator_mfa_test
+          PASHLOC_DISPOSABLE_DB_TEST: 'yes'
+          NODE_ENV: test
+        run: npx tsx --test tests/pashlocDatabase.integration.test.ts
+        working-directory: backend
       - name: Verify MFA default is off
         run: |
           psql -v ON_ERROR_STOP=1 -c "INSERT INTO tenants DEFAULT VALUES;"
