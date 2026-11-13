@@ -920,7 +920,17 @@ export async function sendVoiceIntakeAlert(tenantSlug: string, jobId: number) {
     )
   }
 
+  // Emergency operational notification override. Preserve customer-facing
+  // identity and existing voice workflow; never route one tenant to another.
+  const emergencyRecipient =
+    tenantSlug === "g2g-roofing"
+      ? process.env.G2G_EMERGENCY_NOTIFICATION_TO
+      : tenantSlug === "actual-assistant"
+        ? process.env.AA_EMERGENCY_NOTIFICATION_TO
+        : undefined
+
   const alertEmailTo =
+    emergencyRecipient?.trim() ||
     tenantIdentityEmail ||
     settings.alert_email_to ||
     process.env.VOICE_INTAKE_EMAIL_TO ||
