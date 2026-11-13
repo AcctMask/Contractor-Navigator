@@ -10,6 +10,7 @@ import {
   listInvitationsByTenantSlug,
   listUsersByTenantSlug,
   loginUserByTenantSlug,
+  completePashLocNavigatorLogin,
   changePasswordForUser,
   getTenantIdBySlug,
   updateManagedUserRoleByTenantSlug,
@@ -481,6 +482,25 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   })
 
+
+  // A successful, one-time PashLoc TOTP verification is the only path
+  // from a restricted challenge to a normal Navigator bearer token.
+  app.post("/auth/mfa/login/verify", async (request: any, reply) => {
+    reply.header("Cache-Control","no-store, private")
+    const origin = String(request.headers.origin || "")
+    const allowedOrigin = process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
+    if (origin !== allowedOrigin ||
+        request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
+      return reply.code(403).send({ok:false,error:"forbidden"})
+    }
+    try {
+      const {challenge_id,code} = request.body || {}
+      const result = await completePashLocNavigatorLogin(challenge_id,code)
+      return {ok:true,...result}
+    } catch {
+      return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
+    }
+  })
 
   app.post("/auth/change-password", async (request: any, reply) => {
     try {
