@@ -119,8 +119,13 @@ try {
  assert.equal(retryChallenge.statusCode,200,retryChallenge.body)
  const retryNonce=retryChallenge.json().redeem_nonce
  assert.notEqual(retryNonce,firstNonce,"retry needs a fresh nonce")
- const retry=await post("/auth/mfa/device/redeem",redemptionBody(retryNonce),phoneHeaders)
- assert.equal(retry.statusCode,200,retry.body)
+ const concurrent=await Promise.all([
+  post("/auth/mfa/device/redeem",redemptionBody(retryNonce),phoneHeaders),
+  post("/auth/mfa/device/redeem",redemptionBody(retryNonce),phoneHeaders)
+ ])
+ assert.deepEqual(concurrent.map(r=>r.statusCode).sort((a,b)=>a-b),[200,409],
+  "concurrent use of one retry nonce must allow exactly one success")
+ const retry=concurrent.find(r=>r.statusCode===200)!
  assert.deepEqual(retry.json().envelope,envelope,"retry must not issue new secret")
  const retryReplay=await post("/auth/mfa/device/redeem",redemptionBody(retryNonce),phoneHeaders)
  assert.equal(retryReplay.statusCode,409,"retry nonce must be atomic single-use")
@@ -133,7 +138,7 @@ try {
   tenant_slug:"wrong-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
  },browserHeaders)
  assert.equal(scope.statusCode,401,"cross-tenant password attempt denied")
- console.log("PASS: disposable PostgreSQL migration; password-scoped enrollment; signed device claim; wrong approval; original browser approval; signed synthetic redemption; wrong signer; replay rejection; fresh same-device retry; immutable envelope; cross-tenant denial")
+ console.log("PASS: disposable PostgreSQL migration; password-scoped enrollment; signed device claim; wrong approval; original browser approval; signed synthetic redemption; wrong signer; replay rejection; fresh same-device retry; concurrent same-nonce serialization; immutable envelope; cross-tenant denial")
 } finally {
  await app.close()
  await pool.end()
