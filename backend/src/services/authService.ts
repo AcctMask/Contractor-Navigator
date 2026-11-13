@@ -942,12 +942,17 @@ export async function getCurrentUserFromToken(token: string) {
   // Later, verified MFA sessions must carry a server-verifiable assurance
   // marker; until that integration is complete, fail closed for pilot users.
   const policy = await pool.query(
-    `select pashloc_mfa_required from app_users
+    `select pashloc_mfa_required,pashloc_mfa_activated_at from app_users
      where id = $1 and tenant_id = $2 and is_active = true`,
     [decoded.sub, decoded.tenant_id]
   )
-  if (policy.rows[0]?.pashloc_mfa_required && decoded.mfa_verified !== true) {
-    throw new Error("PashLoc verification required")
+  if (policy.rows[0]?.pashloc_mfa_required) {
+    const activatedAt = policy.rows[0].pashloc_mfa_activated_at
+    if (decoded.mfa_verified !== true || !activatedAt ||
+        !Number.isSafeInteger(decoded.iat) ||
+        decoded.iat * 1000 < new Date(activatedAt).getTime() - 1000) {
+      throw new Error("PashLoc verification required")
+    }
   }
 
   return result.rows[0]
