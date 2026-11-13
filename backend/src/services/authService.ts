@@ -55,6 +55,13 @@ async function ensureAuthTables() {
       add column if not exists preferred_language text not null default 'en'
   `)
 
+  // Pilot MFA is disabled for every existing account until explicitly activated.
+  await pool.query(`
+    alter table app_users
+      add column if not exists pashloc_mfa_required boolean not null default false,
+      add column if not exists pashloc_mfa_activated_at timestamptz null
+  `)
+
   await pool.query(`
     create table if not exists user_invitations (
       id bigserial primary key,
@@ -816,6 +823,18 @@ export async function loginUserByTenantSlug(
     is_active: row.is_active,
   }
 
+  // Fail closed before any usable Navigator session is issued.
+  // A restricted challenge and PashLoc verification endpoint must be wired
+  // before enabling this flag for any production user.
+  const mfaPolicy = await pool.query(
+    `select pashloc_mfa_required from app_users
+     where id = $1 and tenant_id = $2 and is_active = true`,
+    [user.id, user.tenant_id]
+  )
+  if (mfaPolicy.rows[0]?.pashloc_mfa_required) {
+    return { user, mfa_required: true, token: null }
+  }
+
   const token = signToken(user)
 
   return {
@@ -882,6 +901,18 @@ export async function getCurrentUserFromToken(token: string) {
 
   if (!result.rowCount) {
     throw new Error("User not found or account inactive")
+  }
+
+  // Existing pre-MFA sessions cannot bypass an activated account policy.
+  // Later, verified MFA sessions must carry a server-verifiable assurance
+  // marker; until that integration is complete, fail closed for pilot users.
+  const policy = await pool.query(
+    `select pashloc_mfa_required from app_users
+     where id = $1 and tenant_id = $2 and is_active = true`,
+    [decoded.sub, decoded.tenant_id]
+  )
+  if (policy.rows[0]?.pashloc_mfa_required) {
+    throw new Error("PashLoc verification required")
   }
 
   return result.rows[0]
