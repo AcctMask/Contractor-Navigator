@@ -172,19 +172,39 @@ try {
   claimantToken:claim.claimant_proof,code:firstCode
  })
  assert.equal(duplicate,null,"duplicate activation must fail")
- const login=await createPashLocLoginChallenge({
-  tenantId:Number(tenantId),userId:Number(userId),purpose:"verify"
- })
- const otpReplay=await verifyPashLocReturningLogin(login.challengeId,firstCode)
- assert.equal(otpReplay,null,"already accepted activation step must not verify login")
- // Use a future step by updating only disposable test replay boundary.
- // No time spoofing in production: a current step is then accepted.
+ const loginStarted=await post("/auth/mfa/login/start",{
+  tenant_slug:"isolated-tenant",email:"isolated@example.test",password:"Disposable-Test-Password!9"
+ },browserHeaders)
+ assert.equal(loginStarted.statusCode,200,loginStarted.body)
+ const loginData=loginStarted.json()
+ assert.equal(loginData.requires_mfa,true)
+ const loginCookie=String(loginStarted.headers["set-cookie"]).split(";")[0]
+ const loginHeaders={...browserHeaders,cookie:loginCookie,"x-pashloc-csrf":loginData.csrf_token}
+ const invalidCsrf=await post("/auth/mfa/login/verify",{
+  challenge_id:loginData.challenge_id,code:firstCode
+ },{...loginHeaders,"x-pashloc-csrf":"wrong"})
+ assert.equal(invalidCsrf.statusCode,403,"incorrect CSRF must be denied")
+ const otpReplayResponse=await post("/auth/mfa/login/verify",{
+  challenge_id:loginData.challenge_id,code:firstCode
+ },loginHeaders)
+ assert.equal(otpReplayResponse.statusCode,401,"already accepted enrollment step must not verify login")
+ // Only disposable test data: adjust replay boundary to simulate a new TOTP step.
  await pool.query("update pashloc_mfa_enrollments set last_accepted_step=$3 where tenant_id=$1 and app_user_id=$2",
   [tenantId,userId,nowStep-2])
- const verified=await verifyPashLocReturningLogin(login.challengeId,firstCode)
- assert.equal(verified?.tenantId,Number(tenantId))
- const reused=await verifyPashLocReturningLogin(login.challengeId,firstCode)
- assert.equal(reused,null,"consumed login challenge must not be reusable")
+ const verifiedResponse=await post("/auth/mfa/login/verify",{
+  challenge_id:loginData.challenge_id,code:firstCode
+ },loginHeaders)
+ assert.equal(verifiedResponse.statusCode,200,verifiedResponse.body)
+ assert.equal(verifiedResponse.json().mfa_verified,true)
+ assert.equal(verifiedResponse.json().session_issued,false,"isolated MFA must not issue Navigator JWT")
+ const reusedResponse=await post("/auth/mfa/login/verify",{
+  challenge_id:loginData.challenge_id,code:firstCode
+ },loginHeaders)
+ assert.equal(reusedResponse.statusCode,403,"consumed login challenge must not be reusable")
+ const badLogin=await post("/auth/mfa/login/start",{
+  tenant_slug:"isolated-tenant",email:"isolated@example.test",password:"incorrect-password"
+ },browserHeaders)
+ assert.equal(badLogin.statusCode,401)
  console.log("PASS: disposable encrypted TOTP custody; wrong first code rejected; first valid activation; duplicate rejected; returning login challenge; TOTP replay rejection; consumed challenge rejection")
  console.log("PASS: disposable PostgreSQL migration; password-scoped enrollment; signed device claim; wrong approval; original browser approval; signed synthetic redemption; wrong signer; replay rejection; fresh same-device retry; concurrent same-nonce serialization; immutable envelope; cross-tenant denial")
 } finally {
