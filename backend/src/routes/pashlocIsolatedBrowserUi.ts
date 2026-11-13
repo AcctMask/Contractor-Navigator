@@ -18,7 +18,7 @@ const pageEn=`<!doctype html><html lang="en"><meta charset="utf-8">
  <button value="enroll">Start enrollment</button>
  <button value="login">Sign in with saved account</button>
 </form>
-<p id="enrollmentHint" hidden>First-time setup: scan this QR using the phone where you want PashLoc.</p><p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden></p><p id="loginHint" hidden><strong>PashLoc IV MFA required</strong><br>Open PashLoc on your enrolled device, read your six-digit code, and enter it below. No QR is needed.<br><a href="__PHONE_ORIGIN__/" target="_blank" rel="noopener noreferrer">Open PashLoc IV to get code</a></p>
+<p id="desktopOnly" hidden role="alert">For security, first-time enrollment must be started on a Mac or PC. Open Navigator on your computer, then scan its QR with your phone.</p>\n<p id="enrollmentHint" hidden>First-time setup: scan this QR using the phone where you want PashLoc.</p><p><img id="qr" alt="Scan this QR in PashLoc" width="256" height="256" hidden></p><p id="loginHint" hidden><strong>PashLoc IV MFA required</strong><br>Open PashLoc on your enrolled device, read your six-digit code, and enter it below. No QR is needed.<br><a href="__PHONE_ORIGIN__/" target="_blank" rel="noopener noreferrer">Open PashLoc IV to get code</a></p>
 <form id="approve" method="post" hidden><label>Eight-digit approval <input name="code" inputmode="numeric" pattern="[0-9]{8}" required></label><button>Approve device</button></form>
 <form id="totp" method="post" hidden><label>Six-digit code <input name="code" inputmode="numeric" pattern="[0-9]{6}" required></label><button>Verify code</button></form>
 <p><button id="signout" type="button" hidden>Sign out</button></p>
@@ -60,7 +60,7 @@ const pageEs=localizePage()
 const script=`
 const byId=id=>document.getElementById(id);
 const translations=${JSON.stringify(translations)};
-const message=text=>{const known=Object.hasOwn(translations,text)?text:"Request declined. Check the code or start a new test.";byId("status").textContent=document.documentElement.lang==="es"?translations[known]:known;};
+const message=text=>{const known=Object.hasOwn(translations,text)?text:(text==="First-time enrollment requires a Mac or PC."?text:"Request declined. Check the code or start a new test.");byId("status").textContent=document.documentElement.lang==="es"?translations[known]:known;};
 let state=null,mode=null;
 const hide=()=>{for(const id of ["approve","totp","qr","signout","loginHint","enrollmentHint"])byId(id).hidden=true;byId("qr").removeAttribute("src");};
 async function post(path,body){
@@ -79,7 +79,7 @@ function run(id,handler){
   try{await handler(e);}catch(error){message(error.message);}finally{for(const button of buttons)button.disabled=false;}
  });
 }
-run("credentials",async e=>{
+const isPhoneSized=()=>window.matchMedia("(max-width: 767px) and (pointer: coarse)").matches;\nconst enrollButton=document.querySelector(\u0027#credentials button[value="enroll"]\u0027);\nfunction updateEnrollmentAvailability(){const blocked=isPhoneSized();enrollButton.disabled=blocked;byId("desktopOnly").hidden=!blocked;}\nupdateEnrollmentAvailability();window.addEventListener("resize",updateEnrollmentAvailability);\nrun("credentials",async e=>{\n if(e.submitter?.value!=="login"&&isPhoneSized()){byId("desktopOnly").hidden=false;message("First-time enrollment requires a Mac or PC.");return;}
  mode=e.submitter?.value==="login"?"login":"enroll";
  state=null;hide();
  const fields=Object.fromEntries(new FormData(e.currentTarget));
