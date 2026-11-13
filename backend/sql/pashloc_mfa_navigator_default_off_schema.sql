@@ -77,7 +77,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS pashloc_mfa_delivery_pairing_unique
 CREATE TABLE IF NOT EXISTS pashloc_mfa_device_claim_nonces (
  id bigserial PRIMARY KEY,
  pairing_hash text NOT NULL,
- nonce_hash text NOT NULL,
+ nonce_hash text NOT NULL UNIQUE,
  expires_at timestamptz NOT NULL,
  consumed_at timestamptz,
  created_at timestamptz NOT NULL DEFAULT now(),
