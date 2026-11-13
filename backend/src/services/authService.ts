@@ -159,7 +159,7 @@ export function signToken(user: AppUser, mfaVerified = false) {
 }
 
 export function verifyToken(token: string) {
-  return jwt.verify(token, JWT_SECRET) as {
+  return jwt.verify(token, JWT_SECRET) as unknown as {
     sub: number
     tenant_id: number
     email: string
@@ -825,6 +825,7 @@ export async function loginUserByTenantSlug(
     mobile_phone: row.mobile_phone,
     role: row.role,
     is_active: row.is_active,
+    financials_authorized: Boolean(row.financials_authorized),
   }
 
   // Account-specific MFA: password alone cannot mint a Navigator JWT.
