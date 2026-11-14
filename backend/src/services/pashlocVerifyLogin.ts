@@ -46,7 +46,7 @@ export async function verifyPashLocReturningLogin(
        join app_users u on u.id=e.app_user_id and u.tenant_id=e.tenant_id
        where e.tenant_id=$1 and e.app_user_id=$2
          and e.status='confirmed' and u.is_active=true
-         and e.delivery_pairing_id is not null and e.encryption_key_version='isolated-account-v1'
+         and e.delivery_pairing_id is not null and e.encryption_key_version='navigator-account-v1'
        for update of e`,
       [c.tenant_id,c.app_user_id]
     )
