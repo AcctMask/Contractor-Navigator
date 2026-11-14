@@ -3,6 +3,7 @@
  * Never use against a production database.
  */
 import Fastify from "fastify"
+import cors from "@fastify/cors"
 import { registerAuthRoutes } from "./routes/auth"
 
 const allowed = new Set([
@@ -40,6 +41,15 @@ export function assertMfaAcceptanceEnvironment(env: NodeJS.ProcessEnv) {
 export async function buildMfaAcceptanceServer() {
  assertMfaAcceptanceEnvironment(process.env)
  const app = Fastify({logger:true,bodyLimit:16*1024})
+ // The protected Navigator browser and PashLoc phone are distinct origins.
+ // Only these pinned origins may make cross-origin MFA requests; never reflect arbitrary origins.
+ await app.register(cors, {
+   origin: [process.env.APP_BASE_URL!, process.env.PASHLOC_PHONE_ORIGIN!],
+   methods: ["POST"],
+   allowedHeaders: ["Content-Type", "X-PashLoc-CSRF", "X-PashLoc-Restricted-Session"],
+   credentials: false,
+   strictPreflight: true,
+ })
  app.addHook("onRequest", async (req, reply) => {
    const pathname = new URL(req.url,"http://localhost").pathname
    if (req.method === "GET" && pathname === "/healthz") return
