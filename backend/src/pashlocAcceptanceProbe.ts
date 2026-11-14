@@ -19,7 +19,16 @@ app.get("/healthz", async (_req, reply) => {
     )
     if (Object.values(result.rows[0] || {}).some(value => value !== true))
       return reply.code(503).send({ ok: false })
-    return { ok: true, disposable_database_verified: true, schema_inspected: false }
+    const schema = await pool.query(
+      "select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name"
+    )
+    const tables = schema.rows.map((r: { table_name: string }) => r.table_name)
+    return { ok: true, disposable_database_verified: true, schema_inspected: true,
+      table_count: tables.length, required_table_presence: Object.fromEntries(
+        ["tenants", "app_users", "pashloc_enrollments", "pashloc_challenges",
+         "pashloc_pairings", "pashloc_nonces", "pashloc_sessions",
+         "pashloc_request_limits"].map(name => [name, tables.includes(name)])
+      ) }
   } catch {
     return reply.code(503).send({ ok: false })
   }
