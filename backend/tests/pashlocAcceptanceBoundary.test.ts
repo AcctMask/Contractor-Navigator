@@ -59,7 +59,7 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
  ]
  const queries: Array<{sql:string;params:any[]}> = []
  ;(pool as any).query = async (sql: string, params: any[] = []) => {
-  const normalized = String(sql).replace(/\\s+/g," ").toLowerCase()
+  const normalized = String(sql).replace(/\s+/g," ").toLowerCase()
   queries.push({sql:normalized,params})
   if (normalized.includes("select id from tenants where slug")) {
    const id = tenants[String(params[0])]
@@ -79,7 +79,7 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
    const tenantId=Number(params[0])
    return {rows:[{id:tenantId*10,kind:"manual_note",customer_name:"Tenant "+tenantId}],rowCount:1}
   }
-  if (/^\\s*(create|alter) table|^\\s*create index|^\\s*alter table/.test(normalized)) return {rows:[],rowCount:0}
+  if (/^\s*(create|alter) table|^\s*create index|^\s*alter table/.test(normalized)) return {rows:[],rowCount:0}
   throw new Error("Unexpected test SQL: "+normalized.slice(0,140))
  }
  const app = Fastify()
