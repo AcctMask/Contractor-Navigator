@@ -24,6 +24,17 @@ test("acceptance server rejects missing security controls and production databas
   "APP_BASE_URL","PASHLOC_PHONE_ORIGIN"] as const) {
    assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,[key]:""}),key)
  }
+ for (const badOrigin of [
+  "http://navigator-acceptance.example.test",
+  "https://navigator-acceptance.example.test.evil.invalid",
+  "https://navigator-acceptance.example.test/path",
+  "https://navigator-acceptance.example.test?mode=unsafe",
+  "https://user:password@navigator-acceptance.example.test",
+  "https://navigator-acceptance.example.test/#fragment"
+ ]) {
+  assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,APP_BASE_URL:badOrigin}),badOrigin)
+ }
+ assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,PASHLOC_PHONE_ORIGIN:valid.APP_BASE_URL}))
  assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,NODE_ENV:"production"}))
  assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,DATABASE_URL:"postgresql://acceptance@prod.internal/navigator"}))
  assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,DATABASE_URL:"postgresql://acceptance@prod.internal/pashloc_acceptance_disposable_backup"}))
