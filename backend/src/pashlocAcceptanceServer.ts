@@ -6,7 +6,7 @@ import Fastify from "fastify"
 import cors from "@fastify/cors"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerAdminRoutes } from "./routes/admin"
-import { registerCalendarRoutes } from "./routes/calendar"
+import { registerCalendarReadRoute } from "./routes/calendar"
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { pool } from "./db/db"
 import { registerPashLocAcceptanceRateLimits } from "./services/pashlocAcceptanceRateLimit"
@@ -118,7 +118,7 @@ export async function buildMfaAcceptanceServer() {
  // Reuse the established Navigator handlers; the onRequest allowlist blocks
  // every other route, including write operations, before handler execution.
  await registerAdminRoutes(app)
- await registerCalendarRoutes(app)
+ registerCalendarReadRoute(app)
  await registerPlatformProvisioningRoutes(app)
  return app
 }
