@@ -122,7 +122,7 @@ export async function approvePashLocEnrollment(session:PashLocEnrollment,confirm
   },session)
 }
 export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
-  if (!/^\\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
+  if (!/^\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
   const result = await enrollmentRequest("confirm",{
     challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,code
   },session)
