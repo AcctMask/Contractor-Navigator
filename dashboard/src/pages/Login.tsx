@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { login, verifyPashLocLogin, startPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment } from "../lib/auth"
 import type { PashLocEnrollment } from "../lib/auth"
@@ -29,10 +29,40 @@ export default function LoginPage() {
   const [enrollment, setEnrollment] = useState<PashLocEnrollment | null>(null)
   const [deviceCode, setDeviceCode] = useState("")
   const [deviceApproved, setDeviceApproved] = useState(false)
+  const qrContainer = useRef<HTMLDivElement | null>(null)
+  const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
     ? `https://pashloc-iv.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
     : ""
 
+  useEffect(() => {
+    if (!pashlocPhoneUrl || !qrContainer.current) return
+    const container = qrContainer.current
+    container.replaceChildren()
+    setQrError("")
+    let cancelled = false
+    const renderQr = () => {
+      if (cancelled || !container.isConnected) return
+      try {
+        const qr = (window as Window & { QRCode?: new (node: HTMLElement, options: {text:string;width:number;height:number;colorDark:string;colorLight:string;correctLevel:number}) => unknown }).QRCode
+        if (!qr) throw new Error("Local QR generator unavailable")
+        new qr(container, { text: pashlocPhoneUrl, width: 224, height: 224,
+          colorDark: "#000000", colorLight: "#ffffff", correctLevel: 2 })
+        const img = container.querySelector("img")
+        if (img) img.alt = "PashLoc Navigator enrollment QR code"
+      } catch {
+        setQrError("QR code unavailable. Use the secure enrollment link below.")
+      }
+    }
+    const script = document.createElement("script")
+    script.src = "/vendor/qrcode.js"
+    script.async = true
+    script.onload = renderQr
+    script.onerror = () => { if (!cancelled) setQrError("QR code unavailable. Use the secure enrollment link below.") }
+    if ((window as Window & { QRCode?: unknown }).QRCode) renderQr()
+    else document.head.appendChild(script)
+    return () => { cancelled = true; script.remove(); container.replaceChildren() }
+  }, [pashlocPhoneUrl])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -106,21 +136,23 @@ export default function LoginPage() {
             <h2 style={{margin:0}}>PashLoc security verification</h2>
             {mfaEnrollmentRequired ? (
               <div style={{display:"grid",gap:"12px"}}>
-                <p>Connect your PashLoc iPhone account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
+                <p>Connect your PashLoc account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
                 {enrollment ? <>
                   <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
                   <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
-                  <p>On your iPhone, open this PashLoc enrollment link. The link identifies the pending pairing; your Navigator password and security secret are never placed in it.</p>
+                  <p>Scan this QR using the device where you use PashLoc, or open the secure enrollment link there. The QR contains only the short-lived pairing reference—not your password or verification secret.</p>
+                  <div ref={qrContainer} role="img" aria-label="PashLoc enrollment QR code" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
+                  {qrError ? <p role="status">{qrError}</p> : null}
                   <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{color:"#a9d4ff",overflowWrap:"anywhere"}}>Open PashLoc enrollment</a>
                   <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={async()=>{
-                    try{await navigator.clipboard.writeText(pashlocPhoneUrl);setStatus("PashLoc enrollment link copied. Open it on your iPhone.")}catch{setError("Unable to copy the link. Open the link directly instead.")}
-                  }}>Copy iPhone enrollment link</button>
-                  <p>Open PashLoc on your iPhone to claim this pairing. Enter the eight-digit number shown on the phone here.</p>
+                    try{await navigator.clipboard.writeText(pashlocPhoneUrl);setStatus("PashLoc enrollment link copied. Open it on your PashLoc device.")}catch{setError("Unable to copy the link. Open the link directly instead.")}
+                  }}>Copy enrollment link</button>
+                  <p>Open PashLoc on your other device to claim this pairing. Enter the eight-digit number shown on the phone here.</p>
                   <label style={labelStyle}>Eight-digit device approval</label>
                   <input value={deviceCode} onChange={e=>setDeviceCode(e.target.value.replace(/\D/g,"").slice(0,8))} inputMode="numeric" maxLength={8} style={inputStyle}/>
                   <button type="button" style={buttonStyle} disabled={submitting || deviceCode.length!==8} onClick={async()=>{
                     setSubmitting(true);setError("");try{await approvePashLocEnrollment(enrollment,deviceCode);setDeviceApproved(true)}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
-                  }}>Approve this iPhone</button>
+                  }}>Approve this device</button>
                   {deviceApproved ? <>
                     <label style={labelStyle}>First six-digit PashLoc code</label>
                     <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
@@ -132,7 +164,7 @@ export default function LoginPage() {
               </div>
             ) : (
               <>
-                <p>Open PashLoc on your iPhone and enter the current six-digit code. You do not need to scan another QR.</p>
+                <p>Open PashLoc on your enrolled device and enter the current six-digit code. You do not need to scan another QR.</p>
                 <label style={labelStyle} htmlFor="pashloc-code">Six-digit PashLoc code</label>
                 <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))}
                   inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" required style={inputStyle}/>
