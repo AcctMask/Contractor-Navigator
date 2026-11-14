@@ -116,27 +116,70 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
 })
 
 
-test("acceptance route gate rejects writes and unrelated CRM paths", async () => {
+test("acceptance startup is read-only; calendar GET authenticates and isolates tenants; writes and unrelated routes denied", async () => {
  const { pool } = await import("../src/db/db")
  const { buildMfaAcceptanceServer } = await import("../src/pashlocAcceptanceServer")
+ const { signToken } = await import("../src/services/authService")
+ const jwt = (await import("jsonwebtoken")).default
  const originalQuery=pool.query
  const oldEnv={...process.env}
  Object.assign(process.env,valid)
- ;(pool as any).query=async (sql:string) => {
-  if(String(sql).includes("to_regclass")) return {rows:[{
+ const users=[
+  {id:11,tenant_id:101,email:"a@example.invalid",full_name:"A",role:"admin",is_active:true,financials_authorized:false},
+  {id:22,tenant_id:202,email:"b@example.invalid",full_name:"B",role:"admin",is_active:true,financials_authorized:false},
+  {id:33,tenant_id:101,email:"owner@example.invalid",full_name:"Owner",role:"platform_owner",is_active:true,financials_authorized:false}
+ ]
+ const sqlSeen:Array<{sql:string,params:any[]}>=[]
+ ;(pool as any).query=async (sql:string,params:any[]=[]) => {
+  const normalized=String(sql).replace(/\s+/g," ").trim().toLowerCase()
+  sqlSeen.push({sql:normalized,params})
+  if(normalized.includes("to_regclass")) return {rows:[{
    tenants:true,users:true,enrollments:true,challenges:true,pairings:true,
    claim_nonces:true,restricted_sessions:true,request_limits:true,
    default_off_column:true,genuine_envelope_column:true
   }],rowCount:1}
-  throw Error("Unexpected acceptance gate query")
+  if(normalized.includes("select id from tenants where slug")) {
+   const id=({"acceptance-a":101,"acceptance-b":202} as Record<string,number>)[String(params[0])]
+   return {rows:id?[{id}]:[],rowCount:id?1:0}
+  }
+  if(normalized.includes("from app_users") && normalized.includes("select id, tenant_id")) {
+   const u=users.find(u=>u.id===Number(params[0])&&u.tenant_id===Number(params[1]))
+   return {rows:u?[u]:[],rowCount:u?1:0}
+  }
+  if(normalized.includes("select pashloc_mfa_required")) return {rows:[{pashloc_mfa_required:false}],rowCount:1}
+  if(normalized.includes("from calendar_events ce") && normalized.includes("where ce.tenant_id = $1")) {
+   const id=Number(params[0])
+   return {rows:[{id:id*10,tenant_id:id,title:"Tenant "+id}],rowCount:1}
+  }
+  throw Error("Unexpected acceptance SQL: "+normalized.slice(0,140))
  }
  let app:any
  try {
   app=await buildMfaAcceptanceServer()
+  assert.ok(sqlSeen.length>0,"startup checks schema")
+  assert.ok(sqlSeen.every(q=>q.sql.startsWith("select")),"startup must execute SELECT only")
+  const call=(tenant:string,authorization?:string)=>app.inject({method:"GET",url:"/calendar/"+tenant+"/events",headers:authorization?{authorization}:{}})
+  const token=(u:typeof users[number])=>"Bearer "+signToken(u,true)
+  assert.equal((await call("acceptance-a")).statusCode,401)
+  assert.equal((await call("acceptance-a","Bearer invalid")).statusCode,401)
+  const expired=jwt.sign({sub:11,tenant_id:101,role:"admin",exp:1},process.env.JWT_SECRET||"contractor-autopilot-local-secret")
+  assert.equal((await call("acceptance-a","Bearer "+expired)).statusCode,401)
+  const own=await call("acceptance-a",token(users[0]))
+  assert.equal(own.statusCode,200,"own calendar: "+own.body)
+  assert.equal(own.json().events[0].id,1010)
+  assert.equal((await call("acceptance-b",token(users[0]))).statusCode,403)
+  const other=await call("acceptance-b",token(users[1]))
+  assert.equal(other.statusCode,200,"second tenant: "+other.body)
+  assert.equal(other.json().events[0].id,2020)
+  const owner=await call("acceptance-b",token(users[2]))
+  assert.equal(owner.statusCode,200,"platform owner: "+owner.body)
+  assert.equal(owner.json().events[0].id,2020)
   const forbidden=[
    ["POST","/admin/jobs/acceptance-a"],
    ["DELETE","/admin/jobs/acceptance-a"],
    ["POST","/calendar/acceptance-a/events"],
+   ["PUT","/calendar/acceptance-a/events/1"],
+   ["DELETE","/calendar/acceptance-a/events/1"],
    ["GET","/admin/unknown/acceptance-a"],
    ["GET","/platform/tenants"],
    ["GET","/admin/jobs/acceptance-a/123"],
@@ -147,6 +190,10 @@ test("acceptance route gate rejects writes and unrelated CRM paths", async () =>
    assert.equal(response.statusCode,404,method+" "+url)
   }
   assert.equal((await app.inject({method:"GET",url:"/healthz"})).statusCode,200)
+  assert.ok(sqlSeen.every(q=>q.sql.startsWith("select")),"acceptance startup and calendar requests never write schema or records")
+  const reads=sqlSeen.filter(q=>q.sql.includes("from calendar_events ce"))
+  assert.equal(reads.length,3,"only three authorized calendar reads")
+  assert.deepEqual(reads.map(q=>Number(q.params[0])),[101,202,202],"tenant-bound calendar queries")
  } finally {
   if(app) await app.close()
   ;(pool as any).query=originalQuery
