@@ -1,0 +1,30 @@
+import test from "node:test"
+import assert from "node:assert/strict"
+import { assertMfaAcceptanceEnvironment } from "../src/pashlocAcceptanceServer"
+
+const valid = {
+ PASHLOC_ACCEPTANCE_ONLY:"yes",
+ PASHLOC_ACCEPTANCE_DATABASE_CONFIRMED:"yes",
+ NODE_ENV:"development",
+ DATABASE_URL:"postgresql://acceptance@disposable.internal/pashloc_acceptance_disposable",
+ PASHLOC_ACCEPTANCE_DATABASE_NAME:"pashloc_acceptance_disposable",
+ PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED:"yes",
+ PASHLOC_PHONE_CLAIM_ENABLED:"yes",
+ PASHLOC_SHARED_RATE_LIMITS_VERIFIED:"yes",
+ APP_BASE_URL:"https://navigator-acceptance.example.test",
+ PASHLOC_PHONE_ORIGIN:"https://phone-acceptance.example.test"
+} satisfies NodeJS.ProcessEnv
+
+test("acceptance server rejects missing security controls and production databases",()=>{
+ assert.doesNotThrow(()=>assertMfaAcceptanceEnvironment(valid))
+ for(const key of ["PASHLOC_ACCEPTANCE_ONLY","PASHLOC_ACCEPTANCE_DATABASE_CONFIRMED",
+  "PASHLOC_ACCEPTANCE_DATABASE_NAME","PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED",
+  "PASHLOC_PHONE_CLAIM_ENABLED","PASHLOC_SHARED_RATE_LIMITS_VERIFIED",
+  "APP_BASE_URL","PASHLOC_PHONE_ORIGIN"] as const) {
+   assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,[key]:""}),key)
+ }
+ assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,NODE_ENV:"production"}))
+ assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,DATABASE_URL:"postgresql://acceptance@prod.internal/navigator"}))
+ assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,DATABASE_URL:"postgresql://acceptance@prod.internal/pashloc_acceptance_disposable_backup"}))
+ assert.throws(()=>assertMfaAcceptanceEnvironment({...valid,DATABASE_URL:"postgresql://acceptance@prod.internal/pashloc_acceptance_disposable",PASHLOC_ACCEPTANCE_DATABASE_NAME:"navigator"}))
+})
