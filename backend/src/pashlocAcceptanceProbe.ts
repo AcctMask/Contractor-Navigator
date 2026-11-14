@@ -46,5 +46,12 @@ void (async () => {
   const res = await app.inject({ method: "GET", url: "/healthz" })
   console.log("PASHLOC_ACCEPTANCE_DB_INSPECTION", res.body)
   if (res.statusCode !== 200) throw Error("Private disposable database verification failed")
-  await app.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
+  if (process.env.PASHLOC_ACCEPTANCE_RUN_GENUINE === "yes") {
+    const { buildMfaAcceptanceServer } = await import("./pashlocAcceptanceServer")
+    const genuine = await buildMfaAcceptanceServer()
+    await genuine.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
+    console.log("PASHLOC_GENUINE_ACCEPTANCE_LISTENING")
+  } else {
+    await app.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
+  }
 })().catch(error => { console.error(error); process.exit(1) })
