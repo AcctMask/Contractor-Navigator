@@ -122,9 +122,15 @@ export async function approvePashLocEnrollment(session:PashLocEnrollment,confirm
   },session)
 }
 export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
-  return enrollmentRequest("confirm",{
+  if (!/^\\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
+  const result = await enrollmentRequest("confirm",{
     challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,code
   },session)
+  if (result.enrollment_confirmed !== true ||
+      typeof result.token !== "string" || !result.token)
+    throw new Error("Enrollment confirmed but authenticated session unavailable")
+  setToken(result.token)
+  return result
 }
 
 export async function acceptInvite(inviteToken: string, password: string) {
