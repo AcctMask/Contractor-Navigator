@@ -6,6 +6,7 @@ import Fastify from "fastify"
 import cors from "@fastify/cors"
 import { registerAuthRoutes } from "./routes/auth"
 import { pool } from "./db/db"
+import { registerPashLocAcceptanceRateLimits } from "./services/pashlocAcceptanceRateLimit"
 
 const allowed = new Set([
  "/auth/mfa/device/claim-challenge",
@@ -100,6 +101,7 @@ export async function buildMfaAcceptanceServer() {
    return reply.code(404).send({ok:false})
  })
  app.get("/healthz", async () => ({ok:true,service:"navigator-mfa-acceptance"}))
+ registerPashLocAcceptanceRateLimits(app)
  await registerAuthRoutes(app)
  return app
 }
