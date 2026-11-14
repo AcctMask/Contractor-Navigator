@@ -5,6 +5,8 @@ on:
       - 'backend/src/services/pashloc*.ts'
       - 'backend/src/services/authService.ts'
       - 'backend/src/routes/auth.ts'
+      - 'backend/src/pashlocAcceptanceServer.ts'
+      - 'backend/tests/pashloc*.ts'
       - 'backend/sql/pashloc_mfa_navigator_default_off_schema.sql'
       - 'dashboard/src/**'
       - '.github/workflows/navigator-pashloc-integration-check.yml'
@@ -38,9 +40,9 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
         working-directory: backend
-      - run: npx tsc --noEmit --module commonjs --moduleResolution node --target es2021 --esModuleInterop --skipLibCheck src/routes/auth.ts src/services/authService.ts src/services/pashloc*.ts
+      - run: npx tsc --noEmit --module commonjs --moduleResolution node --target es2021 --esModuleInterop --skipLibCheck src/routes/auth.ts src/pashlocAcceptanceServer.ts src/services/authService.ts src/services/pashloc*.ts
         working-directory: backend
-      - run: npx tsx --test tests/pashlocTotp.test.ts tests/pashlocCryptoBoundary.test.ts
+      - run: npx tsx --test tests/pashlocTotp.test.ts tests/pashlocCryptoBoundary.test.ts tests/pashlocAcceptanceBoundary.test.ts
         working-directory: backend
 
   schema-dry-run:
@@ -91,7 +93,7 @@ jobs:
           PASHLOC_DISPOSABLE_DB_TEST: 'yes'
           NODE_ENV: test
           PASHLOC_MFA_ENCRYPTION_KEY_BASE64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-        run: npx tsx --test tests/pashlocDatabase.integration.test.ts tests/pashlocDeviceClaim.integration.test.ts tests/pashlocReturningLogin.integration.test.ts
+        run: npx tsx --test tests/pashlocDatabase.integration.test.ts tests/pashlocDeviceClaim.integration.test.ts tests/pashlocReturningLogin.integration.test.ts tests/pashlocRedeemNonce.integration.test.ts
         working-directory: backend
       - name: Verify MFA default is off
         run: |
