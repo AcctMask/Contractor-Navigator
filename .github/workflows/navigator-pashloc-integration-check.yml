@@ -29,6 +29,22 @@ jobs:
         working-directory: dashboard
       - run: npm run build
         working-directory: dashboard
+      - name: Verify acceptance frontend builds only with the exact isolated API origin
+        working-directory: dashboard
+        env:
+          VITE_PASHLOC_ACCEPTANCE_ONLY: 'yes'
+          VITE_PASHLOC_ACCEPTANCE_API_ORIGIN: https://navigator-pashloc-iv-isolated-20261113.onrender.com
+        run: |
+          set -eu
+          if VITE_API_BASE=https://contractor-navigator.onrender.com npm run build > /tmp/acceptance-rejected.log 2>&1; then
+            echo 'FAIL: production-like API was accepted'
+            exit 1
+          fi
+          if VITE_API_BASE=https://navigator-pashloc-iv-isolated-20261113.onrender.com/ npm run build > /tmp/acceptance-rejected.log 2>&1; then
+            echo 'FAIL: noncanonical API origin was accepted'
+            exit 1
+          fi
+          VITE_API_BASE=https://navigator-pashloc-iv-isolated-20261113.onrender.com npm run build
   backend-typecheck:
     runs-on: ubuntu-latest
     steps:
