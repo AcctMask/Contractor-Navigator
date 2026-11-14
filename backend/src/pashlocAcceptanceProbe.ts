@@ -64,6 +64,28 @@ void (async () => {
       console.log("PASHLOC_GENUINE_ENDPOINT_CHECK",JSON.stringify({method:request.method,path:request.url,expected,actual:response.statusCode,passed:response.statusCode===expected}))
       if (response.statusCode!==expected) throw Error("Genuine acceptance endpoint rejection check failed")
     }
+    // Test-only signed token is used solely inside Fastify.inject; never returned to a client.
+    // This proves CRM read handlers, not a completed PashLoc device authentication.
+    const acceptance = await pool.query(
+      "select u.id,u.tenant_id,u.email,u.full_name,u.role,u.is_active,u.financials_authorized from app_users u join tenants t on t.id=u.tenant_id where t.slug=$1 and lower(u.email)=$2 limit 1",
+      ["pashloc-genuine-acceptance-20261114","navigator-acceptance@example.invalid"]
+    )
+    if(acceptance.rowCount!==1||acceptance.rows[0].is_active!==true)
+      throw Error("Disposable acceptance user unavailable")
+    const { signToken } = await import("./services/authService")
+    const token = signToken(acceptance.rows[0],true)
+    const authorizedPaths=[
+      "/auth/me",
+      "/platform/company-dna-runtime/pashloc-genuine-acceptance-20261114",
+      "/admin/jobs/pashloc-genuine-acceptance-20261114",
+      "/calendar/pashloc-genuine-acceptance-20261114/events",
+      "/admin/recent-activity/pashloc-genuine-acceptance-20261114"
+    ]
+    for(const path of authorizedPaths){
+      const response=await genuine.inject({method:"GET",url:path,headers:{authorization:"Bearer "+token}})
+      console.log("PASHLOC_CRM_AUTHORIZED_READ",JSON.stringify({path,status:response.statusCode,passed:response.statusCode===200}))
+      if(response.statusCode!==200) throw Error("Disposable authenticated CRM read failed: "+path)
+    }
     await genuine.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
     console.log("PASHLOC_GENUINE_ACCEPTANCE_LISTENING")
   } else {
