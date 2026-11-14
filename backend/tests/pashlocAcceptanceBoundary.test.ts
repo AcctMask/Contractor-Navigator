@@ -1,6 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { assertMfaAcceptanceEnvironment } from "../src/pashlocAcceptanceServer"
+process.env.DATABASE_URL ||= "postgresql://test:test@localhost:5432/pashloc_acceptance_disposable"
+const { assertMfaAcceptanceEnvironment } = await import("../src/pashlocAcceptanceServer")
 
 const valid = {
  PASHLOC_ACCEPTANCE_ONLY:"yes",
