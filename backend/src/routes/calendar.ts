@@ -133,13 +133,11 @@ async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export async function registerCalendarRoutes(app: FastifyInstance) {
-  await ensureCalendarTable()
-  await ensureCalendarAutomationFoundation()
-
+/** Register the existing authenticated read handler without schema setup in acceptance. */
+export function registerCalendarReadRoute(app: FastifyInstance, ensureSchema = false) {
   app.get("/calendar/:tenantSlug/events", async (request: any, reply) => {
     try {
-      await ensureCalendarTable()
+      if (ensureSchema) await ensureCalendarTable()
 
       const { tenantSlug } = request.params
       const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -227,6 +225,14 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
       return { ok: false, error: err?.message || String(err) }
     }
   })
+
+}
+
+export async function registerCalendarRoutes(app: FastifyInstance) {
+  await ensureCalendarTable()
+  await ensureCalendarAutomationFoundation()
+
+  registerCalendarReadRoute(app)
 
   app.post("/calendar/:tenantSlug/events", async (request: any, reply) => {
     try {
