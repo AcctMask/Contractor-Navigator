@@ -157,7 +157,7 @@ export default function LoginPage() {
                     <label style={labelStyle}>First six-digit PashLoc code</label>
                     <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
                     <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
-                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrolled. Sign in again with a fresh code.")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrollment complete");navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
                     }}>Complete PashLoc enrollment</button>
                   </> : null}
                 </> : <p>Enrollment is unavailable. Please try signing in again.</p>}
