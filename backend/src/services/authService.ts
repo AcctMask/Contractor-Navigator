@@ -857,7 +857,8 @@ export async function loginUserByTenantSlug(
   // This does not change MFA defaults or authentication for other tenants.
   if (process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
       process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
-      tenantSlug === "pashloc-genuine-acceptance-20261114") {
+      tenantSlug === "pashloc-genuine-acceptance-20261114" &&
+      email === "navigator-acceptance@example.invalid") {
     return {mfa_required:true,enrollment_required:true,token:null}
   }
 
