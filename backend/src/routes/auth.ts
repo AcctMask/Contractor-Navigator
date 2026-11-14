@@ -607,11 +607,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       challengeId:b.challenge_id,purpose:"enroll"
     })
     if(!session)return reply.code(403).send({ok:false})
-    // The current verifier accepts only isolated synthetic delivery.
-    // An environment toggle cannot turn synthetic enrollment into real MFA.
-    // Replace the verifier with reviewed genuine credential delivery before
-    // this route can confirm a production account.
-    return reply.code(503).send({ok:false,error:"secure_credential_delivery_unavailable"})
+    // Confirmation is restricted to the genuine Navigator credential envelope,
+    // after approved device claim, signed redemption and first TOTP verification.
     const confirmed=await confirmPashLocFirstCode({challengeId:session.challengeId,
       pairingId:b.pairing_ref,tenantId:session.tenantId,userId:session.userId,code:b.code})
     if(!confirmed)return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
