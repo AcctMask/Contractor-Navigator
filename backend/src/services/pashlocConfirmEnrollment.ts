@@ -82,6 +82,18 @@ export async function confirmPashLocFirstCode(input: {
       `update pashloc_mfa_pairings
           set credential_envelope=null,credential_retry_nonce_hash=null,credential_retry_nonce_expires_at=null
         where id=$1`,[pairing.rows[0].id])
+    // Activate MFA only for the exact successfully confirmed user in the same transaction.
+    const activated = await client.query(
+      `update app_users set pashloc_mfa_required=true,
+         pashloc_mfa_activated_at=date_trunc('second',now())
+       where id=$1 and tenant_id=$2 and is_active=true
+         and pashloc_mfa_required=false
+       returning id`, [c.app_user_id,c.tenant_id]
+    )
+    if (activated.rowCount !== 1) {
+      await client.query("ROLLBACK")
+      return null
+    }
     await client.query("COMMIT")
     return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),accountId:String(e.account_id)}
   } catch (error) {
