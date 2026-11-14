@@ -45,7 +45,8 @@ export async function issuePashLocNavigatorRedeemNonce(input:{
        and p.denied_at is null and p.credential_retry_attempts<5
        and p.credential_recovery_expires_at>now()
        and (p.credential_retry_nonce_hash is null or p.credential_retry_nonce_expires_at<=now())
-       and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
+       and c.purpose='enroll' and c.consumed_at is null
+       and (c.expires_at>now() or p.credential_recovery_expires_at>now())
      returning p.credential_retry_nonce_expires_at`,
     [sha(input.pairingRef),sha(input.claimId),sha(input.claimantProof),sha(nonce)]
    )
