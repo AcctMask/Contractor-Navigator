@@ -33,9 +33,20 @@ export function assertMfaAcceptanceEnvironment(env: NodeJS.ProcessEnv) {
      env.PASHLOC_PHONE_CLAIM_ENABLED !== "yes" ||
      env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
    throw new Error("MFA acceptance security prerequisites not met")
- if (!env.APP_BASE_URL?.startsWith("https://") ||
-     !env.PASHLOC_PHONE_ORIGIN?.startsWith("https://"))
-   throw new Error("Explicit HTTPS acceptance origins required")
+ // Exact origins are mandatory: reject credentials, paths, query strings and
+ // deceptive prefixes before using these values for browser CORS decisions.
+ for (const origin of [env.APP_BASE_URL, env.PASHLOC_PHONE_ORIGIN]) {
+   if (!origin) throw new Error("Explicit HTTPS acceptance origins required")
+   let parsed: URL
+   try { parsed = new URL(origin) }
+   catch { throw new Error("Invalid MFA acceptance origin") }
+   if (parsed.protocol !== "https:" || parsed.origin !== origin ||
+       parsed.username || parsed.password || parsed.pathname !== "/" ||
+       parsed.search || parsed.hash)
+     throw new Error("Invalid MFA acceptance origin")
+ }
+ if (env.APP_BASE_URL === env.PASHLOC_PHONE_ORIGIN)
+   throw new Error("Navigator and PashLoc acceptance origins must be distinct")
 }
 
 export async function buildMfaAcceptanceServer() {
