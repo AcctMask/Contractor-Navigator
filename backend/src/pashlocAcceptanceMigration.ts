@@ -13,7 +13,7 @@ try {
  if(identity.rows[0]?.db!==expected||identity.rows[0]?.role!==user) throw Error("Database identity mismatch")
  const tables=await pool.query("select count(*)::int as count from information_schema.tables where table_schema='public'")
  console.log("DISPOSABLE_PRE_MIGRATION_SCHEMA",JSON.stringify({tables:tables.rows[0].count}))
- const sql=readFileSync(new URL("../../sql/pashloc_mfa_acceptance_private_disposable.sql",import.meta.url),"utf8")
+ const sql=readFileSync(new URL("../sql/pashloc_mfa_acceptance_private_disposable.sql",import.meta.url),"utf8")
  await pool.query(sql)
  const result=await pool.query("select to_regclass('public.pashloc_mfa_enrollments') is not null as enrollments,to_regclass('public.pashloc_mfa_challenges') is not null as challenges,to_regclass('public.pashloc_mfa_pairings') is not null as pairings,to_regclass('public.pashloc_mfa_request_limits') is not null as limits")
  console.log("DISPOSABLE_POST_MIGRATION_SCHEMA",JSON.stringify(result.rows[0]))
