@@ -5,6 +5,7 @@
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import { registerAuthRoutes } from "./routes/auth"
+import { pool } from "./db/db"
 
 const allowed = new Set([
  "/auth/mfa/device/claim-challenge",
@@ -49,8 +50,34 @@ export function assertMfaAcceptanceEnvironment(env: NodeJS.ProcessEnv) {
    throw new Error("Navigator and PashLoc acceptance origins must be distinct")
 }
 
+/** Startup gate: never claim a ready genuine backend before its disposable
+ * database contains the actual Navigator MFA schema. Read-only checks only. */
+export async function assertMfaAcceptanceSchema() {
+ const result = await pool.query(`
+   select
+     to_regclass('public.tenants') is not null as tenants,
+     to_regclass('public.app_users') is not null as users,
+     to_regclass('public.pashloc_mfa_enrollments') is not null as enrollments,
+     to_regclass('public.pashloc_mfa_challenges') is not null as challenges,
+     to_regclass('public.pashloc_mfa_pairings') is not null as pairings,
+     to_regclass('public.pashloc_mfa_device_claim_nonces') is not null as claim_nonces,
+     to_regclass('public.pashloc_mfa_restricted_browser_sessions') is not null as restricted_sessions,
+     to_regclass('public.pashloc_mfa_request_limits') is not null as request_limits,
+     exists(select 1 from information_schema.columns
+       where table_schema='public' and table_name='app_users'
+         and column_name='pashloc_mfa_required') as default_off_column,
+     exists(select 1 from information_schema.columns
+       where table_schema='public' and table_name='pashloc_mfa_pairings'
+         and column_name='credential_envelope') as genuine_envelope_column
+ `)
+ const status = result.rows[0] || {}
+ const missing = Object.entries(status).filter(([,ready])=>ready!==true).map(([name])=>name)
+ if(missing.length) throw new Error("Disposable MFA schema incomplete: "+missing.join(","))
+}
+
 export async function buildMfaAcceptanceServer() {
  assertMfaAcceptanceEnvironment(process.env)
+ await assertMfaAcceptanceSchema()
  const app = Fastify({logger:true,bodyLimit:16*1024})
  // The protected Navigator browser and PashLoc phone are distinct origins.
  // Only these pinned origins may make cross-origin MFA requests; never reflect arbitrary origins.
