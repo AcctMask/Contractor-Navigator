@@ -116,7 +116,6 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
 
 
 test("acceptance route gate rejects writes and unrelated CRM paths", async () => {
- const { default: Fastify } = await import("fastify")
  const { pool } = await import("../src/db/db")
  const { buildMfaAcceptanceServer } = await import("../src/pashlocAcceptanceServer")
  const originalQuery=pool.query
