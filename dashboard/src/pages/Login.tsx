@@ -29,6 +29,10 @@ export default function LoginPage() {
   const [enrollment, setEnrollment] = useState<PashLocEnrollment | null>(null)
   const [deviceCode, setDeviceCode] = useState("")
   const [deviceApproved, setDeviceApproved] = useState(false)
+  const pashlocPhoneUrl = enrollment
+    ? `https://pashloc-iv.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
+    : ""
+
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -106,6 +110,11 @@ export default function LoginPage() {
                 {enrollment ? <>
                   <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
                   <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
+                  <p>On your iPhone, open this PashLoc enrollment link. The link identifies the pending pairing; your Navigator password and security secret are never placed in it.</p>
+                  <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{color:"#a9d4ff",overflowWrap:"anywhere"}}>Open PashLoc enrollment</a>
+                  <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={async()=>{
+                    try{await navigator.clipboard.writeText(pashlocPhoneUrl);setStatus("PashLoc enrollment link copied. Open it on your iPhone.")}catch{setError("Unable to copy the link. Open the link directly instead.")}
+                  }}>Copy iPhone enrollment link</button>
                   <p>Open PashLoc on your iPhone to claim this pairing. Enter the eight-digit number shown on the phone here.</p>
                   <label style={labelStyle}>Eight-digit device approval</label>
                   <input value={deviceCode} onChange={e=>setDeviceCode(e.target.value.replace(/\D/g,"").slice(0,8))} inputMode="numeric" maxLength={8} style={inputStyle}/>
