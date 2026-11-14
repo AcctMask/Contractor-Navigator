@@ -75,6 +75,9 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
       - name: Verify schema is repeatable
         run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - name: Verify genuine credential custody columns exist
+        run: |
+          psql -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM information_schema.columns WHERE table_name='pashloc_mfa_pairings' AND column_name IN ('credential_envelope','credential_redeem_proof_hash','credential_recovery_expires_at','credential_retry_attempts','credential_retry_nonce_hash','credential_retry_nonce_expires_at')" | grep -qx 6
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
