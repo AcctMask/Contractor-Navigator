@@ -496,7 +496,39 @@ export async function registerAuthRoutes(app: FastifyInstance) {
 
   // Phone-facing endpoints are intentionally disabled until shared limits,
   // origin policy, and genuine encrypted credential redemption are proven.
+  // The PashLoc phone is a distinct origin from Navigator's dashboard.
+  // Allow only the exact configured HTTPS phone origin, never wildcard CORS.
+  const pashlocPhoneOrigin=process.env.PASHLOC_PHONE_ORIGIN
+  const phonePaths=["/auth/mfa/device/claim-challenge","/auth/mfa/device/claim",
+    "/auth/mfa/device/redeem-challenge","/auth/mfa/device/redeem"]
+  const validPhoneOrigin=typeof pashlocPhoneOrigin==="string" &&
+    /^https:\/\/[a-z0-9.-]+(?::443)?$/i.test(pashlocPhoneOrigin)
+  const phoneHeaders={
+    "Access-Control-Allow-Origin":validPhoneOrigin?pashlocPhoneOrigin:"",
+    "Access-Control-Allow-Methods":"POST, OPTIONS",
+    "Access-Control-Allow-Headers":"Content-Type",
+    "Vary":"Origin"
+  }
+  for(const path of phonePaths){
+    app.options(path,async(request:any,reply)=>{
+      if(!validPhoneOrigin||request.headers.origin!==pashlocPhoneOrigin ||
+         request.headers["access-control-request-method"]!=="POST" ||
+         !/^content-type$/i.test(String(request.headers["access-control-request-headers"]||"").trim()))
+        return reply.code(403).send()
+      return reply.headers(phoneHeaders).code(204).send()
+    })
+  }
+  const authorizePhone=(request:any,reply:any)=>{
+    if(!validPhoneOrigin||request.headers.origin!==pashlocPhoneOrigin||
+       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase()!=="application/json"){
+      reply.code(403).send({ok:false,error:"forbidden"})
+      return false
+    }
+    reply.headers(phoneHeaders)
+    return true
+  }
   app.post("/auth/mfa/device/claim-challenge",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
     reply.header("Cache-Control","no-store")
     if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
@@ -506,6 +538,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return nonce?{ok:true,proof_nonce:nonce}:reply.code(404).send({ok:false,error:"unavailable"})
   })
   app.post("/auth/mfa/device/claim",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
     reply.header("Cache-Control","no-store")
     if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
@@ -571,6 +604,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   // Device-only endpoints never issue Navigator JWTs. The browser must first
   // approve the claim and the phone must sign a fresh redemption challenge.
   app.post("/auth/mfa/device/redeem-challenge",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
     reply.header("Cache-Control","no-store")
     if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
        process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
@@ -583,6 +617,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     return result?{ok:true,...result}:reply.code(409).send({ok:false})
   })
   app.post("/auth/mfa/device/redeem",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
     reply.header("Cache-Control","no-store")
     if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
        process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
