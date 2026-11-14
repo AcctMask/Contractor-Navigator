@@ -66,7 +66,7 @@ export function encodeCanonicalContext(c:ContextFields):Buffer {
  if(c.version!==V || c.application!=="Navigator") throw new Error("Invalid context authority")
  const fields=[
   ascii("version",c.version,/^AA-PASHLOC-ENROLL-V1$/),
-  ascii("environment",c.environment,/^(isolated|test|development|production)$/),
+  ascii("environment",c.environment,/^(isolated|test|development|production|acceptance)$/),
   ascii("application",c.application,/^Navigator$/),
   ascii("tenant",c.tenantId,id),ascii("user",c.userId,id),ascii("account",c.accountId,id),
   ascii("pairing",c.pairingRef,b64),ascii("claim",c.claimId,b64),
@@ -84,12 +84,12 @@ export type SyntheticEnvelope = { version:typeof V; salt:string; context:string;
  * the signed redeem proof, browser approval, account scope and one-use nonce.
  */
 export function encryptNavigatorCredentialV1(input:{secret:string; deviceEcdhPublicJwk:unknown;context:ContextFields}):SyntheticEnvelope {
- if(input.context.environment!=="production") throw new Error("Genuine credential requires production context")
+ if(!["production","acceptance"].includes(input.context.environment)) throw new Error("Genuine credential requires an authorized genuine context")
  if(!/^[A-Z2-7]{16,128}$/.test(input.secret)) throw new Error("Invalid Base32 credential")
  return encryptEnrollmentEnvelope(input.secret,input.deviceEcdhPublicJwk,input.context)
 }
 export function encryptSyntheticEnrollmentV1(input:{syntheticSecret:string; deviceEcdhPublicJwk:unknown;context:ContextFields}):SyntheticEnvelope {
- if(input.context.environment==="production") throw new Error("Synthetic enrollment is forbidden in production")
+ if(["production","acceptance"].includes(input.context.environment)) throw new Error("Synthetic enrollment is forbidden in genuine credential contexts")
  if(!/^[A-Z2-7]{16,128}$/.test(input.syntheticSecret)) throw new Error("Synthetic Base32 test credential required")
  return encryptEnrollmentEnvelope(input.syntheticSecret,input.deviceEcdhPublicJwk,input.context)
 }
