@@ -52,6 +52,9 @@ export async function login(email: string, password: string) {
     throw new Error(json?.error || "Login failed")
   }
   if (json.mfa_required === true) {
+    // A previous browser session must never survive into a restricted MFA challenge.
+    // Only successful six-digit verification may establish the new session.
+    clearToken()
     // No session is stored while the PashLoc challenge is pending.
     if (json.enrollment_required === true) {
       return json as {ok:true;mfa_required:true;enrollment_required:true;token:null}
