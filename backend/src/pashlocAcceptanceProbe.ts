@@ -49,6 +49,21 @@ void (async () => {
   if (process.env.PASHLOC_ACCEPTANCE_RUN_GENUINE === "yes") {
     const { buildMfaAcceptanceServer } = await import("./pashlocAcceptanceServer")
     const genuine = await buildMfaAcceptanceServer()
+    const checks = [
+      {method:"GET" as const,url:"/healthz",expected:200},
+      {method:"GET" as const,url:"/auth/me",expected:401},
+      {method:"GET" as const,url:"/admin/jobs/pashloc-genuine-acceptance-20261114",expected:401},
+      {method:"GET" as const,url:"/calendar/pashloc-genuine-acceptance-20261114/events",expected:401},
+      {method:"POST" as const,url:"/admin/jobs/pashloc-genuine-acceptance-20261114",expected:404},
+      {method:"GET" as const,url:"/admin/unknown-route",expected:404},
+      {method:"POST" as const,url:"/auth/mfa/enrollment/start",payload:{},headers:{origin:"https://untrusted.invalid","content-type":"application/json"},expected:403}
+    ]
+    for (const check of checks) {
+      const {expected,...request} = check
+      const response = await genuine.inject(request)
+      console.log("PASHLOC_GENUINE_ENDPOINT_CHECK",JSON.stringify({method:request.method,path:request.url,expected,actual:response.statusCode,passed:response.statusCode===expected}))
+      if (response.statusCode!==expected) throw Error("Genuine acceptance endpoint rejection check failed")
+    }
     await genuine.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
     console.log("PASHLOC_GENUINE_ACCEPTANCE_LISTENING")
   } else {
