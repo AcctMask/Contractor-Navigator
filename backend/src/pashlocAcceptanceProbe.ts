@@ -33,5 +33,9 @@ app.get("/healthz", async (_req, reply) => {
     return reply.code(503).send({ ok: false })
   }
 })
-void app.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
-  .catch(error => { console.error(error); process.exitCode = 1 })
+void (async () => {
+  const res = await app.inject({ method: "GET", url: "/healthz" })
+  console.log("PASHLOC_ACCEPTANCE_DB_INSPECTION", res.body)
+  if (res.statusCode !== 200) throw Error("Private disposable database verification failed")
+  await app.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
+})().catch(error => { console.error(error); process.exit(1) })
