@@ -864,6 +864,24 @@ export async function loginUserByTenantSlug(
 /** Only the PashLoc verifier may issue an MFA-assured Navigator token.
  * Verification consumes a challenge and TOTP replay step transactionally.
  */
+/** First enrollment may issue a session only after atomic TOTP confirmation and policy activation. */
+export async function completePashLocFirstEnrollmentSession(tenantId:number,userId:number) {
+  if (!Number.isSafeInteger(tenantId) || !Number.isSafeInteger(userId)) throw new Error("Invalid enrollment scope")
+  const result = await pool.query(
+    `select id,tenant_id,email,full_name,mobile_phone,role,is_active,financials_authorized
+       from app_users where id=$1 and tenant_id=$2 and is_active=true
+         and pashloc_mfa_required=true and pashloc_mfa_activated_at is not null
+         and exists(select 1 from pashloc_mfa_enrollments e
+           where e.app_user_id=app_users.id and e.tenant_id=app_users.tenant_id
+             and e.status='confirmed' and e.delivery_pairing_id is not null
+             and e.encryption_key_version='navigator-account-v1')
+       limit 1`,[userId,tenantId]
+  )
+  if(result.rowCount!==1) throw new Error("Confirmed enrollment not available")
+  const user:AppUser=result.rows[0]
+  return {user,token:signToken(user,true)}
+}
+
 export async function completePashLocNavigatorLogin(challengeId: string, code: string) {
   if (typeof challengeId !== "string" || typeof code !== "string")
     throw new Error("Invalid MFA verification request")
