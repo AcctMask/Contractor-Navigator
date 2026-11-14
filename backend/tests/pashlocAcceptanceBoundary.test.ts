@@ -1,3 +1,4 @@
+import "./pashlocAcceptanceRateLimit.test"
 import test from "node:test"
 import assert from "node:assert/strict"
 process.env.DATABASE_URL ||= "postgresql://test:test@localhost:5432/pashloc_acceptance_disposable"
