@@ -38,7 +38,7 @@ export async function confirmPashLocFirstCode(input: {
       `select id from pashloc_mfa_pairings
         where challenge_id=$1 and pairing_hash=$2 and denied_at is null
           and claimed_at is not null and browser_approved_at is not null
-          and redeemed_at is not null and synthetic_envelope is not null and expires_at>now()
+          and redeemed_at is not null and credential_envelope is not null and expires_at>now()
         for update`,
       [c.id, sha(input.pairingId)]
     )
@@ -49,7 +49,7 @@ export async function confirmPashLocFirstCode(input: {
          from pashloc_mfa_enrollments e
          join app_users u on u.id=e.app_user_id and u.tenant_id=e.tenant_id
         where e.tenant_id=$1 and e.app_user_id=$2
-          and e.delivery_pairing_id=$3 and e.encryption_key_version='isolated-account-v1'
+          and e.delivery_pairing_id=$3 and e.encryption_key_version='navigator-account-v1'
           and e.status='pending' and u.is_active=true
         for update of e`,
       [c.tenant_id,c.app_user_id,pairing.rows[0].id]
@@ -80,7 +80,7 @@ export async function confirmPashLocFirstCode(input: {
     }
     await client.query(
       `update pashloc_mfa_pairings
-          set synthetic_envelope=null,synthetic_retry_nonce_hash=null,synthetic_retry_nonce_expires_at=null
+          set credential_envelope=null,credential_retry_nonce_hash=null,credential_retry_nonce_expires_at=null
         where id=$1`,[pairing.rows[0].id])
     await client.query("COMMIT")
     return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),accountId:String(e.account_id)}
