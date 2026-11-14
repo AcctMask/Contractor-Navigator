@@ -137,11 +137,11 @@ export default function DashboardPage() {
       setCalendarError("")
 
       const [jobsRes, eventsRes, recentActivityRes] = await Promise.all([
-        fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=5000`),
+        fetch(`${API_BASE}/admin/jobs/${getTenantSlug()}?limit=5000`, { headers: { Authorization: `Bearer ${getToken()}` } }),
         fetch(`${API_BASE}/calendar/${getTenantSlug()}/events`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         }),
-        fetch(`${API_BASE}/admin/recent-activity/${getTenantSlug()}?limit=10`)
+        fetch(`${API_BASE}/admin/recent-activity/${getTenantSlug()}?limit=10`, { headers: { Authorization: `Bearer ${getToken()}` } })
       ])
 
       const jobsData = await jobsRes.json()

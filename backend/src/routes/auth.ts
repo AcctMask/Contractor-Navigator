@@ -1,6 +1,17 @@
 import type { FastifyInstance } from "fastify"
 import { createHmac, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
+import { createPashLocLoginChallenge } from "../services/pashlocChallenge"
+import { createPashLocPairing } from "../services/pashlocPairing"
+import { issuePashLocDeviceClaimNonce } from "../services/pashlocDeviceClaimChallenge"
+import { claimPashLocDevice } from "../services/pashlocDeviceClaimV2"
+import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from "../services/pashlocRestrictedSessionStoreV1"
+import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
+import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
+import { confirmPashLocFirstCode } from "../services/pashlocConfirmEnrollment"
+import { issuePashLocNavigatorRedeemNonce } from "../services/pashlocNavigatorRedeemNonceV1"
+import { redeemPashLocNavigator } from "../services/pashlocNavigatorRedeemV1"
+import { verifyPashLocRestrictedCredentials } from "../services/pashlocRestrictedCredentialsV1"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
@@ -10,6 +21,8 @@ import {
   listInvitationsByTenantSlug,
   listUsersByTenantSlug,
   loginUserByTenantSlug,
+  completePashLocNavigatorLogin,
+  completePashLocFirstEnrollmentSession,
   changePasswordForUser,
   getTenantIdBySlug,
   updateManagedUserRoleByTenantSlug,
@@ -481,6 +494,189 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     }
   })
 
+
+  // Phone-facing endpoints are intentionally disabled until shared limits,
+  // origin policy, and genuine encrypted credential redemption are proven.
+  // The PashLoc phone is a distinct origin from Navigator's dashboard.
+  // Allow only the exact configured HTTPS phone origin, never wildcard CORS.
+  const pashlocPhoneOrigin=process.env.PASHLOC_PHONE_ORIGIN
+  const phonePaths=["/auth/mfa/device/claim-challenge","/auth/mfa/device/claim",
+    "/auth/mfa/device/redeem-challenge","/auth/mfa/device/redeem"]
+  const validPhoneOrigin=typeof pashlocPhoneOrigin==="string" &&
+    /^https:\/\/[a-z0-9.-]+(?::443)?$/i.test(pashlocPhoneOrigin)
+  const phoneHeaders={
+    "Access-Control-Allow-Origin":validPhoneOrigin?pashlocPhoneOrigin:"",
+    "Access-Control-Allow-Methods":"POST, OPTIONS",
+    "Access-Control-Allow-Headers":"Content-Type",
+    "Vary":"Origin"
+  }
+  for(const path of phonePaths){
+    app.options(path,async(request:any,reply)=>{
+      if(!validPhoneOrigin||request.headers.origin!==pashlocPhoneOrigin ||
+         request.headers["access-control-request-method"]!=="POST" ||
+         !/^content-type$/i.test(String(request.headers["access-control-request-headers"]||"").trim()))
+        return reply.code(403).send()
+      return reply.headers(phoneHeaders).code(204).send()
+    })
+  }
+  const authorizePhone=(request:any,reply:any)=>{
+    if(!validPhoneOrigin||request.headers.origin!==pashlocPhoneOrigin||
+       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase()!=="application/json"){
+      reply.code(403).send({ok:false,error:"forbidden"})
+      return false
+    }
+    reply.headers(phoneHeaders)
+    return true
+  }
+  app.post("/auth/mfa/device/claim-challenge",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const nonce=await issuePashLocDeviceClaimNonce(b.pairing_ref)
+    return nonce?{ok:true,proof_nonce:nonce}:reply.code(404).send({ok:false,error:"unavailable"})
+  })
+  app.post("/auth/mfa/device/claim",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const result=await claimPashLocDevice(b)
+    return result?{ok:true,...result}:reply.code(409).send({ok:false,error:"unavailable"})
+  })
+
+  // First-time enrollment uses password verification without a Navigator JWT.
+  // The restricted session is separate from all CRM bearer-token authorities.
+  app.post("/auth/mfa/enrollment/start",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
+    reply.header("Cache-Control","no-store, private")
+    reply.header("Referrer-Policy","no-referrer")
+    const origin=process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
+    if(request.headers.origin!==origin ||
+       request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase()!=="application/json")
+      return reply.code(403).send({ok:false,error:"forbidden"})
+    const b=request.body||{}
+    if(typeof b.tenant_slug!=="string"||typeof b.email!=="string"||typeof b.password!=="string")
+      return reply.code(400).send({ok:false,error:"invalid_request"})
+    const account=await verifyPashLocRestrictedCredentials({tenantSlug:b.tenant_slug,email:b.email,password:b.password})
+    if(!account)return reply.code(401).send({ok:false,error:"invalid_credentials"})
+    const policy=await pool.query(`select pashloc_mfa_required from app_users
+      where id=$1 and tenant_id=$2 and is_active=true`,[account.userId,account.tenantId])
+    const acceptanceEligible = process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
+      process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
+      b.tenant_slug === "pashloc-genuine-acceptance-20261114" &&
+      String(b.email).trim().toLowerCase() === "navigator-acceptance@example.invalid" &&
+      account.tenantId > 0 && account.userId > 0
+    if(policy.rowCount!==1 ||
+       (policy.rows[0].pashloc_mfa_required!==true && !acceptanceEligible))
+      return reply.code(403).send({ok:false,error:"mfa_not_enabled"})
+    const enrolled=await pool.query(`select id from pashloc_mfa_enrollments
+      where app_user_id=$1 and tenant_id=$2 and status='confirmed' limit 1`,[account.userId,account.tenantId])
+    if(enrolled.rowCount)return reply.code(409).send({ok:false,error:"already_enrolled"})
+    const challenge=await createPashLocLoginChallenge({tenantId:account.tenantId,userId:account.userId,purpose:"enroll"})
+    const pairing=await createPashLocPairing({challengeId:challenge.challengeId,tenantId:account.tenantId,userId:account.userId})
+    const restricted=await stageRestrictedBrowserSession({tenantId:account.tenantId,userId:account.userId,challengeId:challenge.challengeId,purpose:"enroll"})
+    reply.header("Set-Cookie",restrictedCookie(restricted.sessionId))
+    return {ok:true,challenge_id:challenge.challengeId,pairing_ref:pairing.pairingId,
+      csrf_token:restricted.csrfToken,restricted_session:restricted.sessionId,expires_at:pairing.expiresAt}
+  })
+
+  app.post("/auth/mfa/enrollment/approve-device",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.confirmation_code!=="string")
+      return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers["x-pashloc-restricted-session"] || request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    const result=await approvePashLocDeviceClaim({challengeId:session.challengeId,
+      pairingRef:b.pairing_ref,confirmationCode:b.confirmation_code,
+      tenantId:session.tenantId,userId:session.userId})
+    return result.approved?{ok:true,approved:true}:reply.code(409).send({ok:false})
+  })
+
+  // Device-only endpoints never issue Navigator JWTs. The browser must first
+  // approve the claim and the phone must sign a fresh redemption challenge.
+  app.post("/auth/mfa/device/redeem-challenge",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const result=await issuePashLocNavigatorRedeemNonce({
+      pairingRef:b.pairing_ref,claimId:b.claim_id,claimantProof:b.claimant_proof
+    })
+    return result?{ok:true,...result}:reply.code(409).send({ok:false})
+  })
+  app.post("/auth/mfa/device/redeem",async(request:any,reply)=>{
+    if(!authorizePhone(request,reply))return
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const envelope=await redeemPashLocNavigator(request.body||{})
+    return envelope?{ok:true,envelope}:reply.code(409).send({ok:false})
+  })
+
+  app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
+    if (process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED !== "yes" ||
+        process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED !== "yes")
+      return reply.code(503).send({ok:false,error:"enrollment_unavailable"})
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string"||typeof b.code!=="string")
+      return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers["x-pashloc-restricted-session"] || request.headers.cookie,csrfHeader:request.headers["x-pashloc-csrf"],
+      origin:request.headers.origin,expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    // Confirmation is restricted to the genuine Navigator credential envelope,
+    // after approved device claim, signed redemption and first TOTP verification.
+    const confirmed=await confirmPashLocFirstCode({challengeId:session.challengeId,
+      pairingId:b.pairing_ref,tenantId:session.tenantId,userId:session.userId,code:b.code})
+    if(!confirmed)return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
+    const authenticated = await completePashLocFirstEnrollmentSession(confirmed.tenantId,confirmed.userId)
+    reply.header("Set-Cookie",clearRestrictedCookie())
+    return {ok:true,enrollment_confirmed:true,...authenticated}
+  })
+
+  // A successful, one-time PashLoc TOTP verification is the only path
+  // from a restricted challenge to a normal Navigator bearer token.
+  app.post("/auth/mfa/login/verify", async (request: any, reply) => {
+    reply.header("Cache-Control","no-store, private")
+    const origin = String(request.headers.origin || "")
+    const allowedOrigin = process.env.APP_BASE_URL || "https://contractor-navigator.vercel.app"
+    if (origin !== allowedOrigin ||
+        request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
+      return reply.code(403).send({ok:false,error:"forbidden"})
+    }
+    try {
+      const {challenge_id,code} = request.body || {}
+      const result = await completePashLocNavigatorLogin(challenge_id,code)
+      return {ok:true,...result}
+    } catch {
+      return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
+    }
+  })
 
   app.post("/auth/change-password", async (request: any, reply) => {
     try {

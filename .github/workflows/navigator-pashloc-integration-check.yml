@@ -1,0 +1,118 @@
+name: Navigator PashLoc integration checks
+on:
+  pull_request:
+    paths:
+      - 'backend/src/services/pashloc*.ts'
+      - 'backend/src/services/authService.ts'
+      - 'backend/src/routes/auth.ts'
+      - 'backend/src/pashlocAcceptanceServer.ts'
+      - 'backend/tests/pashloc*.ts'
+      - 'backend/sql/pashloc_mfa_navigator_default_off_schema.sql'
+      - 'dashboard/src/**'
+      - '.github/workflows/navigator-pashloc-integration-check.yml'
+  push:
+    branches:
+      - engineering/navi45-production-mfa-gate-20261113
+permissions:
+  contents: read
+jobs:
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+        working-directory: dashboard
+      - run: npm run build
+        working-directory: dashboard
+      - name: Verify acceptance frontend builds only with the exact isolated API origin
+        working-directory: dashboard
+        env:
+          VITE_PASHLOC_ACCEPTANCE_ONLY: 'yes'
+          VITE_PASHLOC_ACCEPTANCE_API_ORIGIN: https://navigator-pashloc-iv-isolated-20261113.onrender.com
+        run: |
+          set -eu
+          if VITE_API_BASE=https://contractor-navigator.onrender.com npm run build > /tmp/acceptance-rejected.log 2>&1; then
+            echo 'FAIL: production-like API was accepted'
+            exit 1
+          fi
+          if VITE_API_BASE=https://navigator-pashloc-iv-isolated-20261113.onrender.com/ npm run build > /tmp/acceptance-rejected.log 2>&1; then
+            echo 'FAIL: noncanonical API origin was accepted'
+            exit 1
+          fi
+          VITE_API_BASE=https://navigator-pashloc-iv-isolated-20261113.onrender.com npm run build
+  backend-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npx tsc --noEmit --module commonjs --moduleResolution node --target es2021 --esModuleInterop --skipLibCheck src/routes/auth.ts src/pashlocAcceptanceServer.ts src/services/authService.ts src/services/pashloc*.ts
+        working-directory: backend
+      - run: npx tsx --test tests/pashlocTotp.test.ts tests/pashlocCryptoBoundary.test.ts tests/pashlocAcceptanceBoundary.test.ts
+        working-directory: backend
+
+  schema-dry-run:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: navigator_mfa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d navigator_mfa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: test
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: test
+      PGDATABASE: navigator_mfa_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create minimum Navigator tenant and user tables in disposable DB
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE tenants (id bigserial PRIMARY KEY);"
+          psql -v ON_ERROR_STOP=1 -c "CREATE TABLE app_users (id bigserial PRIMARY KEY, tenant_id bigint NOT NULL REFERENCES tenants(id), is_active boolean NOT NULL DEFAULT true);"
+      - name: Apply PashLoc schema
+        run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - name: Verify schema is repeatable
+        run: psql -v ON_ERROR_STOP=1 -f backend/sql/pashloc_mfa_navigator_default_off_schema.sql
+      - name: Verify genuine credential custody columns exist
+        run: |
+          psql -v ON_ERROR_STOP=1 -Atc "SELECT count(*) FROM information_schema.columns WHERE table_name='pashloc_mfa_pairings' AND column_name IN ('credential_envelope','credential_redeem_proof_hash','credential_recovery_expires_at','credential_retry_attempts','credential_retry_nonce_hash','credential_retry_nonce_expires_at')" | grep -qx 6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Exercise enrollment challenge and pairing in disposable DB
+        env:
+          DATABASE_URL: postgres://test:test@localhost:5432/navigator_mfa_test
+          PASHLOC_DISPOSABLE_DB_TEST: 'yes'
+          NODE_ENV: test
+          PASHLOC_MFA_ENCRYPTION_KEY_BASE64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: npx tsx --test tests/pashlocDatabase.integration.test.ts tests/pashlocDeviceClaim.integration.test.ts tests/pashlocReturningLogin.integration.test.ts tests/pashlocRedeemNonce.integration.test.ts
+        working-directory: backend
+      - name: Verify MFA default is off
+        run: |
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO tenants DEFAULT VALUES;"
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO app_users(tenant_id) VALUES (1);"
+          psql -v ON_ERROR_STOP=1 -Atc "SELECT pashloc_mfa_required FROM app_users ORDER BY id DESC LIMIT 1" | grep -qx f

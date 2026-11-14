@@ -48,12 +48,89 @@ export async function login(email: string, password: string) {
 
   const json = await res.json()
 
-  if (!res.ok || !json?.token) {
+  if (!res.ok || !json?.ok) {
     throw new Error(json?.error || "Login failed")
   }
-
+  if (json.mfa_required === true) {
+    // A previous browser session must never survive into a restricted MFA challenge.
+    // Only successful six-digit verification may establish the new session.
+    clearToken()
+    // No session is stored while the PashLoc challenge is pending.
+    if (json.enrollment_required === true) {
+      return json as {ok:true;mfa_required:true;enrollment_required:true;token:null}
+    }
+    if (typeof json.challenge_id !== "string" || !json.challenge_id) {
+      throw new Error("Secure sign-in is temporarily unavailable")
+    }
+    return json as {
+      ok: true; mfa_required: true; enrollment_required?: boolean;
+      challenge_id: string; expires_at: string; token: null
+    }
+  }
+  if (typeof json.token !== "string" || !json.token) {
+    throw new Error("Login failed")
+  }
   setToken(json.token)
   return json
+}
+
+/** Completes a password-verified PashLoc challenge; only this response may
+ * provide a usable Navigator session for an MFA-enabled account. */
+export async function verifyPashLocLogin(challengeId: string, code: string) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\d{6}$/.test(code)) {
+    throw new Error("Enter a valid six-digit PashLoc code")
+  }
+  const res = await fetch(`${API_BASE}/auth/mfa/login/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({challenge_id:challengeId,code}),
+    cache: "no-store",
+  })
+  const json = await res.json()
+  if (!res.ok || !json?.ok || typeof json.token !== "string" || !json.token) {
+    throw new Error("Code invalid or expired. Sign in again to retry.")
+  }
+  setToken(json.token)
+  return json
+}
+
+export type PashLocEnrollment = {
+  challenge_id: string; pairing_ref: string; csrf_token: string;
+  restricted_session: string; expires_at: string
+}
+
+async function enrollmentRequest(path: string, payload: Record<string,string>, session?: PashLocEnrollment) {
+  const res = await fetch(`${API_BASE}/auth/mfa/enrollment/${path}`, {
+    method:"POST", cache:"no-store",
+    headers:{ "Content-Type":"application/json",
+      ...(session ? {"X-PashLoc-CSRF":session.csrf_token,
+        "X-PashLoc-Restricted-Session":session.restricted_session} : {}) },
+    body:JSON.stringify(payload)
+  })
+  const json=await res.json()
+  if(!res.ok || !json?.ok) throw new Error(json?.error || "PashLoc enrollment unavailable")
+  return json
+}
+
+export async function startPashLocEnrollment(tenantSlug:string,email:string,password:string):Promise<PashLocEnrollment> {
+  return enrollmentRequest("start",{tenant_slug:tenantSlug,email,password})
+}
+export async function approvePashLocEnrollment(session:PashLocEnrollment,confirmationCode:string) {
+  return enrollmentRequest("approve-device",{
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,
+    confirmation_code:confirmationCode
+  },session)
+}
+export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
+  if (!/^\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
+  const result = await enrollmentRequest("confirm",{
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,code
+  },session)
+  if (result.enrollment_confirmed !== true ||
+      typeof result.token !== "string" || !result.token)
+    throw new Error("Enrollment confirmed but authenticated session unavailable")
+  setToken(result.token)
+  return result
 }
 
 export async function acceptInvite(inviteToken: string, password: string) {
