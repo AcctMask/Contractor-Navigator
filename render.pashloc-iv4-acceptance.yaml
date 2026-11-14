@@ -1,12 +1,4 @@
-# Isolated, disposable MFA acceptance infrastructure only.
-# Separate resources; never adopt or mutate the production services.
-databases:
-  - name: pashloc-iv4-acceptance-db
-    databaseName: pashloc_iv4_acceptance_disposable
-    user: pashloc_iv4_acceptance_user
-    plan: free
-    region: virginia
-    ipAllowList: []
+# Dedicated probe only; reuse existing private disposable database, never production.
 services:
   - type: web
     name: navigator-pashloc-iv4-db-probe
@@ -21,9 +13,9 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: pashloc-iv4-acceptance-db
+          name: pashloc-iv-disposable-mfa-isolated-20261113
           property: connectionString
       - key: NODE_ENV
         value: test
       - key: PASHLOC_ACCEPTANCE_DATABASE_NAME
-        value: pashloc_iv4_acceptance_disposable
+        value: pashloc_iv_disposable_mfa_isolated
