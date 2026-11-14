@@ -33,7 +33,8 @@ export async function redeemPashLocNavigator(input:{
       and p.claimed_at is not null and p.browser_approved_at is not null
       and p.denied_at is null
       and (p.expires_at>now() or (p.credential_envelope is not null and p.credential_recovery_expires_at>now()))
-      and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
+      and c.purpose='enroll' and c.consumed_at is null
+      and (c.expires_at>now() or (p.credential_envelope is not null and p.credential_recovery_expires_at>now()))
     for update of p,c`,
    [sha(input.pairing_ref),sha(input.claim_id),sha(input.claimant_proof)]
   )
