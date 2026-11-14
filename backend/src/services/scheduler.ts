@@ -1273,6 +1273,14 @@ await sendSMS(
     ) + 1
   )
 
+  const overdueTaskIdentityParts = [
+    String(task?.external_job_id || "").trim()
+      ? `Job #${String(task.external_job_id).trim()}`
+      : "",
+    String(task?.customer_name || "").trim(),
+  ].filter(Boolean)
+  const taskJobIdentity = overdueTaskIdentityParts.join(" — ")
+
   const overdueTaskIdentity = taskJobIdentity
     ? `${taskJobIdentity} — `
     : ""
