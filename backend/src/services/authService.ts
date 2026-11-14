@@ -951,7 +951,12 @@ export async function updateOwnPreferredLanguage(
 export async function getCurrentUserFromToken(token: string) {
   const decoded = verifyToken(token)
 
-  await ensureAuthTables()
+  // The isolated acceptance server checks its already-migrated schema at startup.
+  // Session reads must not run DDL on every request. Normal Navigator behavior
+  // retains its existing initialization path.
+  if (process.env.PASHLOC_ACCEPTANCE_ONLY !== "yes") {
+    await ensureAuthTables()
+  }
 
   const result = await pool.query(
     `
