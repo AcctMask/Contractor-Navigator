@@ -94,4 +94,4 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -c "INSERT INTO tenants DEFAULT VALUES;"
           psql -v ON_ERROR_STOP=1 -c "INSERT INTO app_users(tenant_id) VALUES (1);"
-          psql -v ON_ERROR_STOP=1 -Atc "SELECT pashloc_mfa_required FROM app_users WHERE id=1" | grep -qx f
+          psql -v ON_ERROR_STOP=1 -Atc "SELECT pashloc_mfa_required FROM app_users ORDER BY id DESC LIMIT 1" | grep -qx f
