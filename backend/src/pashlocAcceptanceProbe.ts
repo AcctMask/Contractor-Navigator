@@ -23,7 +23,10 @@ app.get("/healthz", async (_req, reply) => {
       "select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name"
     )
     const tables = schema.rows.map((r: { table_name: string }) => r.table_name)
-    return { ok: true, disposable_database_verified: true, schema_inspected: true,
+    const identities = await pool.query(
+      "select (select count(*)::int from tenants) as tenant_count, (select count(*)::int from app_users) as user_count, exists(select 1 from tenants where slug = 'pashloc-genuine-acceptance-20261114') as expected_tenant"
+    )
+    return { tenant_and_user_readiness: identities.rows[0], ok: true, disposable_database_verified: true, schema_inspected: true,
       table_count: tables.length, required_table_presence: Object.fromEntries(
         ["tenants", "app_users", "pashloc_mfa_enrollments", "pashloc_mfa_challenges",
          "pashloc_mfa_pairings", "pashloc_mfa_device_claim_nonces",
