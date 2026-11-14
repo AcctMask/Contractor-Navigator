@@ -64,6 +64,10 @@ export async function buildMfaAcceptanceServer() {
  app.addHook("onRequest", async (req, reply) => {
    const pathname = new URL(req.url,"http://localhost").pathname
    if (req.method === "GET" && pathname === "/healthz") return
+   // The CORS plugin handles approved OPTIONS preflights before route dispatch.
+   // Unknown paths still fail the plugin/router preflight checks.
+   if (req.method === "OPTIONS" && (allowed.has(pathname) ||
+       /^\/auth\/[^/]+\/login$/.test(pathname))) return
    if (req.method === "POST" && (allowed.has(pathname) ||
        /^\/auth\/[^/]+\/login$/.test(pathname))) return
    return reply.code(404).send({ok:false})
