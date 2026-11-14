@@ -69,6 +69,15 @@ CREATE TABLE IF NOT EXISTS pashloc_mfa_pairings (
  synthetic_retry_nonce_hash text,
  synthetic_retry_nonce_expires_at timestamptz
 );
+-- Upgrade existing isolated acceptance schemas as well as creating fresh ones.
+-- CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+ALTER TABLE pashloc_mfa_pairings
+ ADD COLUMN IF NOT EXISTS credential_envelope jsonb,
+ ADD COLUMN IF NOT EXISTS credential_redeem_proof_hash text,
+ ADD COLUMN IF NOT EXISTS credential_recovery_expires_at timestamptz,
+ ADD COLUMN IF NOT EXISTS credential_retry_attempts integer NOT NULL DEFAULT 0,
+ ADD COLUMN IF NOT EXISTS credential_retry_nonce_hash text,
+ ADD COLUMN IF NOT EXISTS credential_retry_nonce_expires_at timestamptz;
 CREATE UNIQUE INDEX IF NOT EXISTS pashloc_pairings_claim_id_unique
  ON pashloc_mfa_pairings(claim_id_hash) WHERE claim_id_hash IS NOT NULL;
 DO $mfa$ BEGIN
