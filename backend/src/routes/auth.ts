@@ -9,6 +9,8 @@ import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from
 import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
 import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
 import { confirmPashLocFirstCode } from "../services/pashlocConfirmEnrollment"
+import { issuePashLocNavigatorRedeemNonce } from "../services/pashlocNavigatorRedeemNonceV1"
+import { redeemPashLocNavigator } from "../services/pashlocNavigatorRedeemV1"
 import { verifyPashLocRestrictedCredentials } from "../services/pashlocRestrictedCredentialsV1"
 import {
   acceptInvitation,
@@ -564,6 +566,30 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       pairingRef:b.pairing_ref,confirmationCode:b.confirmation_code,
       tenantId:session.tenantId,userId:session.userId})
     return result.approved?{ok:true,approved:true}:reply.code(409).send({ok:false})
+  })
+
+  // Device-only endpoints never issue Navigator JWTs. The browser must first
+  // approve the claim and the phone must sign a fresh redemption challenge.
+  app.post("/auth/mfa/device/redeem-challenge",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const b=request.body||{}
+    const result=await issuePashLocNavigatorRedeemNonce({
+      pairingRef:b.pairing_ref,claimId:b.claim_id,claimantProof:b.claimant_proof
+    })
+    return result?{ok:true,...result}:reply.code(409).send({ok:false})
+  })
+  app.post("/auth/mfa/device/redeem",async(request:any,reply)=>{
+    reply.header("Cache-Control","no-store")
+    if(process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_PHONE_CLAIM_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(503).send({ok:false,error:"unavailable"})
+    const envelope=await redeemPashLocNavigator(request.body||{})
+    return envelope?{ok:true,envelope}:reply.code(409).send({ok:false})
   })
 
   app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
