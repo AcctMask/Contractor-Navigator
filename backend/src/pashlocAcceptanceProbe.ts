@@ -34,6 +34,9 @@ app.get("/healthz", async (_req, reply) => {
   }
 })
 void (async () => {
+  if (process.env.PASHLOC_ACCEPTANCE_APPLY_SCHEMA === "yes") {
+    await import("./pashlocAcceptanceMigration")
+  }
   const res = await app.inject({ method: "GET", url: "/healthz" })
   console.log("PASHLOC_ACCEPTANCE_DB_INSPECTION", res.body)
   if (res.statusCode !== 200) throw Error("Private disposable database verification failed")
