@@ -79,12 +79,24 @@ export function encodeCanonicalContext(c:ContextFields):Buffer {
 const hkdfDomain=Buffer.from(V+"/HKDF-AES256GCM\0","ascii")
 const aadDomain=Buffer.from(V+"/AES-GCM\0","ascii")
 export type SyntheticEnvelope = { version:typeof V; salt:string; context:string; ephemeral_public_key_jwk:DevicePublicJwk; nonce:string; ciphertext:string; tag:string }
+/** Encrypt a genuine Navigator TOTP secret to the approved device's ECDH key.
+ * This primitive does not authorize delivery: callers must separately verify
+ * the signed redeem proof, browser approval, account scope and one-use nonce.
+ */
+export function encryptNavigatorCredentialV1(input:{secret:string; deviceEcdhPublicJwk:unknown;context:ContextFields}):SyntheticEnvelope {
+ if(input.context.environment!=="production") throw new Error("Genuine credential requires production context")
+ if(!/^[A-Z2-7]{16,128}$/.test(input.secret)) throw new Error("Invalid Base32 credential")
+ return encryptEnrollmentEnvelope(input.secret,input.deviceEcdhPublicJwk,input.context)
+}
 export function encryptSyntheticEnrollmentV1(input:{syntheticSecret:string; deviceEcdhPublicJwk:unknown;context:ContextFields}):SyntheticEnvelope {
  if(input.context.environment==="production") throw new Error("Synthetic enrollment is forbidden in production")
  if(!/^[A-Z2-7]{16,128}$/.test(input.syntheticSecret)) throw new Error("Synthetic Base32 test credential required")
- const device=normalizedP256PublicKey(input.deviceEcdhPublicJwk)
- if(publicKeyFingerprint(device)!==input.context.agreementFingerprint) throw new Error("Device agreement-key mismatch")
- const context=encodeCanonicalContext(input.context)
+ return encryptEnrollmentEnvelope(input.syntheticSecret,input.deviceEcdhPublicJwk,input.context)
+}
+function encryptEnrollmentEnvelope(secret:string,deviceEcdhPublicJwk:unknown,contextFields:ContextFields):SyntheticEnvelope {
+ const device=normalizedP256PublicKey(deviceEcdhPublicJwk)
+ if(publicKeyFingerprint(device)!==contextFields.agreementFingerprint) throw new Error("Device agreement-key mismatch")
+ const context=encodeCanonicalContext(contextFields)
  const ephemeral=createECDH("prime256v1");ephemeral.generateKeys()
  const remote=Buffer.concat([Buffer.from([4]),base64url(device.x,32),base64url(device.y,32)])
  const shared=ephemeral.computeSecret(remote)
@@ -94,7 +106,7 @@ export function encryptSyntheticEnrollmentV1(input:{syntheticSecret:string; devi
  const key=Buffer.from(hkdfSync("sha256",shared,salt,Buffer.concat([hkdfDomain,context]),32))
  const cipher=createCipheriv("aes-256-gcm",key,nonce)
  cipher.setAAD(Buffer.concat([aadDomain,context,Buffer.from(publicKeyFingerprint(server),"hex")]))
- const ciphertext=Buffer.concat([cipher.update(input.syntheticSecret,"utf8"),cipher.final()])
+ const ciphertext=Buffer.concat([cipher.update(secret,"utf8"),cipher.final()])
  key.fill(0);shared.fill(0)
  return {version:VERSION,salt:salt.toString("base64url"),context:context.toString("base64url"),ephemeral_public_key_jwk:server,nonce:nonce.toString("base64url"),ciphertext:ciphertext.toString("base64url"),tag:cipher.getAuthTag().toString("base64url")}
 }
