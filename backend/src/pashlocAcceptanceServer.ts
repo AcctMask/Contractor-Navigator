@@ -52,6 +52,7 @@ export async function buildMfaAcceptanceServer() {
  return app
 }
 if (process.argv[1] && /pashlocAcceptanceServer\.(?:ts|js)$/.test(process.argv[1])) {
- const app = await buildMfaAcceptanceServer()
- await app.listen({host:"0.0.0.0",port:Number(process.env.PORT||8789)})
+ void buildMfaAcceptanceServer()
+   .then(app => app.listen({host:"0.0.0.0",port:Number(process.env.PORT||8789)}))
+   .catch(error => { console.error("MFA acceptance startup rejected", error); process.exitCode = 1 })
 }
