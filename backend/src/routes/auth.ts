@@ -571,6 +571,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const acceptanceEligible = process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
       process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
       b.tenant_slug === "pashloc-genuine-acceptance-20261114" &&
+      String(b.email).trim().toLowerCase() === "navigator-acceptance@example.invalid" &&
       account.tenantId > 0 && account.userId > 0
     if(policy.rowCount!==1 ||
        (policy.rows[0].pashloc_mfa_required!==true && !acceptanceEligible))
