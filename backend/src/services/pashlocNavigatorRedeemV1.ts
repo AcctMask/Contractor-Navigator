@@ -96,7 +96,15 @@ export async function redeemPashLocNavigator(input:{
   )
   if(pending.rowCount!==1){await client.query("ROLLBACK");return null}
   const context={
-   version:"AA-PASHLOC-ENROLL-V1",environment:"production",
+   version:"AA-PASHLOC-ENROLL-V1",
+   // Distinct authenticated credential domain for explicitly isolated acceptance.
+   // Never infer acceptance from a phone request or a QR parameter.
+   environment:process.env.PASHLOC_ACCEPTANCE_ONLY==="yes" &&
+     process.env.PASHLOC_ACCEPTANCE_DATABASE_CONFIRMED==="yes" &&
+     process.env.NODE_ENV!=="production" &&
+     process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME &&
+     (()=>{try{return decodeURIComponent(new URL(process.env.DATABASE_URL||"").pathname.slice(1))===process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME}catch{return false}})()
+     ? "acceptance" : "production",
    application:"Navigator",tenantId:String(p.tenant_id),
    userId:String(p.app_user_id),accountId,
    pairingRef:input.pairing_ref,claimId:input.claim_id,
