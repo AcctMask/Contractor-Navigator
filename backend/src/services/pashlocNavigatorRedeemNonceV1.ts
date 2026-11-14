@@ -35,23 +35,23 @@ export async function issuePashLocNavigatorRedeemNonce(input:{
    // from its approved signing key is still mandatory at redemption.
    const retry=await client.query(
     `update pashloc_mfa_pairings p
-       set synthetic_retry_nonce_hash=$4,
-           synthetic_retry_nonce_expires_at=least(p.synthetic_recovery_expires_at,now()+interval '60 seconds'),
-           synthetic_retry_attempts=p.synthetic_retry_attempts+1
+       set credential_retry_nonce_hash=$4,
+           credential_retry_nonce_expires_at=least(p.credential_recovery_expires_at,now()+interval '60 seconds'),
+           credential_retry_attempts=p.credential_retry_attempts+1
       from pashloc_mfa_challenges c
      where p.challenge_id=c.id and p.pairing_hash=$1 and p.claim_id_hash=$2
-       and p.claimant_hash=$3 and p.synthetic_envelope is not null
+       and p.claimant_hash=$3 and p.credential_envelope is not null
        and p.redeemed_at is not null and p.browser_approved_at is not null
-       and p.denied_at is null and p.synthetic_retry_attempts<5
-       and p.synthetic_recovery_expires_at>now()
-       and (p.synthetic_retry_nonce_hash is null or p.synthetic_retry_nonce_expires_at<=now())
+       and p.denied_at is null and p.credential_retry_attempts<5
+       and p.credential_recovery_expires_at>now()
+       and (p.credential_retry_nonce_hash is null or p.credential_retry_nonce_expires_at<=now())
        and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
-     returning p.synthetic_retry_nonce_expires_at`,
+     returning p.credential_retry_nonce_expires_at`,
     [sha(input.pairingRef),sha(input.claimId),sha(input.claimantProof),sha(nonce)]
    )
    if(retry.rowCount!==1){await client.query("ROLLBACK");return null}
    await client.query("COMMIT")
-   return {redeem_nonce:nonce,expires_at:new Date(retry.rows[0].synthetic_retry_nonce_expires_at).toISOString()}
+   return {redeem_nonce:nonce,expires_at:new Date(retry.rows[0].credential_retry_nonce_expires_at).toISOString()}
   }
   await client.query("COMMIT")
   return {redeem_nonce:nonce,expires_at:new Date(r.rows[0].redemption_nonce_expires_at).toISOString()}
