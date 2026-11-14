@@ -95,7 +95,7 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
    const expired=jwt.sign({sub:11,tenant_id:101,role:"admin",exp:1},process.env.JWT_SECRET||"contractor-autopilot-local-secret")
    assert.equal((await call("acceptance-a","Bearer "+expired)).statusCode,401,"expired JWT")
    const own=await call("acceptance-a","Bearer "+token(users[0]))
-   assert.equal(own.statusCode,200,"own tenant")
+   assert.equal(own.statusCode,200,"own tenant: "+own.body+" SQL: "+JSON.stringify(queries.slice(-5)))
    assert.equal(own.json()[pathPrefix.includes("recent")?"rows":"jobs"][0].id,1010)
    assert.equal((await call("acceptance-b","Bearer "+token(users[0]))).statusCode,403,"cross tenant")
    const other=await call("acceptance-b","Bearer "+token(users[1]))
