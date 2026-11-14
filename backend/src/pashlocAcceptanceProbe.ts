@@ -25,9 +25,9 @@ app.get("/healthz", async (_req, reply) => {
     const tables = schema.rows.map((r: { table_name: string }) => r.table_name)
     return { ok: true, disposable_database_verified: true, schema_inspected: true,
       table_count: tables.length, required_table_presence: Object.fromEntries(
-        ["tenants", "app_users", "pashloc_enrollments", "pashloc_challenges",
-         "pashloc_pairings", "pashloc_nonces", "pashloc_sessions",
-         "pashloc_request_limits"].map(name => [name, tables.includes(name)])
+        ["tenants", "app_users", "pashloc_mfa_enrollments", "pashloc_mfa_challenges",
+         "pashloc_mfa_pairings", "pashloc_mfa_device_claim_nonces",
+         "pashloc_mfa_restricted_browser_sessions", "pashloc_mfa_request_limits"].map(name => [name, tables.includes(name)])
       ) }
   } catch {
     return reply.code(503).send({ ok: false })
