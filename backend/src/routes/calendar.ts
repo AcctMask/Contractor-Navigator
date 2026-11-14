@@ -232,7 +232,9 @@ export async function registerCalendarRoutes(app: FastifyInstance) {
   await ensureCalendarTable()
   await ensureCalendarAutomationFoundation()
 
-  registerCalendarReadRoute(app)
+  // Preserve the legacy per-request calendar schema check in normal Navigator.
+  // Isolated acceptance registers this read handler separately with false.
+  registerCalendarReadRoute(app, true)
 
   app.post("/calendar/:tenantSlug/events", async (request: any, reply) => {
     try {
