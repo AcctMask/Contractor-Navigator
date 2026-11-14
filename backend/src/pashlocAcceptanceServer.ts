@@ -5,8 +5,19 @@
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import { registerAuthRoutes } from "./routes/auth"
+import { registerAdminRoutes } from "./routes/admin"
+import { registerCalendarRoutes } from "./routes/calendar"
+import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { pool } from "./db/db"
 import { registerPashLocAcceptanceRateLimits } from "./services/pashlocAcceptanceRateLimit"
+
+const crmReadRoutes = [
+ /^\/auth\/me$/,
+ /^\/platform\/company-dna-runtime\/[^/]+$/,
+ /^\/admin\/jobs\/[^/]+$/,
+ /^\/calendar\/[^/]+\/events$/,
+ /^\/admin\/recent-activity\/[^/]+$/
+]
 
 const allowed = new Set([
  "/auth/mfa/device/claim-challenge",
@@ -84,8 +95,8 @@ export async function buildMfaAcceptanceServer() {
  // Only these pinned origins may make cross-origin MFA requests; never reflect arbitrary origins.
  await app.register(cors, {
    origin: [process.env.APP_BASE_URL!, process.env.PASHLOC_PHONE_ORIGIN!],
-   methods: ["POST"],
-   allowedHeaders: ["Content-Type", "X-PashLoc-CSRF", "X-PashLoc-Restricted-Session"],
+   methods: ["POST", "GET"],
+   allowedHeaders: ["Content-Type", "Authorization", "X-PashLoc-CSRF", "X-PashLoc-Restricted-Session"],
    credentials: false,
    strictPreflight: true,
  })
@@ -94,7 +105,8 @@ export async function buildMfaAcceptanceServer() {
    if (req.method === "GET" && pathname === "/healthz") return
    // The CORS plugin handles approved OPTIONS preflights before route dispatch.
    // Unknown paths still fail the plugin/router preflight checks.
-   if (req.method === "OPTIONS" && (allowed.has(pathname) ||
+   if (req.method === "GET" && crmReadRoutes.some(pattern => pattern.test(pathname))) return
+   if (req.method === "OPTIONS" && (crmReadRoutes.some(pattern => pattern.test(pathname)) || allowed.has(pathname) ||
        /^\/auth\/[^/]+\/login$/.test(pathname))) return
    if (req.method === "POST" && (allowed.has(pathname) ||
        /^\/auth\/[^/]+\/login$/.test(pathname))) return
@@ -103,6 +115,11 @@ export async function buildMfaAcceptanceServer() {
  app.get("/healthz", async () => ({ok:true,service:"navigator-mfa-acceptance"}))
  registerPashLocAcceptanceRateLimits(app)
  await registerAuthRoutes(app)
+ // Reuse the established Navigator handlers; the onRequest allowlist blocks
+ // every other route, including write operations, before handler execution.
+ await registerAdminRoutes(app)
+ await registerCalendarRoutes(app)
+ await registerPlatformProvisioningRoutes(app)
  return app
 }
 if (process.argv[1] && /pashlocAcceptanceServer\.(?:ts|js)$/.test(process.argv[1])) {
