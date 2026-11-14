@@ -113,3 +113,44 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
   await app.close()
  }
 })
+
+
+test("acceptance route gate rejects writes and unrelated CRM paths", async () => {
+ const { default: Fastify } = await import("fastify")
+ const { pool } = await import("../src/db/db")
+ const { buildMfaAcceptanceServer } = await import("../src/pashlocAcceptanceServer")
+ const originalQuery=pool.query
+ const oldEnv={...process.env}
+ Object.assign(process.env,valid)
+ ;(pool as any).query=async (sql:string) => {
+  if(String(sql).includes("to_regclass")) return {rows:[{
+   tenants:true,users:true,enrollments:true,challenges:true,pairings:true,
+   claim_nonces:true,restricted_sessions:true,request_limits:true,
+   default_off_column:true,genuine_envelope_column:true
+  }],rowCount:1}
+  throw Error("Unexpected acceptance gate query")
+ }
+ let app:any
+ try {
+  app=await buildMfaAcceptanceServer()
+  const forbidden=[
+   ["POST","/admin/jobs/acceptance-a"],
+   ["DELETE","/admin/jobs/acceptance-a"],
+   ["POST","/calendar/acceptance-a/events"],
+   ["GET","/admin/unknown/acceptance-a"],
+   ["GET","/platform/tenants"],
+   ["GET","/admin/jobs/acceptance-a/123"],
+   ["GET","/auth/acceptance-a/login"]
+  ] as const
+  for(const [method,url] of forbidden){
+   const response=await app.inject({method,url})
+   assert.equal(response.statusCode,404,method+" "+url)
+  }
+  assert.equal((await app.inject({method:"GET",url:"/healthz"})).statusCode,200)
+ } finally {
+  if(app) await app.close()
+  ;(pool as any).query=originalQuery
+  for(const key of Object.keys(process.env)) if(!(key in oldEnv)) delete process.env[key]
+  Object.assign(process.env,oldEnv)
+ }
+})
