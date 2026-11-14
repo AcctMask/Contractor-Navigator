@@ -23,7 +23,7 @@ export async function issuePashLocNavigatorRedeemNonce(input:{
       and p.pairing_hash=$1 and p.claim_id_hash=$2 and p.claimant_hash=$3
       and p.claimed_at is not null and p.browser_approved_at is not null
       and p.denied_at is null and p.redeemed_at is null
-      and p.redemption_nonce_hash is null
+      and (p.redemption_nonce_hash is null or p.redemption_nonce_expires_at<=now())
       and p.expires_at>now()
       and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
     returning p.redemption_nonce_expires_at`,
