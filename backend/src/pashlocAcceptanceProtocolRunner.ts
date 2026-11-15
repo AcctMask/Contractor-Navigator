@@ -85,6 +85,27 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     vault.set(parsed.accountId,secret)
     result("isolated_credential_storage",vault.get(parsed.accountId)===secret,"ephemeral isolated memory; no persistent secrets")
     const {pashLocTotpAtStep,verifyPashLocTotp}=await import("./services/pashlocTotp")
+    // Deterministic boundaries exercise successive real 30-second TOTP counters
+    // without modifying server clocks or reducing security windows.
+    const baseline=Math.floor(Date.now()/30000)
+    for(const step of [baseline,baseline+1,baseline+2]){
+      const candidate=pashLocTotpAtStep(secret,step)
+      const at=step*30000+15000
+      result("totp_rotation_"+(step-baseline),
+        verifyPashLocTotp(secret,candidate,{nowMs:at,allowedSkewSteps:0})?.acceptedStep===step,
+        "30-second step "+(step-baseline))
+      result("totp_step_replay_"+(step-baseline),
+        verifyPashLocTotp(secret,candidate,{nowMs:at,allowedSkewSteps:0,lastAcceptedStep:step})===null,
+        "accepted step cannot be reused")
+      result("totp_outside_window_"+(step-baseline),
+        verifyPashLocTotp(secret,candidate,{nowMs:(step+3)*30000+15000,allowedSkewSteps:1})===null,
+        "outside permitted +/-1 step")
+    }
+    const leadingZeroStep=Array.from({length:2500},(_,i)=>baseline+i).find(step=>pashLocTotpAtStep(secret,step).startsWith("0"))
+    result("totp_leading_zero",leadingZeroStep!==undefined&&
+      verifyPashLocTotp(secret,pashLocTotpAtStep(secret,leadingZeroStep!),{
+        nowMs:leadingZeroStep!*30000+15000,allowedSkewSteps:0})?.acceptedStep===leadingZeroStep,
+      "six-digit leading zero preserved")
     const currentStep=Math.floor(Date.now()/30000)
     const firstCode=pashLocTotpAtStep(secret,currentStep)
     result("totp_compatibility",!!verifyPashLocTotp(secret,firstCode,{allowedSkewSteps:1}),"Navigator verifier accepted credential-derived TOTP")
