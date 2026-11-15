@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login, verifyPashLocLogin, startPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment } from "../lib/auth"
+import { login, verifyPashLocLogin, startPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment, getPashLocRedemptionStatus } from "../lib/auth"
 import type { PashLocEnrollment } from "../lib/auth"
 import {
   getTenantSlug,
@@ -29,6 +29,7 @@ export default function LoginPage() {
   const [enrollment, setEnrollment] = useState<PashLocEnrollment | null>(null)
   const [deviceCode, setDeviceCode] = useState("")
   const [deviceApproved, setDeviceApproved] = useState(false)
+  const [credentialRedeemed, setCredentialRedeemed] = useState(false)
   const qrContainer = useRef<HTMLDivElement | null>(null)
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
@@ -64,6 +65,20 @@ export default function LoginPage() {
     return () => { cancelled = true; script.remove(); container.replaceChildren() }
   }, [pashlocPhoneUrl])
 
+  useEffect(()=>{
+    if(!enrollment || !deviceApproved || credentialRedeemed)return
+    let cancelled=false
+    const check=async()=>{
+      try{
+        const ready=await getPashLocRedemptionStatus(enrollment)
+        if(!cancelled && ready){setCredentialRedeemed(true);setStatus("PashLoc credential received. Enter your first six-digit code.")}
+      }catch{ /* Keep confirmation locked; retry until session expires. */ }
+    }
+    void check()
+    const interval=window.setInterval(()=>{void check()},2500)
+    return ()=>{cancelled=true;window.clearInterval(interval)}
+  },[enrollment,deviceApproved,credentialRedeemed])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
@@ -85,6 +100,8 @@ export default function LoginPage() {
       if (result?.mfa_required && result.enrollment_required) {
         const session = await startPashLocEnrollment(tenantSlug,email.trim(),password)
         setEnrollment(session)
+        setDeviceApproved(false)
+        setCredentialRedeemed(false)
         enrollmentChallenge = session.challenge_id
       }
       if (result?.mfa_required) {
@@ -153,11 +170,12 @@ export default function LoginPage() {
                   <button type="button" style={buttonStyle} disabled={submitting || deviceCode.length!==8} onClick={async()=>{
                     setSubmitting(true);setError("");try{await approvePashLocEnrollment(enrollment,deviceCode);setDeviceApproved(true)}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
                   }}>Approve this device</button>
-                  {deviceApproved ? <>
+                  {deviceApproved && !credentialRedeemed ? <p role="status">Device approved. Waiting for PashLoc to securely receive and save the credential on your phone. Do not enter a six-digit code yet.</p> : null}
+                  {deviceApproved && credentialRedeemed ? <>
                     <label style={labelStyle}>First six-digit PashLoc code</label>
                     <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
                     <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
-                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrollment complete");navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setCredentialRedeemed(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrollment complete");navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
                     }}>Complete PashLoc enrollment</button>
                   </> : null}
                 </> : <p>Enrollment is unavailable. Please try signing in again.</p>}
@@ -171,7 +189,7 @@ export default function LoginPage() {
                 <button type="submit" disabled={submitting || mfaCode.length!==6} style={buttonStyle}>Verify and open Navigator</button>
               </>
             )}
-            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false);setEnrollment(null);setDeviceApproved(false);setDeviceCode("")}}>Back to sign in</button>
+            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false);setEnrollment(null);setDeviceApproved(false);setCredentialRedeemed(false);setDeviceCode("")}}>Back to sign in</button>
             {error ? <div style={errorStyle}>{error}</div> : null}
           </form>
         ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
