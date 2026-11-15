@@ -88,7 +88,8 @@ void (async () => {
       "/admin/recent-activity/pashloc-genuine-acceptance-20261114"
     ]
     for(const path of authorizedPaths){
-      const response=await genuine.inject({method:"GET",url:path,headers:{authorization:"Bearer "+token}})
+      console.log("PASHLOC_CRM_READ_START",JSON.stringify({path}))
+      const response=await Promise.race([genuine.inject({method:"GET",url:path,headers:{authorization:"Bearer "+token}}),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error("CRM read exceeded 12s: "+path)),12000))])
       console.log("PASHLOC_CRM_AUTHORIZED_READ",JSON.stringify({path,status:response.statusCode,passed:response.statusCode===200}))
       if(response.statusCode!==200) throw Error("Disposable authenticated CRM read failed: "+path)
     }
