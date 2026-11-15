@@ -86,6 +86,19 @@ export async function redeemPashLocNavigator(input:{
   const accountId=randomBytes(24).toString("base64url")
   const credentialSecret=generatePashLocTotpSecret()
   const encrypted=encryptPashLocSecret(credentialSecret,Number(p.tenant_id),Number(p.app_user_id),accountId)
+  // A previous approved pairing may have created a pending credential that
+  // the phone could not decrypt. Retire only an unconfirmed credential whose
+  // original pairing has expired; never alter confirmed enrollment.
+  await client.query(
+   `delete from pashloc_mfa_enrollments e
+     using pashloc_mfa_pairings prior
+    where e.delivery_pairing_id=prior.id
+      and e.tenant_id=$1 and e.app_user_id=$2
+      and e.status='pending'
+      and prior.id<>$3 and prior.expires_at<=now()
+      and prior.credential_recovery_expires_at<=now()`,
+   [p.tenant_id,p.app_user_id,p.id]
+  )
   const pending=await client.query(
    `insert into pashloc_mfa_enrollments
       (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status,delivery_pairing_id)
