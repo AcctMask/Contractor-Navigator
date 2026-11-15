@@ -33,7 +33,7 @@ export async function approvePashLocDeviceClaim(input: {
   try {
     await client.query("BEGIN")
     const result = await client.query(
-      `select p.id,p.confirmation_code_hash,p.confirmation_attempts,p.expires_at
+      `select p.id,p.confirmation_code_hash,p.confirmation_attempts,p.expires_at,p.browser_approved_at
          from pashloc_mfa_challenges c
          join pashloc_mfa_pairings p on p.challenge_id=c.id
         where c.challenge_hash=$1 and c.tenant_id=$2 and c.app_user_id=$3
@@ -41,13 +41,14 @@ export async function approvePashLocDeviceClaim(input: {
           and c.expires_at>now() and c.attempts<c.max_attempts
           and (($4::text is not null and p.claim_id_hash=$4)
             or ($4 is null and p.pairing_hash=$5)) and p.claimed_at is not null
-          and p.browser_approved_at is null and p.denied_at is null
+          and p.denied_at is null
           and p.redeemed_at is null and p.expires_at>now()
         for update of c,p`,
       [sha(input.challengeId),input.tenantId,input.userId,input.claimId ? sha(input.claimId) : null, input.pairingRef ? sha(input.pairingRef) : null]
     )
     if (result.rowCount !== 1) { await client.query("ROLLBACK"); return {approved:false} }
     const p = result.rows[0]
+    if (p.browser_approved_at) { await client.query("COMMIT"); return {approved:true,expiresAt:new Date(p.expires_at).toISOString()} }
     if (p.confirmation_attempts >= 5) { await client.query("ROLLBACK"); return {approved:false} }
     await client.query(
       "update pashloc_mfa_pairings set confirmation_attempts=confirmation_attempts+1 where id=$1",
