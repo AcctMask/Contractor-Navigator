@@ -71,7 +71,7 @@ export default function LoginPage() {
     const check=async()=>{
       try{
         const ready=await getPashLocRedemptionStatus(enrollment)
-        if(!cancelled && ready){setCredentialRedeemed(true);setStatus("PashLoc credential received. Enter your first six-digit code.")}
+        if(!cancelled && ready){setCredentialRedeemed(true);setStatus("Credential redeemed by PashLoc. Confirm it is saved on your phone, then enter your first six-digit code.")}
       }catch{ /* Keep confirmation locked; retry until session expires. */ }
     }
     void check()
@@ -170,7 +170,7 @@ export default function LoginPage() {
                   <button type="button" style={buttonStyle} disabled={submitting || deviceCode.length!==8} onClick={async()=>{
                     setSubmitting(true);setError("");try{await approvePashLocEnrollment(enrollment,deviceCode);setDeviceApproved(true)}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
                   }}>Approve this device</button>
-                  {deviceApproved && !credentialRedeemed ? <p role="status">Device approved. Waiting for PashLoc to securely receive and save the credential on your phone. Do not enter a six-digit code yet.</p> : null}
+                  {deviceApproved && !credentialRedeemed ? <p role="status">Device approved. Waiting for PashLoc to redeem the credential. Save it on your phone before proceeding. Do not enter a six-digit code yet.</p> : null}
                   {deviceApproved && credentialRedeemed ? <>
                     <label style={labelStyle}>First six-digit PashLoc code</label>
                     <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
