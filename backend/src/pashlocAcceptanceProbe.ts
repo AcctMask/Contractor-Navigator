@@ -23,6 +23,9 @@ app.get("/healthz", async (_req, reply) => {
       "select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name"
     )
     const tables = schema.rows.map((r: { table_name: string }) => r.table_name)
+    const tenantColumns = await pool.query("select column_name from information_schema.columns where table_schema='public' and table_name='tenants' order by ordinal_position")
+    const tenantColumnNames = tenantColumns.rows.map((r:{column_name:string})=>r.column_name)
+    console.log("PASHLOC_DISPOSABLE_TENANT_COLUMNS",JSON.stringify(tenantColumnNames))
     const identities = await pool.query(
       "select (select count(*)::int from tenants) as tenant_count, (select count(*)::int from app_users) as user_count, exists(select 1 from tenants where slug = 'pashloc-genuine-acceptance-20261114') as expected_tenant"
     )
