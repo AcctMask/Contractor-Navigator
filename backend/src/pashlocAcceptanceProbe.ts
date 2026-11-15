@@ -40,6 +40,9 @@ app.get("/healthz", async (_req, reply) => {
   }
 })
 void (async () => {
+  if (process.env.PASHLOC_ACCEPTANCE_APPLY_TENANT_COMPAT === "yes") {
+    await import("./pashlocAcceptanceTenantCompatibility")
+  }
   if (process.env.PASHLOC_ACCEPTANCE_APPLY_SCHEMA === "yes") {
     await import("./pashlocAcceptanceMigration")
   }
