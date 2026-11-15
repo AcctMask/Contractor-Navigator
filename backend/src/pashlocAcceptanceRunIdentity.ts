@@ -16,7 +16,7 @@ export async function provisionPashLocAcceptanceIdentity(password:string){
  const created=await pool.query(`
    insert into app_users (tenant_id,email,full_name,role,is_active,financials_authorized,
       password_hash,pashloc_mfa_required,pashloc_mfa_activated_at)
-   select t.id,$1,'Disposable MFA Acceptance','viewer',true,false,$2,true,now()
+   select t.id,$1,'Disposable MFA Acceptance','viewer',true,false,$2,false,null
      from tenants t where t.slug=$3
    returning id,tenant_id`,[email,hash,slug])
  if(created.rowCount!==1)throw Error("Disposable acceptance tenant unavailable")
