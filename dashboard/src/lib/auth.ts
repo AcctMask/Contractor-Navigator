@@ -121,6 +121,12 @@ export async function approvePashLocEnrollment(session:PashLocEnrollment,confirm
     confirmation_code:confirmationCode
   },session)
 }
+export async function getPashLocRedemptionStatus(session:PashLocEnrollment):Promise<boolean> {
+  const result=await enrollmentRequest("redemption-status",{
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref
+  },session)
+  return result.redeemed===true
+}
 export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
   if (!/^\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
   const result = await enrollmentRequest("confirm",{
