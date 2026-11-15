@@ -8,7 +8,7 @@ import {runInNewContext} from "node:vm"
 import {resolve} from "node:path"
 import {claimTranscript,redeemTranscript,normalizedP256PublicKey} from "./services/pashlocEnrollV1Crypto"
 const slug="pashloc-genuine-acceptance-20261114"
-const email="navigator-acceptance@example.invalid"
+
 const origin=process.env.APP_BASE_URL!
 const stages:string[]=[]
 function result(stage:string,passed:boolean,detail:string){
@@ -23,6 +23,8 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
      process.env.NODE_ENV!=="test")throw Error("Acceptance runner gate rejected")
   const password=process.env.PASHLOC_ACCEPTANCE_INITIAL_PASSWORD
   if(!password||password.length<24)throw Error("Disposable acceptance password unavailable")
+  const {provisionPashLocAcceptanceIdentity}=await import("./pashlocAcceptanceRunIdentity")
+  const {email}=await provisionPashLocAcceptanceIdentity(password)
   const abort=AbortSignal.timeout(45000)
   const run=async()=>{
     const headers={origin,"content-type":"application/json"}
