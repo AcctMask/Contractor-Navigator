@@ -7,6 +7,15 @@ import { verifyPashLocTotp } from "./pashlocTotp"
 const validToken = (s: string) => /^[A-Za-z0-9_-]{43}$/.test(s)
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 
+// Diagnostic events contain only the failure stage, never a code, secret,
+// pairing reference, challenge identifier, user identifier or credential.
+const diagnostic = (reason: string) => {
+  if (process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
+      process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated") {
+    console.info("PASHLOC_ACCEPTANCE_CONFIRM_DIAGNOSTIC", JSON.stringify({reason}))
+  }
+}
+
 export async function confirmPashLocFirstCode(input: {
   challengeId: string
   pairingId: string
@@ -29,9 +38,9 @@ export async function confirmPashLocFirstCode(input: {
         for update`,
       [sha(input.challengeId),input.tenantId,input.userId]
     )
-    if (challenge.rowCount !== 1) { await client.query("ROLLBACK"); return null }
+    if (challenge.rowCount !== 1) { diagnostic("challenge_missing_or_expired"); await client.query("ROLLBACK"); return null }
     const c = challenge.rows[0]
-    if (c.attempts >= c.max_attempts) { await client.query("ROLLBACK"); return null }
+    if (c.attempts >= c.max_attempts) { diagnostic("challenge_attempt_limit"); await client.query("ROLLBACK"); return null }
     await client.query("update pashloc_mfa_challenges set attempts=attempts+1 where id=$1", [c.id])
 
     const pairing = await client.query(
@@ -42,7 +51,7 @@ export async function confirmPashLocFirstCode(input: {
         for update`,
       [c.id, sha(input.pairingId)]
     )
-    if (pairing.rowCount !== 1) { await client.query("COMMIT"); return null }
+    if (pairing.rowCount !== 1) { diagnostic("pairing_state_or_expiration"); await client.query("COMMIT"); return null }
 
     const enrolled = await client.query(
       `select e.account_id,e.encrypted_secret,e.last_accepted_step
@@ -54,13 +63,13 @@ export async function confirmPashLocFirstCode(input: {
         for update of e`,
       [c.tenant_id,c.app_user_id,pairing.rows[0].id]
     )
-    if (enrolled.rowCount !== 1) { await client.query("COMMIT"); return null }
+    if (enrolled.rowCount !== 1) { diagnostic("pending_credential_missing"); await client.query("COMMIT"); return null }
     const e = enrolled.rows[0]
     const secret = decryptPashLocSecret(e.encrypted_secret,Number(c.tenant_id),Number(c.app_user_id),e.account_id)
     const match = verifyPashLocTotp(secret,input.code,{
       lastAcceptedStep:e.last_accepted_step === null ? null : Number(e.last_accepted_step)
     })
-    if (!match) { await client.query("COMMIT"); return null }
+    if (!match) { diagnostic("totp_mismatch"); await client.query("COMMIT"); return null }
 
     const confirmed = await client.query(
       `update pashloc_mfa_enrollments
@@ -75,6 +84,7 @@ export async function confirmPashLocFirstCode(input: {
         returning id`,[c.id]
     )
     if (confirmed.rowCount !== 1 || consumed.rowCount !== 1) {
+      diagnostic("confirmation_transaction_conflict")
       await client.query("ROLLBACK")
       return null
     }
@@ -100,12 +110,14 @@ export async function confirmPashLocFirstCode(input: {
         process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
         process.env.PASHLOC_ACCEPTANCE_BOOTSTRAP_ACCOUNT === "yes"
       if (!acceptanceBootstrap) {
+        diagnostic("activation_not_allowed")
         await client.query("ROLLBACK")
         return null
       }
       const identity = await client.query("select current_database() as db,current_user as role")
       if (identity.rows[0]?.db !== "pashloc_iv_disposable_mfa_isolated" ||
           identity.rows[0]?.role !== "pashloc_iv_disposable_mfa_isolated_user") {
+        diagnostic("acceptance_database_identity_rejected")
         await client.query("ROLLBACK")
         return null
       }
@@ -118,11 +130,13 @@ export async function confirmPashLocFirstCode(input: {
         [c.app_user_id,c.tenant_id]
       )
       if (preenabled.rowCount !== 1) {
+        diagnostic("acceptance_preenabled_identity_rejected")
         await client.query("ROLLBACK")
         return null
       }
     }
     await client.query("COMMIT")
+    diagnostic("confirmed")
     return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),accountId:String(e.account_id)}
   } catch (error) {
     await client.query("ROLLBACK")
