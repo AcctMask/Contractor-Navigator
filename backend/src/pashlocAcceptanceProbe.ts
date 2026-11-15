@@ -40,6 +40,9 @@ app.get("/healthz", async (_req, reply) => {
   }
 })
 void (async () => {
+  if (process.env.PASHLOC_ACCEPTANCE_APPLY_CRM_SCHEMA === "yes") {
+    await import("./pashlocAcceptanceCrmSchema")
+  }
   if (process.env.PASHLOC_ACCEPTANCE_APPLY_TENANT_COMPAT === "yes") {
     await import("./pashlocAcceptanceTenantCompatibility")
   }
@@ -83,9 +86,9 @@ void (async () => {
     const authorizedPaths=[
       "/auth/me",
       "/platform/company-dna-runtime/pashloc-genuine-acceptance-20261114",
-      "/admin/jobs/pashloc-genuine-acceptance-20261114",
+      "/admin/jobs/pashloc-genuine-acceptance-20261114?limit=5000",
       "/calendar/pashloc-genuine-acceptance-20261114/events",
-      "/admin/recent-activity/pashloc-genuine-acceptance-20261114"
+      "/admin/recent-activity/pashloc-genuine-acceptance-20261114?limit=10"
     ]
     for(const path of authorizedPaths){
       console.log("PASHLOC_CRM_READ_START",JSON.stringify({path}))
