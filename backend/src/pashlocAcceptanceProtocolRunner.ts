@@ -48,7 +48,7 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const signature=sign("sha256",claimTranscript({pairingRef:body.pairing_ref,nonce:n.proof_nonce,signingKey:publicSigning,agreementKey:publicAgreement}),{key:signing.privateKey,dsaEncoding:"ieee-p1363"}).toString("base64url")
     const claim=await post("/auth/mfa/device/claim",{pairing_ref:body.pairing_ref,device_public_key_jwk:publicSigning,device_ecdh_public_key_jwk:publicAgreement,proof_nonce:n.proof_nonce,proof_signature:signature,protocol_version:"AA-PASHLOC-ENROLL-V1"})
     const c=claim.json()
-    result("signed_device_claim",claim.statusCode===200&&typeof c.claim_id==="string"&&/^\\d{8}$/.test(c.confirmation_code),"HTTP "+claim.statusCode)
+    result("signed_device_claim",claim.statusCode===200&&typeof c.claim_id==="string"&&/^\d{8}$/.test(c.confirmation_code),"HTTP "+claim.statusCode)
     const restricted={"x-pashloc-restricted-session":body.restricted_session,"x-pashloc-csrf":body.csrf_token}
     const approval=await post("/auth/mfa/enrollment/approve-device",{challenge_id:body.challenge_id,pairing_ref:body.pairing_ref,confirmation_code:c.confirmation_code},false,restricted)
     result("independent_browser_approval",approval.statusCode===200&&approval.json().approved===true,"HTTP "+approval.statusCode)
