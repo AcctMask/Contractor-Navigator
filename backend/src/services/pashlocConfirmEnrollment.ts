@@ -47,7 +47,8 @@ export async function confirmPashLocFirstCode(input: {
       `select id from pashloc_mfa_pairings
         where challenge_id=$1 and pairing_hash=$2 and denied_at is null
           and claimed_at is not null and browser_approved_at is not null
-          and redeemed_at is not null and credential_envelope is not null and expires_at>now()
+          and redeemed_at is not null and credential_envelope is not null
+          and (expires_at>now() or credential_recovery_expires_at>now())
         for update`,
       [c.id, sha(input.pairingId)]
     )
