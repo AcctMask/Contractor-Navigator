@@ -99,6 +99,10 @@ void (async () => {
       console.log("PASHLOC_CRM_AUTHORIZED_READ",JSON.stringify({path,status:response.statusCode,passed:response.statusCode===200}))
       if(response.statusCode!==200) throw Error("Disposable authenticated CRM read failed: "+path)
     }
+    if (process.env.PASHLOC_ACCEPTANCE_EXECUTE_PROTOCOL === "yes") {
+      const { executeDisposableMfaAcceptance } = await import("./pashlocAcceptanceProtocolRunner")
+      await executeDisposableMfaAcceptance(genuine)
+    }
     await genuine.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
     console.log("PASHLOC_GENUINE_ACCEPTANCE_LISTENING")
   } else {
