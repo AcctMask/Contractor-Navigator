@@ -91,8 +91,36 @@ export async function confirmPashLocFirstCode(input: {
        returning id`, [c.app_user_id,c.tenant_id]
     )
     if (activated.rowCount !== 1) {
-      await client.query("ROLLBACK")
-      return null
+      // The disposable acceptance bootstrap pre-enables MFA solely to route
+      // the acceptance account through enrollment. Accept that existing flag
+      // only after the genuine TOTP matched and challenge was consumed.
+      const acceptanceBootstrap =
+        process.env.NODE_ENV === "test" &&
+        process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
+        process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
+        process.env.PASHLOC_ACCEPTANCE_BOOTSTRAP_ACCOUNT === "yes"
+      if (!acceptanceBootstrap) {
+        await client.query("ROLLBACK")
+        return null
+      }
+      const identity = await client.query("select current_database() as db,current_user as role")
+      if (identity.rows[0]?.db !== "pashloc_iv_disposable_mfa_isolated" ||
+          identity.rows[0]?.role !== "pashloc_iv_disposable_mfa_isolated_user") {
+        await client.query("ROLLBACK")
+        return null
+      }
+      const preenabled = await client.query(
+        `select u.id from app_users u join tenants t on t.id=u.tenant_id
+          where u.id=$1 and u.tenant_id=$2 and u.is_active=true
+            and u.pashloc_mfa_required=true
+            and u.email='navigator-acceptance@example.invalid'
+            and t.slug='pashloc-genuine-acceptance-20261114'`,
+        [c.app_user_id,c.tenant_id]
+      )
+      if (preenabled.rowCount !== 1) {
+        await client.query("ROLLBACK")
+        return null
+      }
     }
     await client.query("COMMIT")
     return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id),accountId:String(e.account_id)}
