@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify"
-import { createHmac, randomUUID } from "node:crypto"
+import { createHmac, createHash, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
 import { createPashLocLoginChallenge } from "../services/pashlocChallenge"
 import { createPashLocPairing } from "../services/pashlocPairing"
@@ -632,6 +632,42 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(503).send({ok:false,error:"unavailable"})
     const envelope=await redeemPashLocNavigator(request.body||{})
     return envelope?{ok:true,envelope}:reply.code(409).send({ok:false})
+  })
+
+  // Restricted browser can observe redemption readiness, never retrieve the credential.
+  app.post("/auth/mfa/enrollment/redemption-status",async(request:any,reply)=>{
+    if(process.env.PASHLOC_ACCEPTANCE_ONLY!=="yes"||
+       process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME!=="pashloc_iv_disposable_mfa_isolated")
+      return reply.code(404).send({ok:false})
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string"||typeof b.pairing_ref!=="string")
+      return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers["x-pashloc-restricted-session"]||request.headers.cookie,
+      csrfHeader:request.headers["x-pashloc-csrf"],origin:request.headers.origin,
+      expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    const ready=await pool.query(`select exists(
+      select 1 from pashloc_mfa_challenges c
+      join pashloc_mfa_pairings p on p.challenge_id=c.id
+      join pashloc_mfa_enrollments e on e.delivery_pairing_id=p.id
+      where c.challenge_hash=$1 and p.pairing_hash=$2
+        and c.tenant_id=$3 and c.app_user_id=$4
+        and c.purpose='enroll' and c.consumed_at is null and c.expires_at>now()
+        and p.browser_approved_at is not null and p.redeemed_at is not null
+        and p.credential_envelope is not null
+        and (p.expires_at>now() or p.credential_recovery_expires_at>now())
+        and e.tenant_id=$3 and e.app_user_id=$4 and e.status='pending'
+    ) as ready`,[
+      createHash("sha256").update(b.challenge_id).digest("hex"),
+      createHash("sha256").update(b.pairing_ref).digest("hex"),
+      session.tenantId,session.userId
+    ])
+    return {ok:true,redeemed:ready.rows[0]?.ready===true}
   })
 
   app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
