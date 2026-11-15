@@ -102,6 +102,15 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const returnCode=pashLocTotpAtStep(secret,nextStep)
     const verified=await post("/auth/mfa/login/verify",{challenge_id:l.challenge_id,code:returnCode},false)
     result("returning_login",verified.statusCode===200&&verified.json().ok===true,"HTTP "+verified.statusCode)
+    const repeated=await post("/auth/mfa/login/verify",{challenge_id:l.challenge_id,code:returnCode},false)
+    result("returning_login_replay_rejected",repeated.statusCode===401,"HTTP "+repeated.statusCode)
+    const badLogin=await post("/auth/"+slug+"/login",{email,password},false)
+    const badChallenge=badLogin.json()
+    result("negative_login_challenge",badLogin.statusCode===200&&typeof badChallenge.challenge_id==="string","HTTP "+badLogin.statusCode)
+    const invalid=await post("/auth/mfa/login/verify",{challenge_id:badChallenge.challenge_id,code:"not-a-code"},false)
+    result("invalid_totp_rejected",invalid.statusCode===401,"HTTP "+invalid.statusCode)
+    const unauthenticated=await app.inject({method:"GET",url:"/auth/me"})
+    result("unauthenticated_crm_rejected",unauthenticated.statusCode===401,"HTTP "+unauthenticated.statusCode)
     vault.clear()
 
 
