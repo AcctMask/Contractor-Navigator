@@ -100,6 +100,22 @@ void (async () => {
       if(response.statusCode!==200) throw Error("Disposable authenticated CRM read failed: "+path)
     }
     if (process.env.PASHLOC_ACCEPTANCE_EXECUTE_PROTOCOL === "yes") {
+      const diag=await pool.query(`select e.status, e.created_at,
+        p.expires_at, p.credential_recovery_expires_at,
+        (p.expires_at>now()) as pairing_active,
+        (p.credential_recovery_expires_at>now()) as recovery_active
+        from pashloc_mfa_enrollments e
+        join app_users u on u.id=e.app_user_id and u.tenant_id=e.tenant_id
+        join tenants t on t.id=u.tenant_id
+        left join pashloc_mfa_pairings p on p.id=e.delivery_pairing_id
+        where t.slug=$1 and lower(u.email)=$2`,
+        ["pashloc-genuine-acceptance-20261114","navigator-acceptance@example.invalid"])
+      console.log("PASHLOC_ACCEPTANCE_ENROLLMENT_LIFECYCLE",JSON.stringify({
+        count:diag.rowCount,states:diag.rows.map((r:any)=>({
+          status:r.status,pairing_active:r.pairing_active,recovery_active:r.recovery_active
+        }))
+      }))
+
       const { executeDisposableMfaAcceptance } = await import("./pashlocAcceptanceProtocolRunner")
       await executeDisposableMfaAcceptance(genuine)
     }
