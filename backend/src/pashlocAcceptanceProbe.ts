@@ -55,6 +55,9 @@ void (async () => {
   const res = await app.inject({ method: "GET", url: "/healthz" })
   console.log("PASHLOC_ACCEPTANCE_DB_INSPECTION", res.body)
   if (res.statusCode !== 200) throw Error("Private disposable database verification failed")
+  if (process.env.PASHLOC_ACCEPTANCE_BOOTSTRAP_ACCOUNT === "yes") {
+    await import("./pashlocAcceptanceAccountBootstrap")
+  }
   if (process.env.PASHLOC_ACCEPTANCE_RUN_GENUINE === "yes") {
     const { buildMfaAcceptanceServer } = await import("./pashlocAcceptanceServer")
     const genuine = await buildMfaAcceptanceServer()
