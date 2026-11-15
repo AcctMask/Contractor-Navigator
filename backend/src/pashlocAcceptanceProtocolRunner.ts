@@ -2,7 +2,10 @@
  * All results are actual Fastify.inject responses, never synthetic successes.
  */
 import type { FastifyInstance } from "fastify"
-import {generateKeyPairSync,sign} from "node:crypto"
+import {generateKeyPairSync,sign,webcrypto} from "node:crypto"
+import {readFileSync} from "node:fs"
+import {runInNewContext} from "node:vm"
+import {resolve} from "node:path"
 import {claimTranscript,redeemTranscript,normalizedP256PublicKey} from "./services/pashlocEnrollV1Crypto"
 const slug="pashloc-genuine-acceptance-20261114"
 const email="navigator-acceptance@example.invalid"
@@ -62,7 +65,43 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     result("signed_credential_redemption",redemption.statusCode===200&&envelope.ok===true&&!!envelope.envelope,"HTTP "+redemption.statusCode)
     const replay=await post("/auth/mfa/device/redeem",redeemPayload)
     result("redemption_replay_rejected",replay.statusCode===409,"HTTP "+replay.statusCode)
-    console.log("PASHLOC_ACCEPTANCE_STAGE",JSON.stringify({stage:"decryption_through_returning_login",result:"NOT_RUN",detail:"Cryptographic envelope client and subsequent verification not implemented"}))
+
+    const contextBytes=Buffer.from(envelope.envelope.context,"base64url")
+    const pinnedSource=readFileSync(resolve(process.cwd(),"src/acceptance/pashloc-enroll-v1.pinned.cjs"),"utf8")
+    const sandbox:any={crypto:webcrypto,TextEncoder,TextDecoder,Uint8Array,DataView,atob,btoa,console}
+    sandbox.globalThis=sandbox
+    runInNewContext(pinnedSource,sandbox,{timeout:2000})
+    const pashloc=sandbox.PashLocEnrollV1
+    const parsed=pashloc.parseCanonicalContext(envelope.envelope.context)
+    result("credential_context",parsed.environment==="acceptance"&&parsed.pairingRef===body.pairing_ref&&parsed.claimId===c.claim_id,"acceptance environment and claim binding")
+    // Device private key must be a WebCrypto ECDH key, as in the real PashLoc client.
+    // Node's generated EC private key is imported into the WebCrypto implementation.
+    const privateAgreement=await webcrypto.subtle.importKey("jwk",agreement.privateKey.export({format:"jwk"}) as JsonWebKey,{name:"ECDH",namedCurve:"P-256"},false,["deriveBits"])
+    const secret=await pashloc.decryptNavigatorEnvelope(envelope.envelope,privateAgreement,parsed,publicSigning,publicAgreement,"acceptance")
+    result("credential_decryption",typeof secret==="string"&&/^[A-Z2-7]{16,128}$/.test(secret),"PashLoc genuine decrypt succeeded")
+    const vault=new Map<string,string>()
+    vault.set(parsed.accountId,secret)
+    result("isolated_credential_storage",vault.get(parsed.accountId)===secret,"ephemeral isolated memory; no persistent secrets")
+    const {pashLocTotpAtStep,verifyPashLocTotp}=await import("./services/pashlocTotp")
+    const currentStep=Math.floor(Date.now()/30000)
+    const firstCode=pashLocTotpAtStep(secret,currentStep)
+    result("totp_compatibility",!!verifyPashLocTotp(secret,firstCode,{allowedSkewSteps:1}),"Navigator verifier accepted credential-derived TOTP")
+    const confirmation=await post("/auth/mfa/enrollment/confirm",{challenge_id:body.challenge_id,pairing_ref:body.pairing_ref,code:firstCode},false,restricted)
+    const confirmed=confirmation.json()
+    result("first_code_confirmation",confirmation.statusCode===200&&confirmed.enrollment_confirmed===true,"HTTP "+confirmation.statusCode)
+    const bearer=confirmed.token||confirmed.access_token
+    result("mfa_session_issuance",typeof bearer==="string"&&bearer.length>20,"MFA-confirmed bearer issued")
+    const me=await app.inject({method:"GET",url:"/auth/me",headers:{authorization:"Bearer "+bearer}})
+    result("authenticated_crm",me.statusCode===200&&me.json().ok===true,"HTTP "+me.statusCode)
+    const login=await post("/auth/"+slug+"/login",{email,password},false)
+    const l=login.json()
+    result("returning_login_challenge",login.statusCode===200&&typeof l.challenge_id==="string","HTTP "+login.statusCode)
+    const nextStep=Math.floor(Date.now()/30000)+1
+    const returnCode=pashLocTotpAtStep(secret,nextStep)
+    const verified=await post("/auth/mfa/login/verify",{challenge_id:l.challenge_id,code:returnCode},false)
+    result("returning_login",verified.statusCode===200&&verified.json().ok===true,"HTTP "+verified.statusCode)
+    vault.clear()
+
 
   }
   await Promise.race([run(),new Promise<never>((_,reject)=>{
