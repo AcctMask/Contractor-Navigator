@@ -55,6 +55,11 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const c=claim.json()
     result("signed_device_claim",claim.statusCode===200&&typeof c.claim_id==="string"&&/^\d{8}$/.test(c.confirmation_code),"HTTP "+claim.statusCode)
     const restricted={"x-pashloc-restricted-session":body.restricted_session,"x-pashloc-csrf":body.csrf_token}
+    const statusPayload={challenge_id:body.challenge_id,pairing_ref:body.pairing_ref}
+    const beforeStatus=await post("/auth/mfa/enrollment/redemption-status",statusPayload,false,restricted)
+    result("redemption_status_before_approval",beforeStatus.statusCode===200&&beforeStatus.json().redeemed===false,"HTTP "+beforeStatus.statusCode)
+    const deniedStatus=await post("/auth/mfa/enrollment/redemption-status",statusPayload,false)
+    result("redemption_status_requires_restricted_session",deniedStatus.statusCode===403,"HTTP "+deniedStatus.statusCode)
     const approval=await post("/auth/mfa/enrollment/approve-device",{challenge_id:body.challenge_id,pairing_ref:body.pairing_ref,confirmation_code:c.confirmation_code},false,restricted)
     result("independent_browser_approval",approval.statusCode===200&&approval.json().approved===true,"HTTP "+approval.statusCode)
     const challenge=await post("/auth/mfa/device/redeem-challenge",{pairing_ref:body.pairing_ref,claim_id:c.claim_id,claimant_proof:c.claimant_proof})
@@ -65,6 +70,8 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const redemption=await post("/auth/mfa/device/redeem",redeemPayload)
     const envelope=redemption.json()
     result("signed_credential_redemption",redemption.statusCode===200&&envelope.ok===true&&!!envelope.envelope,"HTTP "+redemption.statusCode)
+    const afterStatus=await post("/auth/mfa/enrollment/redemption-status",statusPayload,false,restricted)
+    result("redemption_status_after_redemption",afterStatus.statusCode===200&&afterStatus.json().redeemed===true,"HTTP "+afterStatus.statusCode)
     const replay=await post("/auth/mfa/device/redeem",redeemPayload)
     result("redemption_replay_rejected",replay.statusCode===409,"HTTP "+replay.statusCode)
 
