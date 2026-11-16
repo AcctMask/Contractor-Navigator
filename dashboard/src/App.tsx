@@ -553,7 +553,7 @@ export default function App() {
       <Route path="/timeline" element={<ProtectedPage><TimelinePage /></ProtectedPage>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
-      <Route path="/acceptance/password-setup/:token" element={<AcceptancePasswordSetup />} />
+      <Route path="/acceptance/password-setup" element={<AcceptancePasswordSetup />} />
           <Route
             path="/crew/accept-invite/:token"
             element={<WorkforceAcceptInvite />}
