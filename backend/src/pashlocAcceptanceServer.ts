@@ -24,6 +24,7 @@ const allowed = new Set([
  "/auth/mfa/device/claim-challenge",
  "/auth/mfa/device/claim",
  "/auth/mfa/enrollment/start",
+ "/auth/mfa/enrollment/resume-confirm",
  "/auth/mfa/enrollment/approve-device",
  "/auth/mfa/device/redeem-challenge",
  "/auth/mfa/device/redeem",
