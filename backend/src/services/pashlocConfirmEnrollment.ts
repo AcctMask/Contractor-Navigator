@@ -126,7 +126,7 @@ export async function confirmPashLocFirstCode(input: {
         `select u.id from app_users u join tenants t on t.id=u.tenant_id
           where u.id=$1 and u.tenant_id=$2 and u.is_active=true
             and u.pashloc_mfa_required=true
-            and u.email='navigator-acceptance@example.invalid'
+            and u.email in ('navigator-acceptance@example.invalid','steve@g2groofing.com')
             and t.slug='pashloc-genuine-acceptance-20261114'`,
         [c.app_user_id,c.tenant_id]
       )
