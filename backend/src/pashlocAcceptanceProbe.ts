@@ -86,6 +86,8 @@ void (async () => {
       if (response.statusCode!==expected) throw Error("Genuine acceptance endpoint rejection check failed")
     }
     if (process.env.PASHLOC_CHAIRMAN_PROVISION === "yes") {
+      const {ensureChairmanSetupSchema}=await import("./pashlocAcceptanceChairmanSetup")
+      await ensureChairmanSetupSchema()
       const chairman = await pool.query(`select u.id,u.is_active,u.pashloc_mfa_required,t.slug,
         (select count(*)::int from pashloc_mfa_enrollments e where e.app_user_id=u.id) as enrollments
         from app_users u join tenants t on t.id=u.tenant_id
