@@ -96,10 +96,10 @@ export async function verifyPashLocLogin(challengeId: string, code: string) {
 
 export type PashLocEnrollment = {
   challenge_id: string; pairing_ref: string; csrf_token: string;
-  restricted_session: string; expires_at: string
+  restricted_session: string; expires_at: string; resume?:boolean; enrollment_id?:number; account_id?:string; pairing_ref?:string
 }
 
-async function enrollmentRequest(path: string, payload: Record<string,string>, session?: PashLocEnrollment) {
+async function enrollmentRequest(path: string, payload: Record<string,string|number>, session?: PashLocEnrollment) {
   const res = await fetch(`${API_BASE}/auth/mfa/enrollment/${path}`, {
     method:"POST", cache:"no-store",
     headers:{ "Content-Type":"application/json",
@@ -129,9 +129,13 @@ export async function getPashLocRedemptionStatus(session:PashLocEnrollment):Prom
 }
 export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:string) {
   if (!/^\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
-  const result = await enrollmentRequest("confirm",{
-    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,code
-  },session)
+  const result = session.resume && Number.isSafeInteger(session.enrollment_id)
+    ? await enrollmentRequest("resume-confirm",{
+        challenge_id:session.challenge_id,enrollment_id:session.enrollment_id,code
+      },session)
+    : await enrollmentRequest("confirm",{
+        challenge_id:session.challenge_id,pairing_ref:session.pairing_ref || "",code
+      },session)
   if (result.enrollment_confirmed !== true ||
       typeof result.token !== "string" || !result.token)
     throw new Error("Enrollment confirmed but authenticated session unavailable")
