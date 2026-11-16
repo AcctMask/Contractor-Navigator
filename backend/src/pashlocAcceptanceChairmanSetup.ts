@@ -43,10 +43,11 @@ export async function issueChairmanPasswordSetup() {
  return {ok:true,recipient:email}
 }
 export function registerChairmanPasswordSetup(app:FastifyInstance) {
- app.get("/auth/acceptance/password-setup",async(req:any,reply)=>{
+ app.post("/auth/acceptance/password-setup/validate",async(req:any,reply)=>{
   guard()
   reply.header("Cache-Control","no-store").header("Referrer-Policy","no-referrer")
-  const token=String(req.query?.token||"")
+  if(req.headers.origin!==origin || !String(req.headers["content-type"]||"").startsWith("application/json")) return reply.code(403).send({ok:false})
+  const token=String(req.body?.token||"")
   if(!/^[a-f0-9]{64}$/.test(token)) return reply.code(404).send({ok:false})
   const result=await pool.query(`select u.email from ${table} p join app_users u on u.id=p.user_id join tenants t on t.id=u.tenant_id where p.token_hash=$1 and p.consumed_at is null and p.expires_at>now() and t.slug=$2 and lower(u.email)=$3`,[hashToken(token),slug,email])
   return result.rowCount===1?{ok:true,email}:{ok:false}
