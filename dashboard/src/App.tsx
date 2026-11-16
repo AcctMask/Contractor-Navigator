@@ -14,6 +14,7 @@ import DashboardPage from "./pages/Dashboard"
 import DeveloperSettingsPage from "./pages/DeveloperSettings"
 import LoginPage from "./pages/Login"
 import AcceptInvitePage from "./pages/AcceptInvite"
+import AcceptancePasswordSetup from "./pages/AcceptancePasswordSetup"
 import DocumentPipelinePage from "./pages/DocumentPipeline"
 import CalendarPage from "./pages/Calendar"
 import TasksPage from "./pages/Tasks"
@@ -552,6 +553,7 @@ export default function App() {
       <Route path="/timeline" element={<ProtectedPage><TimelinePage /></ProtectedPage>} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/accept-invite/:token" element={<AcceptInvitePage />} />
+      <Route path="/acceptance/password-setup/:token" element={<AcceptancePasswordSetup />} />
           <Route
             path="/crew/accept-invite/:token"
             element={<WorkforceAcceptInvite />}
