@@ -30,7 +30,8 @@ const allowed = new Set([
  "/auth/mfa/enrollment/confirm",
  "/auth/mfa/enrollment/redemption-status",
  "/auth/mfa/login/verify",
- "/auth/acceptance/password-setup"
+ "/auth/acceptance/password-setup",
+ "/auth/acceptance/password-setup/validate"
 ])
 
 export function assertMfaAcceptanceEnvironment(env: NodeJS.ProcessEnv) {
@@ -108,7 +109,6 @@ export async function buildMfaAcceptanceServer() {
    if (req.method === "GET" && pathname === "/healthz") return
    // The CORS plugin handles approved OPTIONS preflights before route dispatch.
    // Unknown paths still fail the plugin/router preflight checks.
-   if (req.method === "GET" && pathname === "/auth/acceptance/password-setup") return
    if (req.method === "GET" && crmReadRoutes.some(pattern => pattern.test(pathname))) return
    if (req.method === "OPTIONS" && (crmReadRoutes.some(pattern => pattern.test(pathname)) || allowed.has(pathname) ||
        /^\/auth\/[^/]+\/login$/.test(pathname))) return
