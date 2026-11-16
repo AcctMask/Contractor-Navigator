@@ -117,7 +117,7 @@ export async function startPashLocEnrollment(tenantSlug:string,email:string,pass
 }
 export async function approvePashLocEnrollment(session:PashLocEnrollment,confirmationCode:string) {
   return enrollmentRequest("approve-device",{
-    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref,
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref || "",
     confirmation_code:confirmationCode
   },session)
 }
