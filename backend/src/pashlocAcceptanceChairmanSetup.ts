@@ -16,6 +16,10 @@ function guard() {
      new URL(process.env.DATABASE_URL || "").pathname !== "/pashloc_iv_disposable_mfa_isolated")
    throw Error("Chairman setup requires disposable acceptance database")
 }
+export async function ensureChairmanSetupSchema() {
+ guard()
+ await pool.query(`create table if not exists ${table} (id bigserial primary key, user_id bigint not null, token_hash text not null unique, expires_at timestamptz not null, consumed_at timestamptz, created_at timestamptz not null default now())`)
+}
 export async function issueChairmanPasswordSetup() {
  guard()
  if (process.env.PASHLOC_CHAIRMAN_SETUP_ISSUE !== "yes") throw Error("Explicit issuance gate required")
