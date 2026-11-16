@@ -33,7 +33,7 @@ export default function LoginPage() {
   const qrContainer = useRef<HTMLDivElement | null>(null)
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
-    && !enrollment.resume && enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
+    ? enrollment.resume ? "https://pashloc-iv-acceptance-nu.vercel.app/" : enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
     : ""
 
   useEffect(() => {
@@ -50,7 +50,7 @@ export default function LoginPage() {
         new qr(container, { text: pashlocPhoneUrl, width: 224, height: 224,
           colorDark: "#000000", colorLight: "#ffffff", correctLevel: 2 })
         const img = container.querySelector("img")
-        if (img) img.alt = "PashLoc Navigator enrollment QR code"
+        if (img) img.alt = enrollment?.resume ? "Open existing PashLoc app on your phone" : "PashLoc Navigator enrollment QR code"
       } catch {
         setQrError("QR code unavailable. Use the secure enrollment link below.")
       }
@@ -63,7 +63,7 @@ export default function LoginPage() {
     if ((window as Window & { QRCode?: unknown }).QRCode) renderQr()
     else document.head.appendChild(script)
     return () => { cancelled = true; script.remove(); container.replaceChildren() }
-  }, [pashlocPhoneUrl])
+  }, [pashlocPhoneUrl, enrollment?.resume])
 
   useEffect(()=>{
     if(!enrollment || !deviceApproved || credentialRedeemed)return
@@ -155,8 +155,11 @@ export default function LoginPage() {
               <div style={{display:"grid",gap:"12px"}}>
                 <p>Connect your PashLoc account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
                 {enrollment?.resume ? <>
-                  <p>Your existing PashLoc credential has already been redeemed. No QR scan, device approval, or new account is needed.</p>
-                  <p>Open the existing Navigator account in PashLoc IV on your iPhone and enter its current six-digit code. If you have multiple saved Navigator entries, do not delete either one.</p>
+                  <p>Your existing PashLoc credential has already been redeemed. Scan this QR with your iPhone to open PashLoc IV. This QR does not create or replace a credential.</p>
+                  <div ref={qrContainer} role="img" aria-label="Open existing PashLoc IV on iPhone" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
+                  {qrError ? <p role="status">{qrError}</p> : null}
+                  <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV</a>
+                  <p>Unlock the original Safari or installed PashLoc vault, select your existing Navigator account, and enter its current six-digit code. If the phone shows no protected accounts, do not enter a random code or erase any vault. Open the original installation; the current browser cannot access credentials stored in another browser.</p>
                   <label style={labelStyle}>Current six-digit PashLoc code</label>
                   <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
                   <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
