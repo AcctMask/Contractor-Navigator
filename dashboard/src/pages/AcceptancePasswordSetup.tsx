@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-const API = import.meta.env.VITE_API_BASE
+const API = import.meta.env.VITE_PASHLOC_ACCEPTANCE_API_ORIGIN
 export default function AcceptancePasswordSetup() {
  const [token]=useState(()=>{const raw=window.location.hash.slice(1);window.history.replaceState(null,"",window.location.pathname);return raw})
  const [valid,setValid]=useState(false),[loading,setLoading]=useState(true)
