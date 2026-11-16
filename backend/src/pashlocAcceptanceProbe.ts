@@ -89,7 +89,7 @@ void (async () => {
       const {ensureChairmanSetupSchema}=await import("./pashlocAcceptanceChairmanSetup")
       await ensureChairmanSetupSchema()
       const chairman = await pool.query(`select u.id,u.is_active,u.pashloc_mfa_required,t.slug,
-        (select count(*)::int from pashloc_mfa_enrollments e where e.app_user_id=u.id) as enrollments
+        (select count(*)::int from pashloc_mfa_enrollments e where e.app_user_id=u.id and e.status='confirmed') as enrollments
         from app_users u join tenants t on t.id=u.tenant_id
         where t.slug=$1 and lower(u.email)=$2`,
         ["pashloc-genuine-acceptance-20261114","steve@g2groofing.com"])
