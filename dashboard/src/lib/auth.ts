@@ -95,7 +95,7 @@ export async function verifyPashLocLogin(challengeId: string, code: string) {
 }
 
 export type PashLocEnrollment = {
-  challenge_id: string; pairing_ref: string; csrf_token: string;
+  challenge_id: string; csrf_token: string;
   restricted_session: string; expires_at: string; resume?:boolean; enrollment_id?:number; account_id?:string; pairing_ref?:string
 }
 
@@ -131,7 +131,7 @@ export async function confirmPashLocEnrollment(session:PashLocEnrollment,code:st
   if (!/^\d{6}$/.test(code)) throw new Error("Enter a valid six-digit PashLoc code")
   const result = session.resume && Number.isSafeInteger(session.enrollment_id)
     ? await enrollmentRequest("resume-confirm",{
-        challenge_id:session.challenge_id,enrollment_id:session.enrollment_id,code
+        challenge_id:session.challenge_id,enrollment_id:session.enrollment_id!,code
       },session)
     : await enrollmentRequest("confirm",{
         challenge_id:session.challenge_id,pairing_ref:session.pairing_ref || "",code
