@@ -48,7 +48,7 @@ export async function approvePashLocDeviceClaim(input: {
     )
     if (result.rowCount !== 1) { await client.query("ROLLBACK"); return {approved:false} }
     const p = result.rows[0]
-    if (p.browser_approved_at) { await client.query("COMMIT"); return {approved:true,expiresAt:new Date(p.expires_at).toISOString()} }
+    if (p.browser_approved_at) { await client.query("ROLLBACK"); return {approved:false} }
     if (p.confirmation_attempts >= 5) { await client.query("ROLLBACK"); return {approved:false} }
     await client.query(
       "update pashloc_mfa_pairings set confirmation_attempts=confirmation_attempts+1 where id=$1",
