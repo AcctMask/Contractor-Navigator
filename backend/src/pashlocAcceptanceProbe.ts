@@ -58,9 +58,11 @@ void (async () => {
   if (process.env.PASHLOC_ACCEPTANCE_BOOTSTRAP_ACCOUNT === "yes") {
     await import("./pashlocAcceptanceAccountBootstrap")
   }
-  if (process.env.PASHLOC_CHAIRMAN_SETUP_ISSUE === "yes") {
+  if (process.env.PASHLOC_CHAIRMAN_PROVISION === "yes" || process.env.PASHLOC_CHAIRMAN_SETUP_ISSUE === "yes") {
     const {provisionChairmanAcceptanceIdentity}=await import("./pashlocAcceptanceChairmanIdentity")
     await provisionChairmanAcceptanceIdentity()
+  }
+  if (process.env.PASHLOC_CHAIRMAN_SETUP_ISSUE === "yes") {
     const {issueChairmanPasswordSetup}=await import("./pashlocAcceptanceChairmanSetup")
     await issueChairmanPasswordSetup()
     console.log("PASHLOC_CHAIRMAN_SETUP_INVITATION_DELIVERY_ACCEPTED")
