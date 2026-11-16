@@ -9,6 +9,7 @@ import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from
 import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
 import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
 import { confirmPashLocFirstCode } from "../services/pashlocConfirmEnrollment"
+import { findResumablePashLocEnrollment, confirmResumedPashLocEnrollment } from "../services/pashlocResumeEnrollment"
 import { issuePashLocNavigatorRedeemNonce } from "../services/pashlocNavigatorRedeemNonceV1"
 import { redeemPashLocNavigator } from "../services/pashlocNavigatorRedeemV1"
 import { verifyPashLocRestrictedCredentials } from "../services/pashlocRestrictedCredentialsV1"
@@ -579,6 +580,19 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     const enrolled=await pool.query(`select id from pashloc_mfa_enrollments
       where app_user_id=$1 and tenant_id=$2 and status='confirmed' limit 1`,[account.userId,account.tenantId])
     if(enrolled.rowCount)return reply.code(409).send({ok:false,error:"already_enrolled"})
+    // A redeemed pending credential must never trigger another QR pairing.
+    const existing=await findResumablePashLocEnrollment(account.tenantId,account.userId)
+    if(existing){
+      const challenge=await createPashLocLoginChallenge({tenantId:account.tenantId,userId:account.userId,purpose:"enroll"})
+      const restricted=await stageRestrictedBrowserSession({tenantId:account.tenantId,userId:account.userId,challengeId:challenge.challengeId,purpose:"enroll"})
+      reply.header("Set-Cookie",restrictedCookie(restricted.sessionId))
+      return {ok:true,resume:true,enrollment_id:existing.id,account_id:existing.accountId,
+        challenge_id:challenge.challengeId,csrf_token:restricted.csrfToken,
+        restricted_session:restricted.sessionId,expires_at:restricted.expiresAt}
+    }
+    const pending=await pool.query(`select id from pashloc_mfa_enrollments
+      where app_user_id=$1 and tenant_id=$2 and status='pending' limit 1`,[account.userId,account.tenantId])
+    if(pending.rowCount)return reply.code(409).send({ok:false,error:"pending_enrollment_requires_reconciliation"})
     const challenge=await createPashLocLoginChallenge({tenantId:account.tenantId,userId:account.userId,purpose:"enroll"})
     const pairing=await createPashLocPairing({challengeId:challenge.challengeId,tenantId:account.tenantId,userId:account.userId})
     const restricted=await stageRestrictedBrowserSession({tenantId:account.tenantId,userId:account.userId,challengeId:challenge.challengeId,purpose:"enroll"})
@@ -668,6 +682,33 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       session.tenantId,session.userId
     ])
     return {ok:true,redeemed:ready.rows[0]?.ready===true}
+  })
+
+  app.post("/auth/mfa/enrollment/resume-confirm",async(request:any,reply)=>{
+    if(process.env.PASHLOC_ACCEPTANCE_ONLY!=="yes" ||
+       process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME!=="pashloc_iv_disposable_mfa_isolated" ||
+       process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")
+      return reply.code(404).send({ok:false})
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string" || !Number.isSafeInteger(b.enrollment_id) ||
+       typeof b.code!=="string")return reply.code(400).send({ok:false})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers["x-pashloc-restricted-session"]||request.headers.cookie,
+      csrfHeader:request.headers["x-pashloc-csrf"],origin:request.headers.origin,
+      expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false})
+    const confirmed=await confirmResumedPashLocEnrollment({
+      tenantId:session.tenantId,userId:session.userId,challengeId:session.challengeId,
+      enrollmentId:b.enrollment_id,code:b.code})
+    if(!confirmed)return reply.code(401).send({ok:false,error:"invalid_or_expired_code"})
+    const authenticated=await completePashLocFirstEnrollmentSession(confirmed.tenantId,confirmed.userId)
+    reply.header("Set-Cookie",clearRestrictedCookie())
+    return {ok:true,enrollment_confirmed:true,...authenticated}
   })
 
   app.post("/auth/mfa/enrollment/confirm",async(request:any,reply)=>{
