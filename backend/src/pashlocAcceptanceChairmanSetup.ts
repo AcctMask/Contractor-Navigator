@@ -38,7 +38,7 @@ export async function issueChairmanPasswordSetup() {
   await client.query("COMMIT")
  } catch(e) {await client.query("ROLLBACK");throw e} finally {client.release()}
  // Never log the token or link. Email directly to the intended mailbox.
- const delivered = await sendActualAssistantNavigatorEmail({to:email,subject:"Navigator acceptance — secure password setup",heading:"Set up your Navigator acceptance password",lines:["This one-time link expires in 30 minutes.","This is an isolated acceptance account. Your production Navigator password is unchanged."],buttonLabel:"Set acceptance password",buttonUrl:origin+"/acceptance/password-setup/"+token})
+ const delivered = await sendActualAssistantNavigatorEmail({to:email,subject:"Navigator acceptance — secure password setup",heading:"Set up your Navigator acceptance password",lines:["This one-time link expires in 30 minutes.","This is an isolated acceptance account. Your production Navigator password is unchanged."],buttonLabel:"Set acceptance password",buttonUrl:origin+"/acceptance/password-setup#"+token})
  if (!delivered.ok) throw Error("Chairman setup invitation delivery failed")
  return {ok:true,recipient:email}
 }
