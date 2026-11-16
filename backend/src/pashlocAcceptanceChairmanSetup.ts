@@ -1,6 +1,6 @@
 /** Isolated Chairman password setup. No production route, invitation acceptance, or JWT issuance. */
 import type { FastifyInstance } from "fastify"
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto"
+import { randomBytes, createHash } from "node:crypto"
 import bcrypt from "bcryptjs"
 import { pool } from "./db/db"
 import { sendActualAssistantNavigatorEmail } from "./services/emailService"
