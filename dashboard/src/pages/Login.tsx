@@ -33,7 +33,7 @@ export default function LoginPage() {
   const qrContainer = useRef<HTMLDivElement | null>(null)
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
-    ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
+    && !enrollment.resume && enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
     : ""
 
   useEffect(() => {
@@ -100,15 +100,15 @@ export default function LoginPage() {
       if (result?.mfa_required && result.enrollment_required) {
         const session = await startPashLocEnrollment(tenantSlug,email.trim(),password)
         setEnrollment(session)
-        setDeviceApproved(false)
-        setCredentialRedeemed(false)
+        setDeviceApproved(session.resume===true)
+        setCredentialRedeemed(session.resume===true)
         enrollmentChallenge = session.challenge_id
       }
       if (result?.mfa_required) {
         setMfaChallenge(result.enrollment_required ? enrollmentChallenge : result.challenge_id)
         setMfaEnrollmentRequired(Boolean(result.enrollment_required))
         setPassword("")
-        setStatus(result.enrollment_required ? "PashLoc enrollment required" : "Enter your PashLoc code")
+        setStatus(result.enrollment_required ? ("PashLoc verification required") : "Enter your PashLoc code")
         return
       }
       setStatus("Login successful")
@@ -154,7 +154,15 @@ export default function LoginPage() {
             {mfaEnrollmentRequired ? (
               <div style={{display:"grid",gap:"12px"}}>
                 <p>Connect your PashLoc account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
-                {enrollment ? <>
+                {enrollment?.resume ? <>
+                  <p>Your existing PashLoc credential has already been redeemed. No QR scan, device approval, or new account is needed.</p>
+                  <p>Open the existing Navigator account in PashLoc IV on your iPhone and enter its current six-digit code. If you have multiple saved Navigator entries, do not delete either one.</p>
+                  <label style={labelStyle}>Current six-digit PashLoc code</label>
+                  <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
+                  <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
+                    setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setMfaEnrollmentRequired(false);navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                  }}>Verify existing PashLoc and open Navigator</button>
+                </> : enrollment ? <>
                   <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
                   <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
                   <p>Scan this QR using the device where you use PashLoc, or open the secure enrollment link there. The QR contains only the short-lived pairing reference—not your password or verification secret.</p>
