@@ -93,7 +93,7 @@ export async function assertMfaAcceptanceSchema() {
 export async function buildMfaAcceptanceServer() {
  assertMfaAcceptanceEnvironment(process.env)
  await assertMfaAcceptanceSchema()
- const app = Fastify({logger:true,bodyLimit:16*1024})
+ const app = Fastify({logger:false,bodyLimit:16*1024})
  // The protected Navigator browser and PashLoc phone are distinct origins.
  // Only these pinned origins may make cross-origin MFA requests; never reflect arbitrary origins.
  await app.register(cors, {
