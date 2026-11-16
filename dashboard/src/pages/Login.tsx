@@ -34,7 +34,7 @@ export default function LoginPage() {
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
     ? enrollment.resume ? "https://pashloc-iv-acceptance-nu.vercel.app/" : enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
-    : ""
+    : "" : ""
 
   useEffect(() => {
     if (!pashlocPhoneUrl || !qrContainer.current) return
