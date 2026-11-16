@@ -123,7 +123,7 @@ export async function approvePashLocEnrollment(session:PashLocEnrollment,confirm
 }
 export async function getPashLocRedemptionStatus(session:PashLocEnrollment):Promise<boolean> {
   const result=await enrollmentRequest("redemption-status",{
-    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref
+    challenge_id:session.challenge_id,pairing_ref:session.pairing_ref || ""
   },session)
   return result.redeemed===true
 }
