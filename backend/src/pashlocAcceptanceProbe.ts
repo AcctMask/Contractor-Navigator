@@ -108,6 +108,46 @@ void (async () => {
       const unauth=await genuine.inject({method:"GET",url:"/auth/me"})
       if(unauth.statusCode!==401)throw Error("CRM session bypass")
       console.log("PASHLOC_CHAIRMAN_SETUP_NEGATIVE_TESTS",JSON.stringify({invalid_token:"PASS",origin_rejection:"PASS",unauthenticated_crm:"PASS"}))
+      if(process.env.PASHLOC_CHAIRMAN_SETUP_TEST==="yes"){
+        const {randomBytes,createHash}=await import("node:crypto")
+        const bcrypt=(await import("bcryptjs")).default
+        const origin=process.env.APP_BASE_URL!
+        const newToken=()=>randomBytes(32).toString("hex")
+        const hash=(v:string)=>createHash("sha256").update(v).digest("hex")
+        const table="pashloc_chairman_password_setup"
+        const expired=newToken(),used=newToken(),valid=newToken()
+        const uid=chairman.rows[0].id
+        await pool.query(`insert into ${table}(user_id,token_hash,expires_at,consumed_at) values
+          ($1,$2,now()-interval '1 second',null),
+          ($1,$3,now()+interval '30 minutes',now()),
+          ($1,$4,now()+interval '30 minutes',null)`,[uid,hash(expired),hash(used),hash(valid)])
+        const headers={origin,"content-type":"application/json"}
+        const validate=async(token:string)=>genuine.inject({method:"POST",url:"/auth/acceptance/password-setup/validate",headers,payload:{token}})
+        for(const t of [expired,used]){
+          const v=await validate(t)
+          if(v.statusCode!==200||JSON.parse(v.body).ok!==false)throw Error("Expired or used invitation accepted")
+        }
+        const before=await validate(valid)
+        if(before.statusCode!==200||JSON.parse(before.body).ok!==true)throw Error("Valid invitation rejected")
+        const secret=randomBytes(48).toString("hex")
+        const setup=await genuine.inject({method:"POST",url:"/auth/acceptance/password-setup",headers,payload:{token:valid,password:secret}})
+        const body=JSON.parse(setup.body)
+        if(setup.statusCode!==200||body.ok!==true||body.token||body.jwt||body.access_token)throw Error("Password setup failed or issued session")
+        const replay=await genuine.inject({method:"POST",url:"/auth/acceptance/password-setup",headers,payload:{token:valid,password:secret}})
+        if(replay.statusCode!==410)throw Error("Used setup token replay accepted")
+        const after=await validate(valid)
+        if(JSON.parse(after.body).ok!==false)throw Error("Consumed invitation still valid")
+        const stored=await pool.query("select password_hash,pashloc_mfa_required from app_users where id=$1",[uid])
+        if(!stored.rows[0]?.pashloc_mfa_required||!(await bcrypt.compare(secret,stored.rows[0].password_hash)))throw Error("Secure password hash not persisted")
+        const login=await genuine.inject({method:"POST",url:"/auth/pashloc-genuine-acceptance-20261114/login",
+          headers,payload:{email:"steve@g2groofing.com",password:secret}})
+        const result=JSON.parse(login.body)
+        if(login.statusCode!==200||result.token||result.mfa_required!==true||result.enrollment_required!==true)throw Error("Chairman login bypassed enrollment")
+        const crm=await genuine.inject({method:"GET",url:"/auth/me"})
+        if(crm.statusCode!==401)throw Error("Unauthenticated CRM access")
+        console.log("PASHLOC_CHAIRMAN_SETUP_SECURITY_PROOF",JSON.stringify({expiration:"PASS",consumed:"PASS",identity:"PASS",valid_setup:"PASS",single_use:"PASS",bcrypt:"PASS",no_jwt:"PASS",mfa_enrollment_required:"PASS",crm_denied:"PASS"}))
+      }
+
     }
     // Test-only signed token is used solely inside Fastify.inject; never returned to a client.
     // This proves CRM read handlers, not a completed PashLoc device authentication.
