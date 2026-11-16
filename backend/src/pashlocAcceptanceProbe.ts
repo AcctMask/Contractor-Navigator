@@ -175,6 +175,9 @@ void (async () => {
     if (process.env.PASHLOC_ACCEPTANCE_EXECUTE_PROTOCOL === "yes") {
       const diag=await pool.query(`select e.status, e.created_at,
         p.expires_at, p.credential_recovery_expires_at,
+        (p.credential_envelope is not null) as redeemed,
+        (p.browser_approved_at is not null) as approved,
+        (p.claimed_at is not null) as claimed,
         (p.expires_at>now()) as pairing_active,
         (p.credential_recovery_expires_at>now()) as recovery_active
         from pashloc_mfa_enrollments e
@@ -182,10 +185,10 @@ void (async () => {
         join tenants t on t.id=u.tenant_id
         left join pashloc_mfa_pairings p on p.id=e.delivery_pairing_id
         where t.slug=$1 and lower(u.email)=$2`,
-        ["pashloc-genuine-acceptance-20261114","navigator-acceptance@example.invalid"])
-      console.log("PASHLOC_ACCEPTANCE_ENROLLMENT_LIFECYCLE",JSON.stringify({
+        ["pashloc-genuine-acceptance-20261114","steve@g2groofing.com"])
+      console.log("PASHLOC_CHAIRMAN_ENROLLMENT_LIFECYCLE",JSON.stringify({
         count:diag.rowCount,states:diag.rows.map((r:any)=>({
-          status:r.status,pairing_active:r.pairing_active,recovery_active:r.recovery_active
+          status:r.status,claimed:r.claimed,approved:r.approved,redeemed:r.redeemed,pairing_active:r.pairing_active,recovery_active:r.recovery_active
         }))
       }))
 
