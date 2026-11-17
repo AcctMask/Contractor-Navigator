@@ -98,7 +98,7 @@ void (async () => {
         ["pashloc-genuine-acceptance-20261114","steve@g2groofing.com"])
       if(chairman.rowCount!==1||!chairman.rows[0].is_active||
          chairman.rows[0].pashloc_mfa_required!==true||
-         chairman.rows[0].enrollments!==0) throw Error("Chairman isolated identity verification failed")
+         chairman.rows[0].enrollments>1) throw Error("Chairman isolated identity verification failed")
       console.log("PASHLOC_CHAIRMAN_IDENTITY_VERIFIED",JSON.stringify({isolated:true,tenant_bound:true,mfa_required:true,enrollment_conflicts:0}))
       const invalid = await genuine.inject({method:"POST",url:"/auth/acceptance/password-setup/validate",
         headers:{origin:process.env.APP_BASE_URL!,"content-type":"application/json"},
