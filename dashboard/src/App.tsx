@@ -38,6 +38,7 @@ import {
 import { useLanguage } from "./context/LanguageContext"
 import { translateNavigationLabel } from "./lib/workforceLanguage"
 import { useTenant } from "./context/TenantContext"
+import { maySelectOwnerWorkspace } from "./lib/tenantSelection"
 import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
@@ -176,8 +177,7 @@ function HeaderBar() {
       !nextTenantSlug ||
       nextTenantSlug === tenantSlug ||
       isolatedMfaAcceptance ||
-      currentUser?.role !== "platform_owner" ||
-      !platformTenants.some((tenant) => tenant.slug === nextTenantSlug)
+      !maySelectOwnerWorkspace(currentUser?.role, nextTenantSlug, platformTenants)
     ) {
       return
     }
