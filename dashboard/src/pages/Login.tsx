@@ -20,6 +20,10 @@ export default function LoginPage() {
   })
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [showPassword,setShowPassword]=useState(false)
+  const [showRecoveryPassword,setShowRecoveryPassword]=useState(false)
+  const [clockNow,setClockNow]=useState(Date.now())
+  useEffect(()=>{const timer=window.setInterval(()=>setClockNow(Date.now()),1000);return ()=>window.clearInterval(timer)},[])
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
@@ -164,7 +168,8 @@ export default function LoginPage() {
                   <p>Unlock the original Safari or installed PashLoc vault, select your existing Navigator account, and enter its current six-digit code. If the phone shows no protected accounts, do not enter a random code or erase any vault. Open the original installation; the current browser cannot access credentials stored in another browser.</p>
                   <p>If your original iPhone vault has no Navigator credential, you can explicitly authorize recovery of this pending acceptance enrollment. The old record is retained for audit and a fresh QR will be issued for the same user.</p>
                   <label style={labelStyle}>Enter the password created for this isolated Navigator acceptance registration (not your normal production Navigator password)</label>
-                  <input type="password" autoComplete="current-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} style={inputStyle}/>
+                  <input type={showRecoveryPassword?"text":"password"} autoComplete="current-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} style={inputStyle}/>
+                  <label><input type="checkbox" checked={showRecoveryPassword} onChange={e=>setShowRecoveryPassword(e.target.checked)}/> Show recovery password</label>
                   <label><input type="checkbox" checked={recoveryApproved} onChange={e=>setRecoveryApproved(e.target.checked)}/> I approve superseding the inaccessible pending PashLoc credential for this account.</label>
                   <button type="button" style={buttonStyle} disabled={submitting || !recoveryPassword || !recoveryApproved} onClick={async()=>{
                     if(!enrollment)return
@@ -184,6 +189,7 @@ export default function LoginPage() {
                   }}>Verify existing PashLoc and open Navigator</button>
                 </> : enrollment ? <>
                   <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
+                  {clockNow>=new Date(enrollment.expires_at).getTime() ? <p role="alert" style={{color:"#ffb6b6",fontWeight:700}}>This QR has expired. Do not attempt approval on the phone. Return to sign-in and request a fresh pairing using authorized recovery if required.</p> : <p role="status" style={{fontWeight:700}}>Time remaining to claim pairing: {Math.max(0,Math.ceil((new Date(enrollment.expires_at).getTime()-clockNow)/1000))} seconds. Scan and claim immediately.</p>}
                   <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
                   <p>Scan this QR using the device where you use PashLoc, or open the secure enrollment link there. The QR contains only the short-lived pairing reference—not your password or verification secret.</p>
                   <div ref={qrContainer} role="img" aria-label="PashLoc enrollment QR code" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
@@ -260,12 +266,13 @@ export default function LoginPage() {
           <div>
             <label style={labelStyle}>Password</label>
             <input
-              type="password"
+              type={showPassword?"text":"password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
               style={inputStyle}
             />
+            <label><input type="checkbox" checked={showPassword} onChange={e=>setShowPassword(e.target.checked)}/> Show password</label>
           </div>
 
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
