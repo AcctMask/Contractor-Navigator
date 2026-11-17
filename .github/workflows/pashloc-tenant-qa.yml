@@ -1,0 +1,52 @@
+name: Navigator isolated two-tenant Owner authorization QA
+
+on:
+  pull_request:
+    branches:
+      - engineering/navi45-production-mfa-gate-20261113
+    paths:
+      - backend/tests/pashlocOwnerTenantScope.integration.test.ts
+      - .github/workflows/pashloc-tenant-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-two-tenant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pashloc_qa
+          POSTGRES_PASSWORD: pashloc_qa_only
+          POSTGRES_DB: pashloc_qa_ephemeral
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pashloc_qa -d pashloc_qa_ephemeral"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://pashloc_qa:pashloc_qa_only@127.0.0.1:5432/pashloc_qa_ephemeral
+      JWT_SECRET: pashloc-isolated-qa-nonproduction-secret
+      PASHLOC_TENANT_QA_EPHEMERAL: "yes"
+      PASHLOC_DISPOSABLE_DB_TEST: "yes"
+      PASHLOC_ACCEPTANCE_ONLY: "yes"
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Exercise live Fastify tenant directory and CRM read handlers
+        working-directory: backend
+        run: npx tsx --test tests/pashlocOwnerTenantScope.integration.test.ts
