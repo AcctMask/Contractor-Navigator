@@ -147,7 +147,8 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const {stageRestrictedBrowserSession}=await import("./services/pashlocRestrictedSessionStoreV1")
     const recoveryIdentity=await provisionPashLocAcceptanceIdentity(password)
     const u=await pool.query("select id,tenant_id from app_users where email=$1",[recoveryIdentity.email])
-    const recoveryUser=u.rows[0]
+    const recoveryUser={id:Number(u.rows[0]?.id),tenant_id:Number(u.rows[0]?.tenant_id)}
+    if(!Number.isSafeInteger(recoveryUser.id)||!Number.isSafeInteger(recoveryUser.tenant_id))throw Error("Recovery test account scope invalid")
     const oldChallenge=await createPashLocLoginChallenge({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,purpose:"enroll"})
     const oldPairing=await createPashLocPairing({challengeId:oldChallenge.challengeId,tenantId:recoveryUser.tenant_id,userId:recoveryUser.id})
     const oldHash=(await import("node:crypto")).createHash("sha256").update(oldPairing.pairingId).digest("hex")
