@@ -58,11 +58,12 @@ export async function verifyPashLocReturningLogin(
     })
     if (!match) { await client.query("COMMIT"); return null }
     const updated = await client.query(
-      `update pashloc_mfa_enrollments set last_accepted_step=$3
-       where tenant_id=$1 and app_user_id=$2
-         and (last_accepted_step is null or last_accepted_step<$3)
+      `update pashloc_mfa_enrollments set last_accepted_step=$2
+       where id=$1 and tenant_id=$3 and app_user_id=$4
+         and status='confirmed'
+         and (last_accepted_step is null or last_accepted_step<$2)
        returning id`,
-      [c.tenant_id,c.app_user_id,match.acceptedStep]
+      [e.id,match.acceptedStep,c.tenant_id,c.app_user_id]
     )
     if (updated.rowCount !== 1) { await client.query("ROLLBACK"); return null }
     const consumed = await client.query(
