@@ -159,7 +159,7 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
       [recoveryUser.tenant_id,recoveryUser.id,"disposable-recovery-"+(await import("node:crypto")).randomBytes(16).toString("hex"),Buffer.alloc(32,7),paired.rows[0].id])
     const freshChallenge=await createPashLocLoginChallenge({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,purpose:"enroll"})
     const freshSession=await stageRestrictedBrowserSession({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,challengeId:freshChallenge.challengeId,purpose:"enroll"})
-    const recoverPayload={challenge_id:freshChallenge.challengeId,enrollment_id:oldEnrollment.rows[0].id,password,recovery_approved:true}
+    const recoverPayload={challenge_id:freshChallenge.challengeId,enrollment_id:Number(oldEnrollment.rows[0].id),password,recovery_approved:true}
     const recoverHeaders={"x-pashloc-restricted-session":freshSession.sessionId,"x-pashloc-csrf":freshSession.csrfToken}
     const rejectedRecovery=await post("/auth/mfa/enrollment/recover",{...recoverPayload,password:"invalid-password"},false,recoverHeaders)
     result("recovery_wrong_password_rejected",rejectedRecovery.statusCode===401,"HTTP "+rejectedRecovery.statusCode)
@@ -169,7 +169,7 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     const recovered=recovery.json()
     result("recovery_password_authorized",recovery.statusCode===200&&typeof recovered.pairing_ref==="string","HTTP "+recovery.statusCode)
     const history=await pool.query("select id,status from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",[recoveryUser.tenant_id,recoveryUser.id])
-    result("recovery_identity_and_audit_preserved",history.rowCount===1&&history.rows[0].id===oldEnrollment.rows[0].id&&history.rows[0].status==="revoked","old row retained")
+    result("recovery_identity_and_audit_preserved",history.rowCount===1&&String(history.rows[0].id)===String(oldEnrollment.rows[0].id)&&history.rows[0].status==="revoked","old row retained")
     const newPair=await pool.query("select id from pashloc_mfa_pairings where pairing_hash=$1",[(await import("node:crypto")).createHash("sha256").update(recovered.pairing_ref||"").digest("hex")])
     result("recovery_new_pairing_issued",newPair.rowCount===1,"same existing test identity")
     const replayRecovery=await post("/auth/mfa/enrollment/recover",recoverPayload,false,recoverHeaders)
