@@ -195,12 +195,14 @@ void (async () => {
         }))
       }))
 
-      if(process.env.PASHLOC_CHAIRMAN_RECOVERY_REHEARSAL==="yes"){
+      if(process.env.PASHLOC_CHAIRMAN_RECOVERY_REHEARSAL==="yes" && diag.rows.some((row:any)=>row.status==="pending")){
         const {certifyChairmanRecoveryRehearsal}=await import("./pashlocChairmanRecoveryRehearsal")
         await certifyChairmanRecoveryRehearsal()
       }
-      const { executeDisposableMfaAcceptance } = await import("./pashlocAcceptanceProtocolRunner")
-      await executeDisposableMfaAcceptance(genuine)
+      if(diag.rows.some((row:any)=>row.status==="pending")){
+        const { executeDisposableMfaAcceptance } = await import("./pashlocAcceptanceProtocolRunner")
+        await executeDisposableMfaAcceptance(genuine)
+      }else console.log("PASHLOC_CHAIRMAN_RECOVERY_REHEARSAL_SKIPPED_ALREADY_CONFIRMED")
     }
     await genuine.listen({ host: "0.0.0.0", port: Number(process.env.PORT || 10000) })
     console.log("PASHLOC_GENUINE_ACCEPTANCE_LISTENING")
