@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login, verifyPashLocLogin, startPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment, getPashLocRedemptionStatus } from "../lib/auth"
+import { login, verifyPashLocLogin, startPashLocEnrollment, recoverPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment, getPashLocRedemptionStatus } from "../lib/auth"
 import type { PashLocEnrollment } from "../lib/auth"
 import {
   getTenantSlug,
@@ -30,6 +30,8 @@ export default function LoginPage() {
   const [deviceCode, setDeviceCode] = useState("")
   const [deviceApproved, setDeviceApproved] = useState(false)
   const [credentialRedeemed, setCredentialRedeemed] = useState(false)
+  const [recoveryPassword,setRecoveryPassword] = useState("")
+  const [recoveryApproved,setRecoveryApproved] = useState(false)
   const qrContainer = useRef<HTMLDivElement | null>(null)
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
@@ -160,6 +162,20 @@ export default function LoginPage() {
                   {qrError ? <p role="status">{qrError}</p> : null}
                   <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV</a>
                   <p>Unlock the original Safari or installed PashLoc vault, select your existing Navigator account, and enter its current six-digit code. If the phone shows no protected accounts, do not enter a random code or erase any vault. Open the original installation; the current browser cannot access credentials stored in another browser.</p>
+                  <p>If your original iPhone vault has no Navigator credential, you can explicitly authorize recovery of this pending acceptance enrollment. The old record is retained for audit and a fresh QR will be issued for the same user.</p>
+                  <label style={labelStyle}>Re-enter your Navigator acceptance password to authorize recovery</label>
+                  <input type="password" autoComplete="current-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} style={inputStyle}/>
+                  <label><input type="checkbox" checked={recoveryApproved} onChange={e=>setRecoveryApproved(e.target.checked)}/> I approve superseding the inaccessible pending PashLoc credential for this account.</label>
+                  <button type="button" style={buttonStyle} disabled={submitting || !recoveryPassword || !recoveryApproved} onClick={async()=>{
+                    if(!enrollment)return
+                    setSubmitting(true);setError("")
+                    try{
+                      const recovered=await recoverPashLocEnrollment(enrollment,recoveryPassword)
+                      setEnrollment(recovered);setRecoveryPassword("");setRecoveryApproved(false)
+                      setDeviceApproved(false);setCredentialRedeemed(false);setMfaCode("")
+                      setStatus("Recovery authorized. Scan the new enrollment QR on the iPhone.")
+                    }catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                  }}>Authorize credential recovery and create new pairing</button>
                   <label style={labelStyle}>Current six-digit PashLoc code</label>
                   <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
                   <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
