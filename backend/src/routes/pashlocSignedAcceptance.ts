@@ -45,7 +45,7 @@ export function registerSignedAcceptance(app:FastifyInstance) {
       return fail(r,409,account.registered?"already_registered":"registration_required")
     const result=await pool.query(`insert into pashloc_signed_challenges
       (challenge_id,browser_session_hash,tenant_id,app_user_id,purpose,expires_at)
-      values($1,$2,$3,$4,$5,clock_timestamp()+interval '110 seconds') returning expires_at`,
+      values($1,$2,$3,$4,$5,clock_timestamp()+case when $5='register' then interval '10 minutes' else interval '110 seconds' end) returning expires_at`,
       [reference,browserSessionDigest(browserProof),account.tenant_id,account.app_user_id,b.mode])
     const phoneUrl=new URL("/", process.env.PASHLOC_PHONE_ORIGIN)
     phoneUrl.hash=(b.mode==="login"?"navigator-sign=":"navigator-register=")+reference
