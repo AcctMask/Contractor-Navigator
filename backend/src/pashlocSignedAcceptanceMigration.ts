@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { basename, resolve } from "node:path"
 import { pool } from "./db/db"
 
 export async function migrateSignedAcceptance() {
@@ -10,8 +11,10 @@ export async function migrateSignedAcceptance() {
         id.rows[0]?.role !== "pashloc_iv_disposable_mfa_isolated_user")
       throw new Error("Signed approval migration requires the isolated database and role")
     await client.query("select pg_advisory_xact_lock(449045)")
+    const cwd=process.cwd()
+    const dir=resolve(cwd,basename(cwd)==="backend"?"migrations":"backend/migrations")
     for (const file of ["044_pashloc_signed_approval_acceptance.sql","045_pashloc_signed_enrollment_acceptance.sql"])
-      await client.query(await readFile(new URL("../migrations/"+file,import.meta.url),"utf8"))
+      await client.query(await readFile(resolve(dir,file),"utf8"))
     const schema = await client.query(`select to_regclass('public.pashloc_signed_devices') is not null
       and to_regclass('public.pashloc_signed_challenges') is not null
       and to_regclass('public.pashloc_signed_enrollment_grants') is not null as ready`)
