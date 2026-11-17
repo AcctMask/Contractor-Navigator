@@ -139,6 +139,40 @@ export async function executeDisposableMfaAcceptance(app:FastifyInstance){
     result("invalid_totp_rejected",invalid.statusCode===401,"HTTP "+invalid.statusCode)
     const unauthenticated=await app.inject({method:"GET",url:"/auth/me"})
     result("unauthenticated_crm_rejected",unauthenticated.statusCode===401,"HTTP "+unauthenticated.statusCode)
+    // Recovery integration proof against a separate disposable test identity.
+    // Never touch the Chairman identity or disclose credentials.
+    const {pool}=await import("./db/db")
+    const {createPashLocLoginChallenge}=await import("./services/pashlocChallenge")
+    const {createPashLocPairing}=await import("./services/pashlocPairing")
+    const {stageRestrictedBrowserSession}=await import("./services/pashlocRestrictedSessionStoreV1")
+    const recoveryIdentity=await provisionPashLocAcceptanceIdentity(password)
+    const u=await pool.query("select id,tenant_id from app_users where email=$1",[recoveryIdentity.email])
+    const recoveryUser=u.rows[0]
+    const oldChallenge=await createPashLocLoginChallenge({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,purpose:"enroll"})
+    const oldPairing=await createPashLocPairing({challengeId:oldChallenge.challengeId,tenantId:recoveryUser.tenant_id,userId:recoveryUser.id})
+    const oldHash=(await import("node:crypto")).createHash("sha256").update(oldPairing.pairingId).digest("hex")
+    const paired=await pool.query("update pashloc_mfa_pairings set claimed_at=now(),browser_approved_at=now(),redeemed_at=now() where pairing_hash=$1 returning id",[oldHash])
+    const oldEnrollment=await pool.query(`insert into pashloc_mfa_enrollments
+      (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status,delivery_pairing_id)
+      values($1,$2,$3,$4,'navigator-account-v1','pending',$5) returning id`,
+      [recoveryUser.tenant_id,recoveryUser.id,"disposable-recovery-"+(await import("node:crypto")).randomBytes(16).toString("hex"),Buffer.alloc(32,7),paired.rows[0].id])
+    const freshChallenge=await createPashLocLoginChallenge({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,purpose:"enroll"})
+    const freshSession=await stageRestrictedBrowserSession({tenantId:recoveryUser.tenant_id,userId:recoveryUser.id,challengeId:freshChallenge.challengeId,purpose:"enroll"})
+    const recoverPayload={challenge_id:freshChallenge.challengeId,enrollment_id:oldEnrollment.rows[0].id,password,recovery_approved:true}
+    const recoverHeaders={"x-pashloc-restricted-session":freshSession.sessionId,"x-pashloc-csrf":freshSession.csrfToken}
+    const rejectedRecovery=await post("/auth/mfa/enrollment/recover",{...recoverPayload,password:"invalid-password"},false,recoverHeaders)
+    result("recovery_wrong_password_rejected",rejectedRecovery.statusCode===401,"HTTP "+rejectedRecovery.statusCode)
+    const rejectedConsent=await post("/auth/mfa/enrollment/recover",{...recoverPayload,recovery_approved:false},false,recoverHeaders)
+    result("recovery_requires_approval",rejectedConsent.statusCode===400,"HTTP "+rejectedConsent.statusCode)
+    const recovery=await post("/auth/mfa/enrollment/recover",recoverPayload,false,recoverHeaders)
+    const recovered=recovery.json()
+    result("recovery_password_authorized",recovery.statusCode===200&&typeof recovered.pairing_ref==="string","HTTP "+recovery.statusCode)
+    const history=await pool.query("select id,status from pashloc_mfa_enrollments where tenant_id=$1 and app_user_id=$2",[recoveryUser.tenant_id,recoveryUser.id])
+    result("recovery_identity_and_audit_preserved",history.rowCount===1&&history.rows[0].id===oldEnrollment.rows[0].id&&history.rows[0].status==="revoked","old row retained")
+    const newPair=await pool.query("select id from pashloc_mfa_pairings where pairing_hash=$1",[(await import("node:crypto")).createHash("sha256").update(recovered.pairing_ref||"").digest("hex")])
+    result("recovery_new_pairing_issued",newPair.rowCount===1,"same existing test identity")
+    const replayRecovery=await post("/auth/mfa/enrollment/recover",recoverPayload,false,recoverHeaders)
+    result("recovery_replay_rejected",replayRecovery.statusCode===409,"HTTP "+replayRecovery.statusCode)
     vault.clear()
 
 
