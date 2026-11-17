@@ -514,10 +514,19 @@ export async function registerPlatformProvisioningRoutes(
         })
       }
 
+      // Authentication failure is not an internal server error. Keep invalid
+      // or expired sessions out of the Owner directory without leaking details.
+      let currentUser: Awaited<ReturnType<typeof getCurrentUserFromToken>>
       try {
-        const currentUser =
-          await getCurrentUserFromToken(token)
+        currentUser = await getCurrentUserFromToken(token)
+      } catch {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required.",
+        })
+      }
 
+      try {
         if (!currentUser?.is_active) {
           return reply.code(401).send({
             ok: false,
