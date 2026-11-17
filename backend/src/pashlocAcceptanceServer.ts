@@ -12,6 +12,9 @@ import { pool } from "./db/db"
 import { registerPashLocAcceptanceRateLimits } from "./services/pashlocAcceptanceRateLimit"
 import { registerChairmanPasswordSetup } from "./pashlocAcceptanceChairmanSetup"
 
+import { registerSignedAcceptance } from "./routes/pashlocSignedAcceptance"
+import { migrateSignedAcceptance } from "./pashlocSignedAcceptanceMigration"
+
 const crmReadRoutes = [
  /^\/auth\/me$/,
  /^\/platform\/company-dna-runtime\/[^/]+$/,
@@ -95,6 +98,8 @@ export async function assertMfaAcceptanceSchema() {
 
 export async function buildMfaAcceptanceServer() {
  assertMfaAcceptanceEnvironment(process.env)
+ const signed = process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated"
+ if(signed) await migrateSignedAcceptance()
  await assertMfaAcceptanceSchema()
  const app = Fastify({logger:false,bodyLimit:16*1024})
  // The protected Navigator browser and PashLoc phone are distinct origins.
@@ -109,9 +114,16 @@ export async function buildMfaAcceptanceServer() {
  app.addHook("onRequest", async (req, reply) => {
    const pathname = new URL(req.url,"http://localhost").pathname
    if (req.method === "GET" && pathname === "/healthz") return
+   if (signed && (req.method === "POST" || req.method === "OPTIONS") &&
+       /^\/auth\/mfa\/signed\/(start|registration-info|register|challenge|decision|complete|revoke)$/.test(pathname)) return
    // The CORS plugin handles approved OPTIONS preflights before route dispatch.
    // Unknown paths still fail the plugin/router preflight checks.
-   if (req.method === "GET" && crmReadRoutes.some(pattern => pattern.test(pathname))) return
+   if (req.method === "GET" && crmReadRoutes.some(pattern => pattern.test(pathname))) {
+     const tenantSlug = /^(?:\/admin\/(?:jobs|recent-activity)\/|\/platform\/company-dna-runtime\/|\/calendar\/)([^/]+)/.exec(pathname)?.[1]
+     if(signed && tenantSlug && tenantSlug!=="pashloc-genuine-acceptance-20261114")
+       return reply.code(403).send({ok:false})
+     return
+   }
    if (req.method === "OPTIONS" && (crmReadRoutes.some(pattern => pattern.test(pathname)) || allowed.has(pathname) ||
        /^\/auth\/[^/]+\/login$/.test(pathname))) return
    if (req.method === "POST" && (allowed.has(pathname) ||
@@ -120,6 +132,7 @@ export async function buildMfaAcceptanceServer() {
  })
  app.get("/healthz", async () => ({ok:true,service:"navigator-mfa-acceptance"}))
  registerPashLocAcceptanceRateLimits(app)
+ if(signed) registerSignedAcceptance(app)
  await registerAuthRoutes(app)
  registerChairmanPasswordSetup(app)
  // Reuse the established Navigator handlers; the onRequest allowlist blocks

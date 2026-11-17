@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react"
+import { useLanguage } from "../context/LanguageContext"
+import { signedLoginText } from "../lib/workforceLanguage"
+import { pollSigned, signedEnabled, signedTenant, startSigned, storeSignedToken, type SignedRequest } from "../lib/pashlocSigned"
+import { clearToken } from "../lib/auth"
 import { useNavigate } from "react-router-dom"
 import { login, verifyPashLocLogin, startPashLocEnrollment, recoverPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment, getPashLocRedemptionStatus } from "../lib/auth"
 import type { PashLocEnrollment } from "../lib/auth"
@@ -10,6 +14,38 @@ import {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const {language} = useLanguage()
+  const signedText=signedLoginText[language]
+  const [signed,setSigned]=useState<SignedRequest|null>(null)
+  const [showRegistration,setShowRegistration]=useState(false)
+  const [useFallback,setUseFallback]=useState(false)
+  const [signedNotice,setSignedNotice]=useState<"denied"|"expired"|"unavailable"|"registered"|null>(null)
+  useEffect(()=>{
+    if(!signed)return
+    const controller=new AbortController()
+    let timer:number|undefined
+    const check=async()=>{
+      if(controller.signal.aborted)return
+      if(Date.now()>=Date.parse(signed.expiresAt)){setSigned(null);setSignedNotice("expired");return}
+      try{
+        const result=await pollSigned(signed,controller.signal)
+        if(controller.signal.aborted)return
+        if(result.state==="approved" && signed.mode==="login" && typeof result.token==="string" && result.token){
+          storeSignedToken(result.token);navigate("/");return
+        }
+        if(result.state==="denied"||result.state==="registered"){
+          setSigned(null);setSignedNotice(result.state);return
+        }
+      }catch(err){
+        if(controller.signal.aborted)return
+        if(err instanceof Error && err.message==="expired_or_used"){setSigned(null);setSignedNotice("expired");return}
+      }
+      timer=window.setTimeout(check,4000)
+    }
+    timer=window.setTimeout(check,1000)
+    return ()=>{controller.abort();window.clearTimeout(timer)}
+  },[signed,navigate])
+
   const [workspace, setWorkspace] = useState(() => {
     const queryTenant =
       new URLSearchParams(
@@ -38,9 +74,9 @@ export default function LoginPage() {
   const [recoveryApproved,setRecoveryApproved] = useState(false)
   const qrContainer = useRef<HTMLDivElement | null>(null)
   const [qrError, setQrError] = useState("")
-  const pashlocPhoneUrl = enrollment
+  const pashlocPhoneUrl = signed?.phoneUrl || (enrollment
     ? enrollment.resume ? "https://pashloc-iv-acceptance-nu.vercel.app/" : enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
-    : "" : mfaChallenge ? "https://pashloc-iv-acceptance-nu.vercel.app/" : ""
+    : "" : mfaChallenge ? "https://pashloc-iv-acceptance-nu.vercel.app/" : "")
 
   useEffect(() => {
     if (!pashlocPhoneUrl || !qrContainer.current) return
@@ -56,7 +92,7 @@ export default function LoginPage() {
         new qr(container, { text: pashlocPhoneUrl, width: 224, height: 224,
           colorDark: "#000000", colorLight: "#ffffff", correctLevel: 2 })
         const img = container.querySelector("img")
-        if (img) img.alt = enrollment?.resume ? "Open existing PashLoc app on your phone" : "PashLoc Navigator enrollment QR code"
+        if (img) img.alt = signed ? "" : enrollment?.resume ? "Open existing PashLoc app on your phone" : "PashLoc Navigator enrollment QR code"
       } catch {
         setQrError("QR code unavailable. Use the secure enrollment link below.")
       }
@@ -69,7 +105,7 @@ export default function LoginPage() {
     if ((window as Window & { QRCode?: unknown }).QRCode) renderQr()
     else document.head.appendChild(script)
     return () => { cancelled = true; script.remove(); container.replaceChildren() }
-  }, [pashlocPhoneUrl, enrollment?.resume])
+  }, [pashlocPhoneUrl, enrollment?.resume, signed])
 
   useEffect(()=>{
     if(!enrollment || !deviceApproved || credentialRedeemed)return
@@ -101,6 +137,19 @@ export default function LoginPage() {
         )}...`,
       )
 
+      if(signedEnabled() && tenantSlug===signedTenant && !useFallback){
+        clearToken()
+        setSignedNotice(null)
+        try {
+          setSigned(await startSigned(email.trim(),password,showRegistration?"register":"login"))
+          setPassword("");setShowRegistration(false);setStatus("")
+        } catch (err) {
+          setStatus("")
+          if(err instanceof Error && err.message==="registration_required")setShowRegistration(true)
+          else setSignedNotice("unavailable")
+        }
+        return
+      }
       const result = await login(email.trim(), password)
       let enrollmentChallenge = ""
       if (result?.mfa_required && result.enrollment_required) {
@@ -154,7 +203,19 @@ export default function LoginPage() {
           Sign in to manage invitations, jobs, and staff controls.
         </p>
 
-        {mfaChallenge ? (
+        {signedNotice && <p role="status">{signedText[signedNotice]}</p>}
+        {signed ? (
+          <div style={{display:"grid",gap:"14px",marginTop:"18px"}}>
+            <h2>{signed.mode==="register"?signedText.registration:signedText.approval}</h2>
+            <p>{signed.mode==="register"?signedText.scanRegister:signedText.scan}</p>
+            <div ref={qrContainer} role="img" aria-label={signedText.approval} style={{width:224,minHeight:224,padding:12,background:"white",borderRadius:12,boxSizing:"content-box"}}/>
+            {qrError&&<p role="status">{signedText.qrError}</p>}
+            <a href={signed.phoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>{signedText.open}</a>
+            <p role="status">{signedText.waiting} · {signed.reference.slice(-6).toUpperCase()}</p>
+            <button type="button" style={buttonStyle} onClick={()=>{setSigned(null);setUseFallback(true)}}>{signedText.fallback}</button>
+            <button type="button" style={buttonStyle} onClick={()=>{setSigned(null);setUseFallback(false)}}>{signedText.back}</button>
+          </div>
+        ) : mfaChallenge ? (
           <form onSubmit={handleMfaVerify} style={{display:"grid",gap:"14px",marginTop:"18px"}}>
             <h2 style={{margin:0}}>PashLoc security verification</h2>
             {mfaEnrollmentRequired ? (
@@ -230,6 +291,11 @@ export default function LoginPage() {
             {error ? <div style={errorStyle}>{error}</div> : null}
           </form>
         ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+          {signedEnabled() && workspace===signedTenant && <>
+            {showRegistration&&<p role="status">{signedText.first}</p>}
+            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setUseFallback(!useFallback);setShowRegistration(false)}}>{useFallback?signedText.approval:signedText.fallback}</button>
+            <small>{signedText.recovery}</small>
+          </>}
           <div>
             <label style={labelStyle}>
               Company Workspace
@@ -280,7 +346,7 @@ export default function LoginPage() {
 
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
             <button type="submit" disabled={submitting} style={buttonStyle}>
-              {submitting ? "Signing In..." : "Login"}
+              {submitting ? "Signing In..." : showRegistration ? signedText.register : "Login"}
             </button>
             <span style={{ opacity: 0.85 }}>{status}</span>
           </div>

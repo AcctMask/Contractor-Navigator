@@ -4,7 +4,7 @@
  * browser session, expiration and atomically consume challenge in the database.
  * No private key is transmitted or stored by Navigator.
  */
-import { createHash, createPublicKey, verify, timingSafeEqual } from "node:crypto"
+import { type JsonWebKey, createHash, createPublicKey, verify, timingSafeEqual } from "node:crypto"
 
 export type SignedApprovalDecision = "approve" | "deny"
 export interface SignedApprovalContext {
@@ -46,11 +46,12 @@ export function verifySignedApproval(input: {
   signature: string
   expected: Omit<SignedApprovalContext,"decision">
   now?: number
+  allowDeny?: boolean
 }): boolean {
   try {
     const c = input.context, e = input.expected
     const message = canonicalSignedApproval(c)
-    if (c.decision !== "approve" ||
+    if ((!input.allowDeny && c.decision !== "approve") ||
         c.version !== e.version || c.environment !== e.environment ||
         c.tenantId !== e.tenantId || c.userId !== e.userId ||
         c.deviceId !== e.deviceId || c.challengeId !== e.challengeId ||

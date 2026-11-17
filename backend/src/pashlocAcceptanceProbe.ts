@@ -1,4 +1,4 @@
-/** Disposable acceptance connectivity probe. No migrations or writes.
+/** Disposable acceptance connectivity probe and explicitly gated startup tasks.
  * Intended only for a dedicated Render private-network acceptance database. */
 import Fastify from "fastify"
 import { Pool } from "pg"
@@ -73,6 +73,8 @@ void (async () => {
   if (process.env.PASHLOC_ACCEPTANCE_RUN_GENUINE === "yes") {
     const { buildMfaAcceptanceServer } = await import("./pashlocAcceptanceServer")
     const genuine = await buildMfaAcceptanceServer()
+    const {prepareSignedAcceptanceGrants}=await import("./pashlocSignedAcceptanceGrants")
+    await prepareSignedAcceptanceGrants()
     const checks = [
       {method:"GET" as const,url:"/healthz",expected:200},
       {method:"GET" as const,url:"/auth/me",expected:401},

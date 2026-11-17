@@ -26,7 +26,7 @@ export function registerPashLocAcceptanceRateLimits(app: FastifyInstance) {
        returning bucket,hits`, [buckets]
     )
     if (result.rowCount !== 2 ||
-        result.rows.some((r:any) => Number(r.hits) > (String(r.bucket).endsWith("|aggregate") ? 100 : 20)))
+        result.rows.some((r:any) => Number(r.hits) > (String(r.bucket).endsWith("|aggregate") ? 100 : path === "/auth/mfa/signed/complete" ? 40 : 20)))
       return reply.header("Retry-After","60").code(429).send({ok:false,error:"Rate limited"})
   })
 }
