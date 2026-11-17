@@ -6,10 +6,12 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import Fastify from "fastify"
+import bcrypt from "bcryptjs"
+import { maySelectOwnerWorkspace } from "../../dashboard/src/lib/tenantSelection"
 import { pool } from "../src/db/db"
 import { registerPlatformProvisioningRoutes } from "../src/routes/platformProvisioning"
 import { registerAdminRoutes } from "../src/routes/admin"
-import { signToken } from "../src/services/authService"
+import { signToken, loginUserByTenantSlug, verifyToken } from "../src/services/authService"
 
 test("an Owner sees two isolated test tenants; tenant staff cannot read the other tenant", async () => {
   assert.equal(process.env.PASHLOC_TENANT_QA_EPHEMERAL, "yes")
@@ -27,11 +29,16 @@ test("an Owner sees two isolated test tenants; tenant staff cannot read the othe
     `create table app_users (
       id bigint generated always as identity primary key,
       tenant_id bigint not null references tenants(id),
-      email text not null, full_name text not null,
+      email text not null, full_name text not null, password_hash text,
       mobile_phone text, role text not null, is_active boolean not null default true,
       preferred_language text, financials_authorized boolean not null default false,
       pashloc_mfa_required boolean not null default false,
       pashloc_mfa_activated_at timestamptz
+    )`,
+    `create table pashloc_mfa_enrollments (
+      id bigint generated always as identity primary key,
+      tenant_id bigint not null, app_user_id bigint not null,
+      status text not null, delivery_pairing_id bigint
     )`,
     `create table tenant_company_dna (
       tenant_id bigint primary key references tenants(id),
@@ -126,6 +133,41 @@ test("an Owner sees two isolated test tenants; tenant staff cannot read the othe
       assert.equal(jobs[0].external_job_id,slug+"-EXCLUSIVE-RECORD")
       assert.equal(response.json().tenant_id,ids[slug.endsWith("alpha")?0:1])
     }
+    // Execute an explicit Owner A -> B -> A sequence with real tenant-scoped CRM reads.
+    const authorized=listed.map((entry:any)=>({slug:entry.slug}))
+    for (const [slug,expectedId] of [
+      ["pashloc-qa-alpha",ids[0]],["pashloc-qa-bravo",ids[1]],["pashloc-qa-alpha",ids[0]]
+    ] as const) {
+      assert.equal(maySelectOwnerWorkspace("platform_owner",slug,authorized),true)
+      const response=await get("/admin/jobs/"+slug,owner)
+      assert.equal(response.statusCode,200,response.body)
+      assert.equal(response.json().tenant_id,expectedId)
+      assert.deepEqual(response.json().jobs.map((job:any)=>job.external_job_id),[slug+"-EXCLUSIVE-RECORD"])
+    }
+    assert.equal(maySelectOwnerWorkspace("platform_owner","pashloc-qa-unauthorized",authorized),false)
+    assert.equal((await get("/admin/jobs/pashloc-qa-unauthorized",owner)).statusCode!==200,true)
+
+    // Exercise real password verification, JWT issuance, and authorized CRM access.
+    const password="isolated-ci-only-password"
+    const passwordHash=await bcrypt.hash(password,4)
+    const nonMfa=await pool.query(
+      "insert into app_users(tenant_id,email,full_name,role,password_hash,pashloc_mfa_required) values($1,$2,$3,$4,$5,false) returning id",
+      [ids[0],"qa-password-only@example.invalid","QA Password Only","staff",passwordHash])
+    const normal=await loginUserByTenantSlug("pashloc-qa-alpha",{email:"qa-password-only@example.invalid",password})
+    assert.equal("mfa_required" in normal,false)
+    assert.equal(typeof normal.token,"string")
+    const decoded=verifyToken(normal.token as string)
+    assert.equal(decoded.tenant_id,ids[0])
+    assert.equal(decoded.sub,Number(nonMfa.rows[0].id))
+    assert.equal(decoded.mfa_verified,false)
+    assert.equal((await get("/admin/jobs/pashloc-qa-alpha",normal.token as string)).statusCode,200)
+    assert.equal((await get("/admin/jobs/pashloc-qa-bravo",normal.token as string)).statusCode,403)
+    await pool.query("update app_users set pashloc_mfa_required=true where id=$1",[nonMfa.rows[0].id])
+    const mfa=await loginUserByTenantSlug("pashloc-qa-alpha",{email:"qa-password-only@example.invalid",password})
+    assert.equal(mfa.mfa_required,true)
+    assert.equal(mfa.token,null)
+    assert.equal((await get("/admin/jobs/pashloc-qa-alpha",normal.token as string)).statusCode!==200,true)
+
     const denied=await get("/admin/jobs/pashloc-qa-bravo",alphaStaff)
     assert.equal(denied.statusCode,403,denied.body)
     assert.equal((await get("/admin/jobs/pashloc-qa-alpha",alphaStaff)).statusCode,200)
