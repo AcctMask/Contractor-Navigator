@@ -40,7 +40,7 @@ export default function LoginPage() {
   const [qrError, setQrError] = useState("")
   const pashlocPhoneUrl = enrollment
     ? enrollment.resume ? "https://pashloc-iv-acceptance-nu.vercel.app/" : enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
-    : "" : ""
+    : "" : mfaChallenge ? "https://pashloc-iv-acceptance-nu.vercel.app/" : ""
 
   useEffect(() => {
     if (!pashlocPhoneUrl || !qrContainer.current) return
@@ -216,7 +216,10 @@ export default function LoginPage() {
               </div>
             ) : (
               <>
-                <p>Open PashLoc on your enrolled device and enter the current six-digit code. You do not need to scan another QR.</p>
+                <p>Navigator now uses PashLoc IV multi-factor verification. Scan this QR with your iPhone to open your existing PashLoc account, then enter its current six-digit code. You will not need to enroll again.</p>
+                <div ref={qrContainer} role="img" aria-label="Scan to open your existing PashLoc IV account on iPhone" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
+                {qrError ? <p role="status">{qrError}</p> : null}
+                <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV on this device</a>
                 <label style={labelStyle} htmlFor="pashloc-code">Six-digit PashLoc code</label>
                 <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))}
                   inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" required style={inputStyle}/>
