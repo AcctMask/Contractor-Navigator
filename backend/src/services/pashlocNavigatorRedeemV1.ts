@@ -93,7 +93,7 @@ export async function redeemPashLocNavigator(input:{
       (tenant_id,app_user_id,account_id,encrypted_secret,encryption_key_version,status,delivery_pairing_id)
      select tenant_id,id,$3,$4,'navigator-account-v1','pending',$5
        from app_users where tenant_id=$1 and id=$2 and is_active=true
-     on conflict (tenant_id,app_user_id) do nothing returning id`,
+     on conflict (tenant_id,app_user_id) where status in ('pending','confirmed') do nothing returning id`,
    [p.tenant_id,p.app_user_id,accountId,encrypted,p.id]
   )
   if(pending.rowCount!==1){await client.query("ROLLBACK");return null}
