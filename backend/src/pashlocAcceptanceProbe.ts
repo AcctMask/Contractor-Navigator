@@ -100,6 +100,12 @@ void (async () => {
          chairman.rows[0].pashloc_mfa_required!==true||
          chairman.rows[0].enrollments>1) throw Error("Chairman isolated identity verification failed")
       console.log("PASHLOC_CHAIRMAN_IDENTITY_VERIFIED",JSON.stringify({isolated:true,tenant_bound:true,mfa_required:true,enrollment_conflicts:0}))
+      const returningState=await pool.query(`select u.role,u.pashloc_mfa_activated_at is not null as activated,
+       (select count(*)::int from pashloc_mfa_enrollments e where e.app_user_id=u.id and e.tenant_id=u.tenant_id and e.status='confirmed' and e.delivery_pairing_id is not null and e.encryption_key_version='navigator-account-v1') as eligible_enrollments,
+       (select count(*)::int from pashloc_mfa_enrollments e where e.app_user_id=u.id and e.tenant_id=u.tenant_id and e.status='revoked') as revoked_enrollments
+       from app_users u join tenants t on t.id=u.tenant_id where t.slug=$1 and lower(u.email)=$2`,
+       ["pashloc-genuine-acceptance-20261114","steve@g2groofing.com"])
+      console.log("PASHLOC_CHAIRMAN_RETURNING_LOGIN_READINESS",JSON.stringify(returningState.rows[0]))
       const invalid = await genuine.inject({method:"POST",url:"/auth/acceptance/password-setup/validate",
         headers:{origin:process.env.APP_BASE_URL!,"content-type":"application/json"},
         payload:{token:"0".repeat(64)}})
