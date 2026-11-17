@@ -9,6 +9,7 @@ import { stageRestrictedBrowserSession, authorizeRestrictedBrowserRequest } from
 import { restrictedCookie, clearRestrictedCookie } from "../services/pashlocRestrictedBrowserV1"
 import { approvePashLocDeviceClaim } from "../services/pashlocDeviceApprovalV2"
 import { confirmPashLocFirstCode } from "../services/pashlocConfirmEnrollment"
+import { recoverInaccessiblePashLocEnrollment } from "../services/pashlocRecoverEnrollment"
 import { findResumablePashLocEnrollment, confirmResumedPashLocEnrollment } from "../services/pashlocResumeEnrollment"
 import { issuePashLocNavigatorRedeemNonce } from "../services/pashlocNavigatorRedeemNonceV1"
 import { redeemPashLocNavigator } from "../services/pashlocNavigatorRedeemV1"
@@ -599,6 +600,41 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     reply.header("Set-Cookie",restrictedCookie(restricted.sessionId))
     return {ok:true,challenge_id:challenge.challengeId,pairing_ref:pairing.pairingId,
       csrf_token:restricted.csrfToken,restricted_session:restricted.sessionId,expires_at:pairing.expiresAt}
+  })
+
+  // Acceptance-only recovery: fresh password check + explicit approval + restricted session.
+  app.post("/auth/mfa/enrollment/recover",async(request:any,reply)=>{
+    if(process.env.PASHLOC_ACCEPTANCE_ONLY!=="yes" ||
+       process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME!=="pashloc_iv_disposable_mfa_isolated" ||
+       process.env.PASHLOC_NAVIGATOR_ENROLLMENT_ENABLED!=="yes" ||
+       process.env.PASHLOC_SHARED_RATE_LIMITS_VERIFIED!=="yes")return reply.code(404).send({ok:false})
+    reply.header("Cache-Control","no-store, private")
+    const b=request.body||{}
+    if(typeof b.challenge_id!=="string" || !Number.isSafeInteger(b.enrollment_id) ||
+       typeof b.password!=="string" || b.recovery_approved!==true)
+      return reply.code(400).send({ok:false,error:"explicit_recovery_approval_required"})
+    const session=await authorizeRestrictedBrowserRequest({
+      cookieHeader:request.headers["x-pashloc-restricted-session"]||request.headers.cookie,
+      csrfHeader:request.headers["x-pashloc-csrf"],origin:request.headers.origin,
+      expectedOrigin:process.env.APP_BASE_URL||"https://contractor-navigator.vercel.app",
+      secFetchSite:request.headers["sec-fetch-site"],contentType:request.headers["content-type"],
+      challengeId:b.challenge_id,purpose:"enroll"
+    })
+    if(!session)return reply.code(403).send({ok:false,error:"restricted_session_required"})
+    const account=await pool.query("select u.email,t.slug from app_users u join tenants t on t.id=u.tenant_id where u.id=$1 and u.tenant_id=$2 and u.is_active=true",
+      [session.userId,session.tenantId])
+    if(account.rowCount!==1||account.rows[0].slug!=="pashloc-genuine-acceptance-20261114")
+      return reply.code(403).send({ok:false})
+    const authenticated=await verifyPashLocRestrictedCredentials({
+      tenantSlug:account.rows[0].slug,email:account.rows[0].email,password:b.password})
+    if(!authenticated||authenticated.userId!==session.userId||authenticated.tenantId!==session.tenantId)
+      return reply.code(401).send({ok:false,error:"invalid_credentials"})
+    const recovered=await recoverInaccessiblePashLocEnrollment({
+      tenantId:session.tenantId,userId:session.userId,challengeId:session.challengeId,
+      enrollmentId:b.enrollment_id})
+    if(!recovered)return reply.code(409).send({ok:false,error:"recovery_conflict"})
+    return {ok:true,challenge_id:session.challengeId,csrf_token:request.headers["x-pashloc-csrf"],
+      restricted_session:request.headers["x-pashloc-restricted-session"]||"",...recovered}
   })
 
   app.post("/auth/mfa/enrollment/approve-device",async(request:any,reply)=>{
