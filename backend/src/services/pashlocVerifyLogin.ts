@@ -63,7 +63,11 @@ export async function verifyPashLocReturningLogin(
     const match = verifyPashLocTotp(secret,suppliedCode,{
       lastAcceptedStep: e.last_accepted_step === null ? null : Number(e.last_accepted_step)
     })
-    if (!match) { diagnostic("totp_mismatch_or_replay"); await client.query("COMMIT"); return null }
+    if (!match) {
+      const withoutReplay = verifyPashLocTotp(secret,suppliedCode,{lastAcceptedStep:null})
+      diagnostic(withoutReplay ? "valid_code_replayed" : "code_not_for_confirmed_credential_or_clock")
+      await client.query("COMMIT"); return null
+    }
     const updated = await client.query(
       `update pashloc_mfa_enrollments set last_accepted_step=$2
        where id=$1 and tenant_id=$3 and app_user_id=$4
