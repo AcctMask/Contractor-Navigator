@@ -38,10 +38,22 @@ export async function prepareSignedAcceptanceGrants() {
           password_hash,pashloc_mfa_required,pashloc_mfa_activated_at)
           select id,$1,'Disposable signed-approval fixture','platform_owner',true,$2,true,clock_timestamp() from tenants where slug=$3
           on conflict(tenant_id,email) do nothing returning id,tenant_id`,[fixture,pass,slug])
-        if(account.rowCount===1){
-          const row=account.rows[0]
-          await client.query(`insert into pashloc_signed_enrollment_grants(grant_hash,tenant_id,app_user_id,expires_at)
-            values($1,$2,$3,$4)`,[fixtureGrant,row.tenant_id,row.id,new Date(fixtureUntil)])
+        const row=account.rows[0]??(await client.query(`select u.id,u.tenant_id
+          from app_users u join tenants t on t.id=u.tenant_id
+          where t.slug=$1 and u.email=$2 and u.full_name='Disposable signed-approval fixture'
+          and u.role='platform_owner' for update of u`,[slug,fixture])).rows[0]
+        if(!row)throw Error("Isolated signed fixture identity could not be verified")
+        const issued=await client.query(`insert into pashloc_signed_enrollment_grants(grant_hash,tenant_id,app_user_id,expires_at)
+          values($1,$2,$3,$4) on conflict do nothing returning grant_hash`,
+          [fixtureGrant,row.tenant_id,row.id,new Date(fixtureUntil)])
+        if(issued.rowCount===1 && account.rowCount!==1){
+          await client.query(`update app_users set password_hash=$1,is_active=true,pashloc_mfa_activated_at=clock_timestamp()
+            where id=$2 and tenant_id=$3`,[pass,row.id,row.tenant_id])
+          await client.query(`update pashloc_signed_devices set revoked_at=clock_timestamp()
+            where tenant_id=$1 and app_user_id=$2 and revoked_at is null`,[row.tenant_id,row.id])
+          await client.query(`update pashloc_signed_enrollment_grants set used_at=clock_timestamp()
+            where tenant_id=$1 and app_user_id=$2 and used_at is null and grant_hash<>$3`,[row.tenant_id,row.id,fixtureGrant])
+          console.log("PASHLOC_SIGNED_HOSTED_FIXTURE_RECOVERY_ROTATED")
         }
         await client.query("COMMIT")
       }catch(e){await client.query("ROLLBACK");throw e}finally{client.release()}
