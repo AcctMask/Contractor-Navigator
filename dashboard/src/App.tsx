@@ -76,6 +76,11 @@ function HeaderBar() {
   const API_BASE =
     import.meta.env.VITE_API_BASE
 
+  // The MFA-only acceptance server intentionally cannot enumerate tenants.
+  // Do not present its fixed, isolated workspace as an Owner tenant directory.
+  const isolatedMfaAcceptance =
+    import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "yes"
+
   useEffect(() => {
     if (!authed) {
       setCurrentUser(null)
@@ -109,6 +114,12 @@ function HeaderBar() {
         }
 
         setCurrentUser(data.user)
+
+        if (isolatedMfaAcceptance) {
+          setPlatformTenants([])
+          setTenantDirectoryError("")
+          return null
+        }
 
         if (
           data.user?.role !==
@@ -226,6 +237,20 @@ function HeaderBar() {
         </div>
 
         {currentUser?.role ===
+          "platform_owner" && isolatedMfaAcceptance ? (
+          <div
+            role="status"
+            style={{
+              marginTop: "8px",
+              fontSize: "11px",
+              lineHeight: 1.5,
+              opacity: 0.85,
+            }}
+          >
+            Isolated PashLoc acceptance workspace — test data only.
+            Tenant switching is intentionally unavailable here.
+          </div>
+        ) : currentUser?.role ===
           "platform_owner" ? (
           <div
             style={{
