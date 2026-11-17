@@ -195,6 +195,10 @@ void (async () => {
         }))
       }))
 
+      if(process.env.PASHLOC_CHAIRMAN_RECOVERY_REHEARSAL==="yes"){
+        const {certifyChairmanRecoveryRehearsal}=await import("./pashlocChairmanRecoveryRehearsal")
+        await certifyChairmanRecoveryRehearsal()
+      }
       const { executeDisposableMfaAcceptance } = await import("./pashlocAcceptanceProtocolRunner")
       await executeDisposableMfaAcceptance(genuine)
     }
