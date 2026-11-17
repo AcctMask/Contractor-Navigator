@@ -157,13 +157,13 @@ export default function LoginPage() {
               <div style={{display:"grid",gap:"12px"}}>
                 <p>Connect your PashLoc account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
                 {enrollment?.resume ? <>
-                  <p>Your existing PashLoc credential has already been redeemed. Scan this QR with your iPhone to open PashLoc IV. This QR does not create or replace a credential.</p>
+                  <p>An earlier enrollment was redeemed but never confirmed. This QR only opens the old PashLoc credential; it cannot repair a missing or mismatched code. If your iPhone cannot produce the correct code, use the recovery action below instead.</p>
                   <div ref={qrContainer} role="img" aria-label="Open existing PashLoc IV on iPhone" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
                   {qrError ? <p role="status">{qrError}</p> : null}
                   <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV</a>
                   <p>Unlock the original Safari or installed PashLoc vault, select your existing Navigator account, and enter its current six-digit code. If the phone shows no protected accounts, do not enter a random code or erase any vault. Open the original installation; the current browser cannot access credentials stored in another browser.</p>
                   <p>If your original iPhone vault has no Navigator credential, you can explicitly authorize recovery of this pending acceptance enrollment. The old record is retained for audit and a fresh QR will be issued for the same user.</p>
-                  <label style={labelStyle}>Re-enter your Navigator acceptance password to authorize recovery</label>
+                  <label style={labelStyle}>Enter the password created for this isolated Navigator acceptance registration (not your normal production Navigator password)</label>
                   <input type="password" autoComplete="current-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} style={inputStyle}/>
                   <label><input type="checkbox" checked={recoveryApproved} onChange={e=>setRecoveryApproved(e.target.checked)}/> I approve superseding the inaccessible pending PashLoc credential for this account.</label>
                   <button type="button" style={buttonStyle} disabled={submitting || !recoveryPassword || !recoveryApproved} onClick={async()=>{
@@ -175,11 +175,12 @@ export default function LoginPage() {
                       setDeviceApproved(false);setCredentialRedeemed(false);setMfaCode("")
                       setStatus("Recovery authorized. Scan the new enrollment QR on the iPhone.")
                     }catch(err:any){setError(err.message)}finally{setSubmitting(false)}
-                  }}>Authorize credential recovery and create new pairing</button>
-                  <label style={labelStyle}>Current six-digit PashLoc code</label>
+                  }}>Replace inaccessible credential and generate a NEW QR</button>
+                  <p style={{fontWeight:600}}>Only if your iPhone still has the ORIGINAL credential:</p>
+                  <label style={labelStyle}>Original credential’s six-digit PashLoc code</label>
                   <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
                   <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
-                    setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setMfaEnrollmentRequired(false);navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
+                    setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setMfaEnrollmentRequired(false);navigate("/")}catch(err:any){setError(err.message==="invalid_or_expired_code" ? "This code does not match the previously redeemed credential. If the original credential is missing or inaccessible, use the NEW QR recovery button above. Do not keep trying codes from another account." : err.message)}finally{setSubmitting(false)}
                   }}>Verify existing PashLoc and open Navigator</button>
                 </> : enrollment ? <>
                   <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
