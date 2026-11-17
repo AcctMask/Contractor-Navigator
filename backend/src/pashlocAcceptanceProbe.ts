@@ -49,6 +49,9 @@ void (async () => {
   if (process.env.PASHLOC_ACCEPTANCE_APPLY_SCHEMA === "yes") {
     await import("./pashlocAcceptanceMigration")
   }
+  if (process.env.PASHLOC_ACCEPTANCE_RECOVERY_SCHEMA === "yes") {
+    await import("./pashlocAcceptanceRecoverySchema")
+  }
   if (process.env.PASHLOC_ACCEPTANCE_VERIFY_SHARED_LIMITS === "yes") {
     await import("./pashlocAcceptanceRateLimitProof")
   }
