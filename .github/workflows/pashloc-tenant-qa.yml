@@ -6,6 +6,9 @@ on:
       - engineering/navi45-production-mfa-gate-20261113
     paths:
       - backend/tests/pashlocOwnerTenantScope.integration.test.ts
+      - backend/tests/pashlocTenantSelection.test.ts
+      - dashboard/src/lib/tenantSelection.ts
+      - dashboard/src/App.tsx
       - .github/workflows/pashloc-tenant-qa.yml
   workflow_dispatch:
 
@@ -49,4 +52,4 @@ jobs:
         run: npm ci
       - name: Exercise live Fastify tenant directory and CRM read handlers
         working-directory: backend
-        run: npx tsx --test tests/pashlocOwnerTenantScope.integration.test.ts
+        run: npx tsx --test tests/pashlocOwnerTenantScope.integration.test.ts tests/pashlocTenantSelection.test.ts
