@@ -174,7 +174,10 @@ function HeaderBar() {
   ) {
     if (
       !nextTenantSlug ||
-      nextTenantSlug === tenantSlug
+      nextTenantSlug === tenantSlug ||
+      isolatedMfaAcceptance ||
+      currentUser?.role !== "platform_owner" ||
+      !platformTenants.some((tenant) => tenant.slug === nextTenantSlug)
     ) {
       return
     }
