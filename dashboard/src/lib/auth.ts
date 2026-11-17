@@ -99,7 +99,7 @@ export type PashLocEnrollment = {
   restricted_session: string; expires_at: string; resume?:boolean; enrollment_id?:number; account_id?:string; pairing_ref?:string
 }
 
-async function enrollmentRequest(path: string, payload: Record<string,string|number>, session?: PashLocEnrollment) {
+async function enrollmentRequest(path: string, payload: Record<string,string|number|boolean>, session?: PashLocEnrollment) {
   const res = await fetch(`${API_BASE}/auth/mfa/enrollment/${path}`, {
     method:"POST", cache:"no-store",
     headers:{ "Content-Type":"application/json",
@@ -114,6 +114,9 @@ async function enrollmentRequest(path: string, payload: Record<string,string|num
 
 export async function startPashLocEnrollment(tenantSlug:string,email:string,password:string):Promise<PashLocEnrollment> {
   return enrollmentRequest("start",{tenant_slug:tenantSlug,email,password})
+}
+export async function recoverPashLocEnrollment(session:PashLocEnrollment,password:string):Promise<PashLocEnrollment> {
+  return enrollmentRequest("recover",{challenge_id:session.challenge_id,enrollment_id:session.enrollment_id || 0,password,recovery_approved:true},session)
 }
 export async function approvePashLocEnrollment(session:PashLocEnrollment,confirmationCode:string) {
   return enrollmentRequest("approve-device",{
