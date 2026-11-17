@@ -171,8 +171,8 @@ export async function resolveJobAssetsForOutbound(
     )
   }
 
-  const rowsById = new Map(
-    result.rows.map((row) => [Number(row.id), row])
+  const rowsById = new Map<number, { id: number; original_name: string | null; stored_path: string }>(
+    result.rows.map((row: any) => [Number(row.id), row])
   )
 
   const orderedRows = normalizedIds.map((id) => rowsById.get(id))

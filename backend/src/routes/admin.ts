@@ -863,7 +863,15 @@ export async function registerAdminRoutes(app: FastifyInstance) {
 
   app.get("/admin/jobs/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
+    const token = getBearerToken(req)
+    if (!token) return reply.code(401).send({ok:false,error:"Authentication required"})
+    let actor: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { actor = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ok:false,error:"Authentication required"}) }
+    if (!actor?.is_active) return reply.code(401).send({ok:false,error:"Authentication required"})
     const tenantId = await getTenantIdBySlug(tenant_slug);
+    if (String(actor.role) !== "platform_owner" && Number(actor.tenant_id) !== tenantId)
+      return reply.code(403).send({ok:false,error:"Tenant access denied"})
     const q: any = (req.query as any) || {};
 
     const from = asNullableString(q.from);
@@ -1209,7 +1217,15 @@ ${assignmentDirectorySql}
 
   app.get("/admin/recent-activity/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "")
+    const token = getBearerToken(req)
+    if (!token) return reply.code(401).send({ok:false,error:"Authentication required"})
+    let actor: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { actor = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ok:false,error:"Authentication required"}) }
+    if (!actor?.is_active) return reply.code(401).send({ok:false,error:"Authentication required"})
     const tenantId = await getTenantIdBySlug(tenant_slug)
+    if (String(actor.role) !== "platform_owner" && Number(actor.tenant_id) !== tenantId)
+      return reply.code(403).send({ok:false,error:"Tenant access denied"})
     const q: any = (req as any).query || {}
     const limit = Math.max(1, Math.min(Number(q.limit || 20), 100))
 

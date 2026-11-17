@@ -20,7 +20,7 @@ if (!connectionString) {
  */
 export const pool = new Pool({
   connectionString,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: process.env.PASHLOC_DISPOSABLE_DB_TEST === "yes" && process.env.NODE_ENV === "test"
+    ? false
+    : { rejectUnauthorized: false },
 });
