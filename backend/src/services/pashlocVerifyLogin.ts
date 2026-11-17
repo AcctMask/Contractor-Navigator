@@ -4,6 +4,13 @@ import { decryptPashLocSecret } from "./pashlocSecretCrypto"
 import { verifyPashLocTotp } from "./pashlocTotp"
 import { createHash } from "node:crypto"
 
+const diagnostic = (reason: string) => {
+  if (process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
+      process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated") {
+    console.info("PASHLOC_ACCEPTANCE_LOGIN_DIAGNOSTIC", JSON.stringify({reason}))
+  }
+}
+
 export async function verifyPashLocReturningLogin(
   challengeId: string,
   suppliedCode: string
@@ -21,9 +28,9 @@ export async function verifyPashLocReturningLogin(
        for update`,
       [hash]
     )
-    if (!challenge.rowCount) { await client.query("ROLLBACK"); return null }
+    if (!challenge.rowCount) { diagnostic("challenge_missing_or_expired"); await client.query("ROLLBACK"); return null }
     const c = challenge.rows[0]
-    if (c.attempts >= c.max_attempts) { await client.query("ROLLBACK"); return null }
+    if (c.attempts >= c.max_attempts) { diagnostic("challenge_attempt_limit"); await client.query("ROLLBACK"); return null }
     await client.query(
       "update pashloc_mfa_challenges set attempts=attempts+1 where id=$1",
       [c.id]
@@ -38,7 +45,7 @@ export async function verifyPashLocReturningLogin(
     )
     if (policy.rowCount !== 1 || policy.rows[0].pashloc_mfa_required !== true ||
         !policy.rows[0].pashloc_mfa_activated_at) {
-      await client.query("COMMIT"); return null
+      diagnostic("account_policy_or_activation"); await client.query("COMMIT"); return null
     }
     const enrolled = await client.query(
       `select e.id,e.account_id,e.encrypted_secret,e.last_accepted_step
@@ -50,13 +57,13 @@ export async function verifyPashLocReturningLogin(
        for update of e`,
       [c.tenant_id,c.app_user_id]
     )
-    if (!enrolled.rowCount) { await client.query("COMMIT"); return null }
+    if (!enrolled.rowCount) { diagnostic("confirmed_enrollment_missing"); await client.query("COMMIT"); return null }
     const e = enrolled.rows[0]
     const secret = decryptPashLocSecret(e.encrypted_secret,Number(c.tenant_id),Number(c.app_user_id),e.account_id)
     const match = verifyPashLocTotp(secret,suppliedCode,{
       lastAcceptedStep: e.last_accepted_step === null ? null : Number(e.last_accepted_step)
     })
-    if (!match) { await client.query("COMMIT"); return null }
+    if (!match) { diagnostic("totp_mismatch_or_replay"); await client.query("COMMIT"); return null }
     const updated = await client.query(
       `update pashloc_mfa_enrollments set last_accepted_step=$2
        where id=$1 and tenant_id=$3 and app_user_id=$4
@@ -65,14 +72,15 @@ export async function verifyPashLocReturningLogin(
        returning id`,
       [e.id,match.acceptedStep,c.tenant_id,c.app_user_id]
     )
-    if (updated.rowCount !== 1) { await client.query("ROLLBACK"); return null }
+    if (updated.rowCount !== 1) { diagnostic("replay_update_conflict"); await client.query("ROLLBACK"); return null }
     const consumed = await client.query(
       `update pashloc_mfa_challenges set consumed_at=now()
        where id=$1 and consumed_at is null and expires_at>now()
        returning id`,[c.id]
     )
-    if (consumed.rowCount !== 1) { await client.query("ROLLBACK"); return null }
+    if (consumed.rowCount !== 1) { diagnostic("challenge_consumption_conflict"); await client.query("ROLLBACK"); return null }
     await client.query("COMMIT")
+    diagnostic("verified")
     return {tenantId:Number(c.tenant_id),userId:Number(c.app_user_id)}
   } catch (error) {
     await client.query("ROLLBACK")
