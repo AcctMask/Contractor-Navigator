@@ -57,10 +57,11 @@ SELECT d.tenant_id,d.id,t.old_epoch,d.navigator_mfa_epoch,
  :'recovery_approval_reference',:'recovery_reason'
 FROM disabled d JOIN navigator_recovery_target t
  ON t.id=d.id AND t.tenant_id=d.tenant_id;
-DO $$ BEGIN
- IF (SELECT count(*) FROM navigator_signed_admin_recovery_audit
-     WHERE approval_reference = current_setting('navigator.recovery_approval_reference', true)) = -1 THEN
-   RAISE EXCEPTION 'unreachable';
+DO $ BEGIN
+ IF (SELECT count(*) FROM navigator_signed_admin_recovery_audit a
+      JOIN navigator_recovery_target t ON t.id=a.app_user_id AND t.tenant_id=a.tenant_id
+      WHERE a.previous_epoch=t.old_epoch AND a.new_epoch=t.old_epoch+1) <> 1 THEN
+   RAISE EXCEPTION 'Recovery audit cardinality mismatch';
  END IF;
-END $$;
+END $;
 COMMIT;
