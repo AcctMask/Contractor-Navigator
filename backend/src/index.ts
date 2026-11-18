@@ -62,6 +62,30 @@ if (process.env.NODE_ENV === "test") {
   console.log("NAVIGATOR_ACCEPTANCE_DB_IDENTITY", JSON.stringify(identity.rows))
   console.log("NAVIGATOR_ACCEPTANCE_DB_INVENTORY", JSON.stringify(inventory.rows))
   console.log("NAVIGATOR_ACCEPTANCE_DB_COLUMNS", JSON.stringify(columns.rows))
+  const signedInventory = await pool.query(`
+    select table_name from information_schema.tables
+    where table_schema=current_schema() and table_name in
+      ('app_users','navigator_signed_devices','navigator_signed_challenges','navigator_signed_enrollment_grants')
+    order by table_name
+  `)
+  const signedColumns = await pool.query(`
+    select column_name from information_schema.columns
+    where table_schema=current_schema() and table_name='app_users'
+      and column_name in ('navigator_mfa_required','navigator_mfa_epoch')
+    order by column_name
+  `)
+  const { signedMfaConfig } = await import("./services/navigatorSignedMfa")
+  const cfg = signedMfaConfig()
+  console.log("NAVIGATOR_ACCEPTANCE_SIGNED_DEPENDENCIES", JSON.stringify({
+    tables:signedInventory.rows.map(r=>r.table_name),
+    userColumns:signedColumns.rows.map(r=>r.column_name),
+    jwtSecretPresent:Boolean(process.env.JWT_SECRET),
+    signedGateEnabled:process.env.NAVIGATOR_MFA_SIGNED_ENABLED==="true",
+    signedConfigValid:Boolean(cfg),
+    browserOrigin:cfg?.browser??null, phoneOrigin:cfg?.phone??null,
+    pashlocAcceptanceOnlySet:process.env.PASHLOC_ACCEPTANCE_ONLY!==undefined
+  }))
+
 }
 
 const app = Fastify({ logger: true })
