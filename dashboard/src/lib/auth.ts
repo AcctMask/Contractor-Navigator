@@ -8,7 +8,7 @@ import {
 const ACCEPTANCE_SIGNED_ORIGIN = import.meta.env.VITE_PASHLOC_ACCEPTANCE_SIGNED_ORIGIN
 const ACCEPTANCE_TENANT = "pashloc-genuine-acceptance-20261114"
 const acceptanceSigned = import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "true" &&
-  typeof ACCEPTANCE_SIGNED_ORIGIN === "string" && /^https:\\/\\/[^/]+$/.test(ACCEPTANCE_SIGNED_ORIGIN)
+  typeof ACCEPTANCE_SIGNED_ORIGIN === "string" && /^https:\/\/[^/]+$/.test(ACCEPTANCE_SIGNED_ORIGIN)
 const API_BASE = acceptanceSigned ? ACCEPTANCE_SIGNED_ORIGIN : import.meta.env.VITE_API_BASE 
 const TOKEN_KEY = "contractor_autopilot_token"
 
