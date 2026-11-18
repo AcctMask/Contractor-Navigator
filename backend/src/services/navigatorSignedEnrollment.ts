@@ -1,4 +1,4 @@
-import { createPublicKey, verify, type JsonWebKey } from "node:crypto"
+import { createHash, createPublicKey, verify, type JsonWebKey } from "node:crypto"
 import { pool } from "../db/db"
 import { browserSessionDigest, sameSessionDigest } from "./pashlocSignedApprovalV1"
 import { isOpaque } from "./navigatorSignedMfa"
@@ -52,6 +52,15 @@ export async function registerSignedDevice(input: Record<string, unknown>) {
       (device_id, tenant_id, app_user_id, public_jwk, proof_verified_at)
       values ($1,$2,$3,$4,clock_timestamp()) on conflict do nothing`, [deviceId, row.tenant_id, row.app_user_id, j])
     if (!inserted || inserted.rowCount !== 1) {
+      await client.query("rollback")
+      return null
+    }
+    const referenceHash = createHash("sha256").update(reference).digest("hex")
+    const audit = await client.query(`insert into navigator_signed_device_binding_audit
+      (tenant_id, app_user_id, device_id, binding_method, enrollment_reference_hash)
+      values ($1,$2,$3,'fresh_device_registration',$4) returning id`,
+      [row.tenant_id, row.app_user_id, deviceId, referenceHash])
+    if (audit.rowCount !== 1) {
       await client.query("rollback")
       return null
     }
