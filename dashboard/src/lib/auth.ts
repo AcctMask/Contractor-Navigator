@@ -34,6 +34,27 @@ export function isLoggedIn() {
   return !!getToken()
 }
 
+export type SignedLogin = {
+  mfa_required: true
+  reference: string
+  browserProof: string
+  phoneUrl: string
+  expiresAt: string
+}
+export class PashLocLoginError extends Error {
+  readonly reason: "enrollment" | "unavailable"
+  constructor(reason: "enrollment" | "unavailable") { super(reason); this.reason = reason }
+}
+const opaque = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value)
+function validPhoneUrl(value: unknown, reference: string) {
+  try {
+    const url = new URL(String(value))
+    const phoneOrigin = import.meta.env.VITE_NAVIGATOR_MFA_PHONE_ORIGIN
+    return url.protocol === "https:" && url.origin === phoneOrigin && !url.username && !url.password &&
+      url.pathname === "/" && !url.search && url.hash === "#navigator-sign=" + reference
+  } catch { return false }
+}
+
 export async function login(email: string, password: string) {
   const res = await fetch(`${API_BASE}${tenantLoginPath(getTenantSlug())}`, {
     method: "POST",
@@ -55,13 +76,15 @@ export async function login(email: string, password: string) {
   if (json?.mfa_required === true) {
     // Never retain a previous session while an MFA challenge is pending.
     clearToken()
-    if (json.enrollment_required === true) {
-      throw new Error("PashLoc enrollment is required before this account can sign in. Contact your administrator.")
+    if (json.enrollment_required === true) throw new PashLocLoginError("enrollment")
+    if (json.token || json.method !== "pashloc_signed" || !opaque(json.reference) || !opaque(json.browserProof) ||
+        !validPhoneUrl(json.phoneUrl, json.reference) || !Number.isFinite(Date.parse(json.expiresAt))) {
+      throw new PashLocLoginError("unavailable")
     }
-    if (typeof json.challenge_id !== "string" || !json.challenge_id || json.token) {
-      throw new Error("PashLoc verification is not ready for this account")
-    }
-    return { mfa_required: true as const, challenge_id: json.challenge_id }
+    return {
+      mfa_required: true, reference: json.reference, browserProof: json.browserProof,
+      phoneUrl: json.phoneUrl, expiresAt: json.expiresAt,
+    } satisfies SignedLogin
   }
   if (typeof json?.token !== "string" || !json.token) {
     throw new Error("Login failed")
@@ -71,22 +94,23 @@ export async function login(email: string, password: string) {
   return json
 }
 
-export async function completeMfaLogin(challengeId: string, code: string) {
-  if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\\d{6}$/.test(code)) {
-    throw new Error("Invalid PashLoc verification input")
-  }
-  const response = await fetch(`${API_BASE}/auth/mfa/login/verify`, {
+export async function pollSignedLogin(request: SignedLogin, signal: AbortSignal): Promise<
+  { state: "pending" | "denied" | "expired" } | { state: "approved"; token: string }
+> {
+  const response = await fetch(`${API_BASE}/auth/mfa/signed/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ challenge_id: challengeId, code }),
-    cache: "no-store",
+    body: JSON.stringify({ reference: request.reference, browserProof: request.browserProof }),
+    credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", signal,
   })
+  if (response.status === 410) return { state: "expired" }
   const result = await response.json()
-  if (!response.ok || result?.ok !== true || typeof result.token !== "string" || !result.token) {
-    throw new Error("PashLoc verification failed")
-  }
-  setToken(result.token)
-  return result
+  if (!response.ok || result?.ok !== true) throw new PashLocLoginError("unavailable")
+  if (response.status === 202 && result.state === "pending" && !result.token) return { state: "pending" }
+  if (result.state === "denied" && !result.token) return { state: "denied" }
+  if (result.state === "approved" && typeof result.token === "string" && result.token)
+    return { state: "approved", token: result.token }
+  throw new PashLocLoginError("unavailable")
 }
 
 export async function acceptInvite(inviteToken: string, password: string) {

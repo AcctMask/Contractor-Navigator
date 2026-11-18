@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify"
+import { registerNavigatorSignedMfa } from "./navigatorSignedMfa"
 import { createHmac, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
 import {
@@ -112,6 +113,7 @@ async function requireTenantUserManager(
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  registerNavigatorSignedMfa(app)
   app.post("/auth/storm-launch", async (request: any, reply) => {
     try {
       const token = getBearerToken(request)
@@ -473,7 +475,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const { tenantSlug } = request.params
       const { email, password } = request.body || {}
 
-      const result = await loginUserByTenantSlug(tenantSlug, { email, password })
+      reply.header("Cache-Control", "no-store, private")
+      const result = await loginUserByTenantSlug(tenantSlug, { email, password }, request.headers.origin)
       return { ok: true, ...result }
     } catch (err: any) {
       reply.code(400)

@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import { randomBytes } from "crypto"
 import { pool } from "../db/db"
+import { startSignedMfa } from "./navigatorSignedMfa"
 
 type AppUser = {
   id: number
@@ -134,7 +135,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export function signToken(user: AppUser) {
+export function signToken(user: AppUser, mfa?: { epoch: string; signedMfa: boolean }) {
   return jwt.sign(
     {
       sub: user.id,
@@ -142,6 +143,7 @@ export function signToken(user: AppUser) {
       email: user.email,
       full_name: user.full_name,
       role: user.role,
+      ...(mfa && { mfa_epoch: mfa.epoch, mfa_signed: mfa.signedMfa }),
     },
     JWT_SECRET,
     { expiresIn: "7d" }
@@ -151,6 +153,8 @@ export function signToken(user: AppUser) {
 export function verifyToken(token: string) {
   return jwt.verify(token, JWT_SECRET) as {
     sub: number
+    mfa_epoch?: string
+    mfa_signed?: boolean
     tenant_id: number
     email: string
     full_name: string
@@ -682,6 +686,7 @@ export async function acceptInvitation(
       is_active = true,
       deactivated_at = null,
       updated_at = now()
+    where not app_users.navigator_mfa_required and app_users.navigator_mfa_epoch = 0
     returning id, tenant_id, email, full_name, mobile_phone, role, is_active
     `,
     [
@@ -693,6 +698,8 @@ export async function acceptInvitation(
       invite.role,
     ]
   )
+
+  if (!userResult.rowCount) throw new Error("Use the normal sign-in for this account")
 
   await pool.query(
     `
@@ -765,63 +772,44 @@ export async function acceptInvitation(
 
 export async function loginUserByTenantSlug(
   tenantSlug: string,
-  input: {
-    email: string
-    password: string
-  }
+  input: { email: string; password: string },
+  origin?: string,
 ) {
   await ensureAuthTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
-
   const email = cleanEmail(input.email)
   const password = String(input.password || "")
+  if (!email || !password) throw new Error("Email and password are required")
 
-  if (!email || !password) {
-    throw new Error("Email and password are required")
-  }
+  const lookup = `select id, tenant_id, email, full_name, mobile_phone, role, is_active,
+    financials_authorized, password_hash, navigator_mfa_required, navigator_mfa_epoch
+    from app_users where tenant_id=$1 and lower(email)=$2 limit 1`
+  const { rows: [candidate] } = await pool.query(lookup, [tenantId, email])
+  if (!candidate) throw new Error("Invalid email or password")
+  if (!candidate.is_active) throw new Error("User account is inactive")
+  if (!await bcrypt.compare(password, candidate.password_hash)) throw new Error("Invalid email or password")
 
-  const result = await pool.query(
-    `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash
-    from app_users
-    where tenant_id = $1
-      and lower(email) = $2
-    limit 1
-    `,
-    [tenantId, email]
-  )
-
-  if (!result.rowCount) {
-    throw new Error("Invalid email or password")
-  }
-
-  const row = result.rows[0]
-
-  if (!row.is_active) {
-    throw new Error("User account is inactive")
-  }
-
-  const ok = await bcrypt.compare(password, row.password_hash)
-  if (!ok) {
-    throw new Error("Invalid email or password")
-  }
-
-  const user: AppUser = {
-    id: Number(row.id),
-    tenant_id: Number(row.tenant_id),
-    email: row.email,
-    full_name: row.full_name,
-    mobile_phone: row.mobile_phone,
-    role: row.role,
-    is_active: row.is_active,
-  }
-
-  const token = signToken(user)
-
-  return {
-    user,
-    token,
-  }
+  const client = await pool.connect()
+  try {
+    await client.query("begin")
+    const { rows: [row] } = await client.query(lookup + " for update", [tenantId, email])
+    if (!row?.is_active || String(row.id) !== String(candidate.id) || row.password_hash !== candidate.password_hash)
+      throw new Error("Invalid email or password")
+    const user: AppUser = {
+      id: Number(row.id), tenant_id: Number(row.tenant_id), email: row.email, full_name: row.full_name,
+      mobile_phone: row.mobile_phone, role: row.role, is_active: row.is_active,
+      financials_authorized: row.financials_authorized,
+    }
+    const epoch = String(row.navigator_mfa_epoch)
+    const result = row.navigator_mfa_required
+      ? await startSignedMfa(client, { ...user, password_hash: row.password_hash, navigator_mfa_epoch: epoch }, origin)
+      : { user, token: signToken(user, epoch === "0" ? undefined : { epoch, signedMfa: false }) }
+    await client.query("commit")
+    return result
+  } catch (err) {
+    await client.query("rollback")
+    throw err
+  } finally { client.release() }
 }
 
 export async function updateOwnPreferredLanguage(
@@ -875,9 +863,11 @@ export async function getCurrentUserFromToken(token: string) {
     where id = $1
       and tenant_id = $2
       and is_active = true
+      and (navigator_mfa_epoch = $3::bigint)
+      and (not navigator_mfa_required or $4::boolean)
     limit 1
     `,
-    [decoded.sub, decoded.tenant_id]
+    [decoded.sub, decoded.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true]
   )
 
   if (!result.rowCount) {
@@ -1924,7 +1914,8 @@ export async function changePasswordForUser(
 ) {
   await ensureAuthTables()
 
-  const decoded = verifyToken(token)
+  const currentUser = await getCurrentUserFromToken(token)
+  const decoded = { sub: currentUser.id, tenant_id: currentUser.tenant_id }
 
   const currentPassword = String(input.currentPassword || "")
   const newPassword = String(input.newPassword || "")

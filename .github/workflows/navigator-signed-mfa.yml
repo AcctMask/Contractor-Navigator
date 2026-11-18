@@ -1,0 +1,62 @@
+name: Navigator signed login integration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'dashboard/**'
+      - '.github/workflows/navigator-signed-mfa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  isolated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qa
+          POSTGRES_PASSWORD: synthetic-ci-db
+          POSTGRES_DB: pashloc_qa_ephemeral
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U qa -d pashloc_qa_ephemeral"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://qa:synthetic-ci-db@127.0.0.1:5432/pashloc_qa_ephemeral?sslmode=disable
+      JWT_SECRET: synthetic-navigator-ci-only
+      NODE_ENV: test
+      NAVIGATOR_SIGNED_MFA_QA: ephemeral
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            dashboard/package-lock.json
+      - run: npm ci --no-audit
+        working-directory: backend
+      - run: node --import tsx --test tests/pashlocSignedApprovalV1.test.ts tests/navigatorSignedMfa.integration.test.ts
+        working-directory: backend
+      - run: npm ci --no-audit && npm run build
+        working-directory: dashboard
+        env:
+          VITE_API_BASE: http://127.0.0.1:5179
+          VITE_NAVIGATOR_MFA_PHONE_ORIGIN: https://pashloc.example.invalid
+      - name: Verify login presentation in Chromium with synthetic API responses
+        working-directory: dashboard
+        run: |
+          npm install --no-save --package-lock=false --no-audit playwright@1.57.0
+          npx playwright install --with-deps chromium
+          npm run preview -- --host 127.0.0.1 --port 5179 --strictPort &
+          for attempt in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:5179/login -o /dev/null && break
+            sleep 1
+          done
+          node tests/navigatorSignedMfa.browser.cjs

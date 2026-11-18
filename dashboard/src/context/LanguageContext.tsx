@@ -55,8 +55,11 @@ export function LanguageProvider({
     function restoreLanguage() {
       const version = ++requestVersion.current
       const token = getToken()
+      if (!token) {
+        applyLanguage(navigator.language.toLowerCase().startsWith("es") ? "es" : "en")
+        return
+      }
       applyLanguage("en")
-      if (!token) return
 
       void getMe()
         .then((user) => {
