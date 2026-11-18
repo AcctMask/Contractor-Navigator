@@ -7,7 +7,7 @@ import { sendActualAssistantNavigatorEmail } from "./services/emailService"
 
 const email = "steve@g2groofing.com"
 const slug = "pashloc-genuine-acceptance-20261114"
-const origin = "https://navigator-pashloc-iv4-acceptance.vercel.app"
+const origin = process.env.APP_BASE_URL || ""
 const table = "pashloc_chairman_password_setup"
 const hashToken = (value:string) => createHash("sha256").update(value).digest("hex")
 function guard() {
