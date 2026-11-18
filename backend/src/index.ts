@@ -42,6 +42,28 @@ import { commercialRoutes } from "./modules/commercial/routes"
 
 dotenv.config()
 
+// Protected acceptance diagnostics: inspect the connected database before startup mutations.
+if (process.env.NODE_ENV === "test") {
+  const { pool } = await import("./db/db")
+  const identity = await pool.query(`select current_database() as database, current_schema() as schema, current_setting('search_path') as search_path`)
+  const inventory = await pool.query(`
+    select table_schema, table_name
+    from information_schema.tables
+    where table_name in ('developer_settings', 'customers', 'jobs', 'tenants')
+    order by table_schema, table_name
+  `)
+  const columns = await pool.query(`
+    select table_schema, table_name, column_name
+    from information_schema.columns
+    where table_name in ('developer_settings', 'customers')
+      and column_name in ('tenant_id', 'settings', 'phone', 'reporting_classification')
+    order by table_schema, table_name, column_name
+  `)
+  console.log("NAVIGATOR_ACCEPTANCE_DB_IDENTITY", JSON.stringify(identity.rows))
+  console.log("NAVIGATOR_ACCEPTANCE_DB_INVENTORY", JSON.stringify(inventory.rows))
+  console.log("NAVIGATOR_ACCEPTANCE_DB_COLUMNS", JSON.stringify(columns.rows))
+}
+
 const app = Fastify({ logger: true })
 
 await app.register(cors, { origin: true })
