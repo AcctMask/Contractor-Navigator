@@ -165,6 +165,15 @@ test("approved device binding, signed approval and one-time Navigator session", 
   assert.equal((await post(api + "register", { ...enrollment, signature: await sign(registrationProof("acceptance")) }, phone)).statusCode, 404)
   assert.equal((await post(api + "register", enrollment, phone)).statusCode, 200)
   assert.equal((await post(api + "register", enrollment, phone)).statusCode, 404)
+  const bindingAudit = await pool.query(`select tenant_id,app_user_id,device_id,binding_method,
+    enrollment_reference_hash from navigator_signed_device_binding_audit
+    where tenant_id=$1 and app_user_id=$2`, [tenant,userId])
+  assert.equal(bindingAudit.rowCount, 1)
+  assert.equal(Number(bindingAudit.rows[0].tenant_id), tenant)
+  assert.equal(Number(bindingAudit.rows[0].app_user_id), userId)
+  assert.equal(bindingAudit.rows[0].device_id, deviceId)
+  assert.equal(bindingAudit.rows[0].binding_method, "fresh_device_registration")
+  assert.equal(bindingAudit.rows[0].enrollment_reference_hash, hash(reference))
 
   const response = await login(signed)
   const challenge = response.json()
