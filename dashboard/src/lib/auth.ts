@@ -55,7 +55,7 @@ const opaque = (value: unknown): value is string => typeof value === "string" &&
 function validPhoneUrl(value: unknown, reference: string) {
   try {
     const url = new URL(String(value))
-    const phoneOrigin = import.meta.env.VITE_NAVIGATOR_MFA_PHONE_ORIGIN
+    const phoneOrigin = acceptanceSigned ? import.meta.env.VITE_PASHLOC_ORIGINAL_PHONE_ORIGIN : import.meta.env.VITE_NAVIGATOR_MFA_PHONE_ORIGIN
     return url.protocol === "https:" && url.origin === phoneOrigin && !url.username && !url.password &&
       url.pathname === "/" && !url.search && url.hash === "#navigator-sign=" + reference
   } catch { return false }
