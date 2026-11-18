@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login } from "../lib/auth"
+import { login, PashLocLoginError, pollSignedLogin, setToken, type SignedLogin } from "../lib/auth"
+import { useLanguage } from "../context/LanguageContext"
+import type { WorkforceTranslationKey } from "../lib/workforceLanguage"
 import {
   getTenantSlug,
   setTenantSlug,
@@ -9,6 +11,7 @@ import {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { t } = useLanguage()
   const [workspace, setWorkspace] = useState(() => {
     const queryTenant =
       new URLSearchParams(
@@ -22,11 +25,68 @@ export default function LoginPage() {
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [mfaChallenge, setMfaChallenge] = useState<SignedLogin | null>(null)
+  const [mfaError, setMfaError] = useState<WorkforceTranslationKey | null>(null)
+  const [qrFailed, setQrFailed] = useState(false)
+  const qrContainer = useRef<HTMLDivElement>(null)
+  const pendingPoll = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    if (!mfaChallenge) return
+    const controller = new AbortController()
+    pendingPoll.current = controller
+    let timer: ReturnType<typeof setTimeout>
+    const fail = (key: WorkforceTranslationKey) => {
+      setMfaChallenge(null)
+      setMfaError(key)
+    }
+    const poll = async () => {
+      if (controller.signal.aborted) return
+      try {
+        // The API clock is authoritative, including for approval expiry.
+        const result = await pollSignedLogin(mfaChallenge, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]))
+        if (controller.signal.aborted) return
+        if (result.state === "approved") {
+          setTenantSlug(mfaChallenge.tenant)
+          setToken(result.token)
+          navigate("/")
+        } else if (result.state === "pending") timer = setTimeout(poll, 1500)
+        else fail(result.state === "denied" ? "pashLocDenied" : "pashLocExpired")
+      } catch {
+        if (!controller.signal.aborted) fail("pashLocUnavailable")
+      }
+    }
+    void poll()
+    return () => { controller.abort(); clearTimeout(timer) }
+  }, [mfaChallenge, navigate])
+
+  useEffect(() => {
+    if (!mfaChallenge || !qrContainer.current) return
+    const container = qrContainer.current
+    const browser = window as Window & { QRCode?: new (
+      node: HTMLElement, options: { text: string; width: number; height: number; correctLevel: number },
+    ) => unknown }
+    const draw = () => {
+      try {
+        if (!browser.QRCode) throw new Error("QR renderer unavailable")
+        container.replaceChildren()
+        new browser.QRCode(container, { text: mfaChallenge.phoneUrl, width: 224, height: 224, correctLevel: 1 })
+      } catch { setQrFailed(true) }
+    }
+    if (browser.QRCode) { draw(); return }
+    const script = document.createElement("script")
+    script.src = "/vendor/qrcode.js"
+    script.onload = draw
+    script.onerror = () => setQrFailed(true)
+    document.head.append(script)
+    return () => { script.onload = script.onerror = null; script.remove() }
+  }, [mfaChallenge])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError("")
+    setMfaError(null)
     setStatus("Logging in...")
 
     try {
@@ -39,12 +99,25 @@ export default function LoginPage() {
         )}...`,
       )
 
-      await login(email.trim(), password)
+      const result = await login(email.trim(), password)
+      if (result?.mfa_required === true) {
+        setQrFailed(false)
+        setPassword("")
+        setMfaChallenge(result)
+        setStatus("")
+        return
+      }
       setStatus("Login successful")
       navigate("/")
     } catch (err: any) {
-      setError(err?.message || "Login failed")
-      setStatus("Login failed")
+      if (err instanceof PashLocLoginError) {
+        setPassword("")
+        setMfaError(err.reason === "enrollment" ? "pashLocEnrollment" : "pashLocUnavailable")
+        setStatus("")
+      } else {
+        setError(err?.message || "Login failed")
+        setStatus("Login failed")
+      }
     } finally {
       setSubmitting(false)
     }
@@ -61,7 +134,23 @@ export default function LoginPage() {
           Sign in to manage invitations, jobs, and staff controls.
         </p>
 
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+        {mfaError && <div role="alert" style={errorStyle}>{t(mfaError)}</div>}
+        {mfaChallenge ? (
+          <section style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+            <h2>{t("pashLocTitle")}</h2>
+            <p>{t("pashLocScan")}</p>
+            <div ref={qrContainer} role="img" aria-label={t("pashLocTitle")}
+              style={{ width: 224, minHeight: 224, padding: 12, background: "white", boxSizing: "content-box" }} />
+            {qrFailed && <p role="status">{t("pashLocQrUnavailable")}</p>}
+            <a style={{ color: "#a9d4ff" }} href={mfaChallenge.phoneUrl} target="_blank" rel="noopener noreferrer">
+              {t("pashLocOpen")}
+            </a>
+            <p role="status">{t("pashLocWaiting")} · {mfaChallenge.reference.slice(-6).toUpperCase()}</p>
+            <button type="button" onClick={() => { pendingPoll.current?.abort(); setMfaChallenge(null) }} style={buttonStyle}>
+              {t("pashLocBack")}
+            </button>
+          </section>
+        ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
           <div>
             <label style={labelStyle}>
               Company Workspace
@@ -117,7 +206,7 @@ export default function LoginPage() {
           </div>
 
           {error ? <div style={errorStyle}>{error}</div> : null}
-        </form>
+        </form>}
       </div>
     </div>
   )

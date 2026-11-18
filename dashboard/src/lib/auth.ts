@@ -1,14 +1,17 @@
 import {
   getTenantSlug,
+  setTenantSlug,
   tenantLoginPath,
 } from "./tenant"
 
-const API_BASE = import.meta.env.VITE_API_BASE 
+const API_BASE = import.meta.env.VITE_API_BASE
+const PROTECTED = ["yes", "true"].includes(import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY)
 const TOKEN_KEY = "contractor_autopilot_token"
 
 export type AuthUser = {
   id: number
   tenant_id: number
+  tenant_slug?: string
   email: string
   full_name: string
   role: string
@@ -34,8 +37,33 @@ export function isLoggedIn() {
   return !!getToken()
 }
 
+export type SignedLogin = {
+  mfa_required: true
+  reference: string
+  browserProof: string
+  phoneUrl: string
+  expiresAt: string
+  tenant: string
+}
+export class PashLocLoginError extends Error {
+  readonly reason: "enrollment" | "unavailable"
+  constructor(reason: "enrollment" | "unavailable") { super(reason); this.reason = reason }
+}
+const opaque = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{43}$/.test(value)
+function validPhoneUrl(value: unknown, reference: string) {
+  try {
+    const url = new URL(String(value))
+    const phoneOrigin = import.meta.env.VITE_PASHLOC_ORIGINAL_PHONE_ORIGIN || import.meta.env.VITE_NAVIGATOR_MFA_PHONE_ORIGIN
+    return url.protocol === "https:" && url.origin === phoneOrigin && !url.username && !url.password &&
+      url.pathname === "/" && !url.search && url.hash === "#navigator-sign=" + reference
+  } catch { return false }
+}
+
 export async function login(email: string, password: string) {
-  const res = await fetch(`${API_BASE}${tenantLoginPath(getTenantSlug())}`, {
+  const tenant = getTenantSlug()
+  // Preserve the selected tenant. The protected authority must explicitly authorize it;
+  // never silently substitute an acceptance identity or grant a cross-tenant session.
+  const res = await fetch(`${API_BASE}${tenantLoginPath(tenant)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -48,12 +76,51 @@ export async function login(email: string, password: string) {
 
   const json = await res.json()
 
-  if (!res.ok || !json?.token) {
+  if (!res.ok || json?.ok === false) {
     throw new Error(json?.error || "Login failed")
   }
 
+  if (json?.mfa_required === true) {
+    // Never retain a previous session while an MFA challenge is pending.
+    clearToken()
+    if (json.enrollment_required === true) throw new PashLocLoginError("enrollment")
+    if ((PROTECTED && json.tenantSlug !== tenant) || json.token || json.method !== "pashloc_signed" || !opaque(json.reference) || !opaque(json.browserProof) ||
+        !validPhoneUrl(json.phoneUrl, json.reference) || !Number.isFinite(Date.parse(json.expiresAt))) {
+      throw new PashLocLoginError("unavailable")
+    }
+    return {
+      mfa_required: true, reference: json.reference, browserProof: json.browserProof,
+      phoneUrl: json.phoneUrl, expiresAt: json.expiresAt, tenant,
+    } satisfies SignedLogin
+  }
+  if (typeof json?.token !== "string" || !json.token) {
+    throw new Error("Login failed")
+  }
+
+  if (PROTECTED && json.tenantSlug !== tenant) throw new Error("Login failed")
+  setTenantSlug(tenant)
   setToken(json.token)
   return json
+}
+
+export async function pollSignedLogin(request: SignedLogin, signal: AbortSignal): Promise<
+  { state: "pending" | "denied" | "expired" } | { state: "approved"; token: string }
+> {
+  const response = await fetch(`${API_BASE}/auth/mfa/signed/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reference: request.reference, browserProof: request.browserProof }),
+    credentials: "omit", cache: "no-store", referrerPolicy: "no-referrer", signal,
+  })
+  if (response.status === 410) return { state: "expired" }
+  const result = await response.json()
+  if (!response.ok || result?.ok !== true) throw new PashLocLoginError("unavailable")
+  if (response.status === 202 && result.state === "pending" && !result.token) return { state: "pending" }
+  if (result.state === "denied" && !result.token) return { state: "denied" }
+  if (result.state === "approved" && typeof result.token === "string" && result.token &&
+      (!PROTECTED || result.tenantSlug === request.tenant))
+    return { state: "approved", token: result.token }
+  throw new PashLocLoginError("unavailable")
 }
 
 export async function acceptInvite(inviteToken: string, password: string) {
@@ -125,7 +192,18 @@ export async function getMe(): Promise<AuthUser | null> {
     return null
   }
 
-  return json.user || null
+  const user = json.user as AuthUser | undefined
+  if (!user || json.ok !== true) {
+    clearToken()
+    return null
+  }
+  // In protected acceptance, never reuse a session from another workspace.
+  // Production platform-owner workspace switching retains its existing authority.
+  if (PROTECTED && (typeof user.tenant_slug !== "string" || (user.role !== "platform_owner" && user.tenant_slug !== getTenantSlug()))) {
+    clearToken()
+    return null
+  }
+  return user
 }
 
 export async function fetchInvite(inviteToken: string) {

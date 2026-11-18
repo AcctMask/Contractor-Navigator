@@ -24,6 +24,16 @@ async function ensureSalesPerformanceReportingSchema() {
       not null default 'customer'
   `)
 
+  // Older isolated acceptance schemas may not contain customers.phone.
+  // Preserve their existing records; only run owner classification when supported.
+  const phoneColumn = await pool.query(`
+    select 1 from information_schema.columns
+    where table_schema = current_schema()
+      and table_name = 'customers' and column_name = 'phone'
+    limit 1
+  `)
+  if (!phoneColumn.rowCount) return
+
   await pool.query(`
     update customers c
     set
