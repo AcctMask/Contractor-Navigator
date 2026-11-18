@@ -3,7 +3,13 @@ import {
   tenantLoginPath,
 } from "./tenant"
 
-const API_BASE = import.meta.env.VITE_API_BASE 
+// Protected acceptance only: use the established November 17 signed authority,
+// never a second navigator_signed_* service or a cross-audience token exchange.
+const ACCEPTANCE_SIGNED_ORIGIN = import.meta.env.VITE_PASHLOC_ACCEPTANCE_SIGNED_ORIGIN
+const ACCEPTANCE_TENANT = "pashloc-genuine-acceptance-20261114"
+const acceptanceSigned = import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "true" &&
+  typeof ACCEPTANCE_SIGNED_ORIGIN === "string" && /^https:\\/\\/[^/]+$/.test(ACCEPTANCE_SIGNED_ORIGIN)
+const API_BASE = acceptanceSigned ? ACCEPTANCE_SIGNED_ORIGIN : import.meta.env.VITE_API_BASE 
 const TOKEN_KEY = "contractor_autopilot_token"
 
 export type AuthUser = {
@@ -56,7 +62,9 @@ function validPhoneUrl(value: unknown, reference: string) {
 }
 
 export async function login(email: string, password: string) {
-  const res = await fetch(`${API_BASE}${tenantLoginPath(getTenantSlug())}`, {
+  const tenant = getTenantSlug()
+  if (acceptanceSigned && tenant !== ACCEPTANCE_TENANT) throw new Error("Protected acceptance tenant required")
+  const res = await fetch(`${API_BASE}${acceptanceSigned ? "/auth/mfa/signed/start" : tenantLoginPath(tenant)}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -64,10 +72,14 @@ export async function login(email: string, password: string) {
     body: JSON.stringify({
       email,
       password,
+      ...(acceptanceSigned ? {tenantSlug: tenant, mode: "login"} : {}),
     }),
   })
 
-  const json = await res.json()
+  const original = await res.json()
+  const json = acceptanceSigned && original?.ok === true && original?.reference
+    ? { ...original, mfa_required: true, method: "pashloc_signed" }
+    : original
 
   if (!res.ok || json?.ok === false) {
     throw new Error(json?.error || "Login failed")
