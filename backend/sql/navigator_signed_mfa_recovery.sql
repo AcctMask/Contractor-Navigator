@@ -1,67 +1,10 @@
--- Chairman-only production pilot: administrative recovery transaction.
--- NOT an application endpoint or automatic migration. Requires a separately
--- authorized database administrator, independently verified identity, and
--- the Chairman's explicit approval for the exact account and tenant.
--- Execute with psql variables: chairman_user_id, chairman_tenant_id,
--- expected_mfa_epoch, recovery_approval_reference, recovery_reason.
--- All operations are atomic. Epoch change invalidates every existing token;
--- challenge revocation prevents outstanding approvals from being consumed.
-\\set ON_ERROR_STOP on
-BEGIN;
-CREATE TABLE IF NOT EXISTS navigator_signed_admin_recovery_audit (
-  id bigserial PRIMARY KEY,
-  tenant_id bigint NOT NULL,
-  app_user_id bigint NOT NULL,
-  previous_epoch bigint NOT NULL,
-  new_epoch bigint NOT NULL,
-  approval_reference text NOT NULL CHECK (length(trim(approval_reference)) >= 8),
-  reason text NOT NULL CHECK (length(trim(reason)) >= 12),
-  performed_at timestamptz NOT NULL DEFAULT clock_timestamp()
-);
-CREATE TEMP TABLE navigator_recovery_target ON COMMIT DROP AS
-SELECT u.id, u.tenant_id, u.navigator_mfa_epoch AS old_epoch
-FROM app_users u
-WHERE u.id = :chairman_user_id
-  AND u.tenant_id = :chairman_tenant_id
-  AND u.navigator_mfa_epoch = :expected_mfa_epoch
-  AND u.navigator_mfa_required = true AND u.is_active = true;
-DO $$ BEGIN
- IF (SELECT count(*) FROM navigator_recovery_target) <> 1 THEN
-   RAISE EXCEPTION 'Recovery target is not exactly one active MFA-enabled account';
- END IF;
-END $$;
--- Lock target before modifying its challenges or policy.
-SELECT u.id FROM app_users u JOIN navigator_recovery_target t
- ON t.id=u.id AND t.tenant_id=u.tenant_id FOR UPDATE OF u;
-UPDATE navigator_signed_challenges c
-SET decision='deny', consumed_at=clock_timestamp()
-FROM navigator_recovery_target t
-WHERE c.app_user_id=t.id AND c.tenant_id=t.tenant_id
-  AND c.consumed_at IS NULL AND c.decision IS NULL;
-UPDATE navigator_signed_enrollment_grants g
-SET used_at=clock_timestamp()
-FROM navigator_recovery_target t
-WHERE g.app_user_id=t.id AND g.tenant_id=t.tenant_id
-  AND g.used_at IS NULL;
-WITH disabled AS (
- UPDATE app_users u SET navigator_mfa_required=false,
-   navigator_mfa_epoch=u.navigator_mfa_epoch+1
- FROM navigator_recovery_target t
- WHERE u.id=t.id AND u.tenant_id=t.tenant_id
-   AND u.navigator_mfa_epoch=t.old_epoch AND u.navigator_mfa_required
- RETURNING u.id,u.tenant_id,u.navigator_mfa_epoch
-)
-INSERT INTO navigator_signed_admin_recovery_audit
-(tenant_id,app_user_id,previous_epoch,new_epoch,approval_reference,reason)
-SELECT d.tenant_id,d.id,t.old_epoch,d.navigator_mfa_epoch,
- :'recovery_approval_reference',:'recovery_reason'
-FROM disabled d JOIN navigator_recovery_target t
- ON t.id=d.id AND t.tenant_id=d.tenant_id;
-DO $ BEGIN
- IF (SELECT count(*) FROM navigator_signed_admin_recovery_audit a
-      JOIN navigator_recovery_target t ON t.id=a.app_user_id AND t.tenant_id=a.tenant_id
-      WHERE a.previous_epoch=t.old_epoch AND a.new_epoch=t.old_epoch+1) <> 1 THEN
-   RAISE EXCEPTION 'Recovery audit cardinality mismatch';
- END IF;
-END $;
-COMMIT;
+-- Parameterized operations query. Not a migration or public API.
+-- Run after identity proofing and only with explicit account recovery approval.
+-- Bind $1=existing account id, $2=existing tenant id, $3=expected current MFA epoch.
+-- Require exactly one returned row. No other account is changed.
+-- Moving the epoch forward invalidates pre-recovery sessions and challenges.
+update app_users
+set navigator_mfa_required = false, navigator_mfa_epoch = navigator_mfa_epoch + 1
+where id = $1 and tenant_id = $2 and navigator_mfa_epoch = $3
+  and is_active and navigator_mfa_required
+returning id, tenant_id, navigator_mfa_epoch;
