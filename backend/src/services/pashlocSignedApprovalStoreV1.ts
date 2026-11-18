@@ -15,6 +15,7 @@ export async function decideSignedApproval(input:{
  const client=await pool.connect()
  try{
   await client.query("BEGIN")
+  await client.query("SELECT set_config($1,$2,true)",["app.pashloc_test_tenants",process.env.PASHLOC_SIGNED_TEST_TENANTS || "pashloc-genuine-acceptance-20261114"])
   const rows=await client.query(`select c.id,c.tenant_id,c.app_user_id,c.browser_session_hash,
     c.expires_at,c.decision,d.device_id,d.public_jwk
     from pashloc_signed_challenges c
@@ -22,7 +23,7 @@ export async function decideSignedApproval(input:{
     join app_users u on u.id=c.app_user_id and u.tenant_id=c.tenant_id
     join tenants t on t.id=c.tenant_id
     where c.challenge_id=$1 and d.device_id=$2
-      and t.slug='pashloc-genuine-acceptance-20261114'
+      and t.slug = any(string_to_array(coalesce(nullif(current_setting('app.pashloc_test_tenants',true),''),'pashloc-genuine-acceptance-20261114'),','))
       and c.purpose='login' and c.expires_at>clock_timestamp() and c.consumed_at is null and c.decided_at is null
       and d.revoked_at is null and d.proof_verified_at is not null
       and u.is_active=true and u.pashloc_mfa_required=true
