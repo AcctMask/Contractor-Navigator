@@ -55,6 +55,9 @@ export async function login(email: string, password: string) {
   if (json?.mfa_required === true) {
     // Never retain a previous session while an MFA challenge is pending.
     clearToken()
+    if (json.enrollment_required === true) {
+      throw new Error("PashLoc enrollment is required before this account can sign in. Contact your administrator.")
+    }
     if (typeof json.challenge_id !== "string" || !json.challenge_id || json.token) {
       throw new Error("PashLoc verification is not ready for this account")
     }
