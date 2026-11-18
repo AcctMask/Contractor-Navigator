@@ -473,7 +473,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const { tenantSlug } = request.params
       const { email, password } = request.body || {}
 
-      const result = await loginUserByTenantSlug(tenantSlug, { email, password })
+      const result = await loginUserByTenantSlug(tenantSlug, { email, password }, request.headers.origin)
       return { ok: true, ...result }
     } catch (err: any) {
       reply.code(400)
