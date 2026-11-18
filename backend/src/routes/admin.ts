@@ -471,6 +471,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.get("/admin/timeline/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
+    const access = await requireJobReadUser(req, reply, tenantId);
+    if (reply.sent) return;
+    if (!access || typeof access !== "object" || !("id" in access)) return;
+
     const q: any = (req.query as any) || {};
 
     const from = asNullableString(q.from);
@@ -501,6 +505,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.get("/admin/scheduled/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
+    const access = await requireJobReadUser(req, reply, tenantId);
+    if (reply.sent) return;
+    if (!access || typeof access !== "object" || !("id" in access)) return;
+
 
     const actions = await pool.query(
       `
@@ -778,6 +786,10 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   app.get("/admin/reports/:tenant_slug", async (req, reply) => {
     const tenant_slug = String((req.params as any).tenant_slug || "");
     const tenantId = await getTenantIdBySlug(tenant_slug);
+    const access = await requireJobReadUser(req, reply, tenantId);
+    if (reply.sent) return;
+    if (!access || typeof access !== "object" || !("id" in access)) return;
+
     const q: any = (req.query as any) || {};
     const range = String(q.range || "30d");
 
