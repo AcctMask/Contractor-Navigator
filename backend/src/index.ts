@@ -128,6 +128,14 @@ app.listen({ port, host: "0.0.0.0" })
      * Navigator corporate authority must be durable before any
      * CRM / AI follow-up scheduler is allowed to operate.
      */
+    // The disposable PashLoc acceptance database intentionally contains only
+    // the authentication/test subset. Do not install production CRM follow-up
+    // triggers or start outbound schedulers against this protected fixture.
+    if (process.env.NODE_ENV === "test") {
+      console.log("NAVIGATOR_ACCEPTANCE_SCHEDULERS_DISABLED")
+      return
+    }
+
     await ensureStageSinceAuthority()
     await ensureFollowupLifecycleAuthority()
 
