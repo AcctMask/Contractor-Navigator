@@ -195,6 +195,56 @@ test("disposable Good2Go password, signed approval, and operational data", { ski
         dom.window.close()
       }
     }
+
+    // Shared rate-limit proof: independent Fastify instances, one PostgreSQL counter.
+    // All fixtures and destructive fault injection remain inside the disposable loopback DB.
+    {
+      const { default: Fastify } = await import("fastify")
+      const { registerPashLocAcceptanceRateLimits } = await import("../src/services/pashlocAcceptanceRateLimit")
+      const one = Fastify({logger:false}), two = Fastify({logger:false})
+      for (const instance of [one,two]) {
+        registerPashLocAcceptanceRateLimits(instance)
+        for (const route of ["/auth/g2g-roofing/login","/auth/mfa/enrollment/start",
+          "/auth/mfa/signed/decision","/auth/mfa/device/claim"]) {
+          instance.post(route,async()=>({ok:true}))
+        }
+      }
+      try {
+        await pool.query("delete from pashloc_mfa_request_limits")
+        const path="/auth/mfa/signed/decision"
+        const requests=Array.from({length:25},(_,i)=>(i%2?two:one).inject({
+          method:"POST",url:path,payload:{},remoteAddress:"192.0.2.10",
+          headers:{origin:phone,"x-forwarded-for":"203.0.113."+i,"x-real-ip":"198.51.100."+i}
+        }))
+        const results=await Promise.all(requests)
+        assert.equal(results.filter(r=>r.statusCode===200).length,20,"atomic shared limit across instances")
+        assert.equal(results.filter(r=>r.statusCode===429).length,5)
+        await pool.query("delete from pashloc_mfa_request_limits")
+        const aggregate=await Promise.all(Array.from({length:105},(_,i)=>(i%2?two:one).inject({
+          method:"POST",url:path,payload:{},remoteAddress:"198.51.100."+i,
+          headers:{origin:phone}
+        })))
+        assert.equal(aggregate.filter(r=>r.statusCode===200).length,100,"shared aggregate cap")
+        assert.equal(aggregate.filter(r=>r.statusCode===429).length,5)
+        await pool.query("delete from pashloc_mfa_request_limits")
+        for (const route of ["/auth/g2g-roofing/login","/auth/mfa/enrollment/start",
+          "/auth/mfa/signed/decision","/auth/mfa/device/claim"]) {
+          const response=await one.inject({method:"POST",url:route,payload:{},headers:{origin:phone}})
+          assert.equal(response.statusCode,200,route)
+          const record=await pool.query("select count(*)::int as count from pashloc_mfa_request_limits where bucket like $1",[route+"|%"])
+          assert.equal(record.rows[0].count,2,"rate limit buckets required for "+route)
+        }
+        assert.equal((await one.inject({method:"POST",url:path,payload:{},headers:{origin:"https://untrusted.invalid"}})).statusCode,403)
+        await pool.query("alter table pashloc_mfa_request_limits rename to pashloc_mfa_request_limits_fault")
+        try {
+          const unavailable=await one.inject({method:"POST",url:path,payload:{},headers:{origin:phone}})
+          assert.notEqual(unavailable.statusCode,200,"DB outage must fail closed")
+        } finally {
+          await pool.query("alter table pashloc_mfa_request_limits_fault rename to pashloc_mfa_request_limits")
+        }
+        console.log("PASHLOC_SHARED_RATE_LIMITS_ATOMIC_MULTI_INSTANCE_SPOOF_AGGREGATE_COVERAGE_FAIL_CLOSED_PASS")
+      } finally {await one.close();await two.close()}
+    }
   } finally {
     await app?.close()
     await pool.end()
