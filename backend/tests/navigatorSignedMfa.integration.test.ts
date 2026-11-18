@@ -224,3 +224,11 @@ test("account-level recovery restores only the selected password login and inval
   assert.equal((await get("/auth/me", recovered)).statusCode, 200)
   assert.equal((await get("/auth/me", staffToken)).statusCode, 200)
 })
+
+test("customer-facing reports, timeline and scheduled reads reject unauthenticated and foreign tenants", async () => {
+  const staffToken = (await login(staff)).json().token
+  for (const route of ["/admin/timeline/", "/admin/scheduled/", "/admin/reports/"]) {
+    assert.equal((await get(route + slug)).statusCode, 401, route + " requires login")
+    assert.equal((await get(route + secondSlug, staffToken)).statusCode, 403, route + " denies other tenant")
+  }
+})
