@@ -199,7 +199,7 @@ export async function getMe(): Promise<AuthUser | null> {
   }
   // In protected acceptance, never reuse a session from another workspace.
   // Production platform-owner workspace switching retains its existing authority.
-  if (PROTECTED && (typeof user.tenant_slug !== "string" || user.tenant_slug !== getTenantSlug())) {
+  if (PROTECTED && (typeof user.tenant_slug !== "string" || (user.role !== "platform_owner" && user.tenant_slug !== getTenantSlug()))) {
     clearToken()
     return null
   }
