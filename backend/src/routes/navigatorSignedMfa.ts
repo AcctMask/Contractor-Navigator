@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { registerSignedDevice, signedRegistrationInfo } from "../services/navigatorSignedEnrollment"
 import { signToken } from "../services/authService"
+import { pool } from "../db/db"
 import { consumeSignedMfa, getSignedChallenge, isOpaque, recordSignedDecision, signedMfaConfig } from "../services/navigatorSignedMfa"
 import type { SignedApprovalContext } from "../services/pashlocSignedApprovalV1"
 
@@ -43,8 +44,15 @@ export function registerNavigatorSignedMfa(app: FastifyInstance) {
     const { reference, browserProof } = (request.body ?? {}) as Record<string, unknown>
     if (!isOpaque(reference) || !isOpaque(browserProof)) return reply.code(400).send({ ok: false, error: "malformed" })
     const result = await consumeSignedMfa(reference, browserProof)
-    if (result.state === "approved")
-      return { ok: true, state: result.state, token: signToken(result.user, { epoch: result.epoch, signedMfa: true }) }
+    if (result.state === "approved") {
+      // Return the tenant from the authenticated, one-time consumed challenge;
+      // never trust a tenant slug supplied by the browser.
+      const tenant = await pool.query("select slug from tenants where id=$1", [result.user.tenant_id])
+      if (tenant.rowCount !== 1 || typeof tenant.rows[0]?.slug !== "string")
+        return reply.code(403).send({ ok: false, error: "unavailable" })
+      return { ok: true, state: result.state, tenantSlug: tenant.rows[0].slug,
+        token: signToken(result.user, { epoch: result.epoch, signedMfa: true }) }
+    }
     if (result.state === "pending") reply.code(202)
     if (result.state === "expired") reply.code(410)
     if (result.state === "unavailable") reply.code(404)
