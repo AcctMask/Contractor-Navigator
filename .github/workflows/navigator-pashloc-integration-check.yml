@@ -9,6 +9,7 @@ on:
       - 'backend/tests/pashloc*.ts'
       - 'backend/sql/pashloc_mfa_navigator_default_off_schema.sql'
       - 'dashboard/src/**'
+      - 'dashboard/vite.config.ts'
       - '.github/workflows/navigator-pashloc-integration-check.yml'
   push:
     branches:
@@ -36,7 +37,7 @@ jobs:
           VITE_PASHLOC_ACCEPTANCE_API_ORIGIN: https://navigator-pashloc-iv-isolated-20261113.onrender.com
         run: |
           set -eu
-          if VITE_API_BASE=https://contractor-navigator.onrender.com npm run build > /tmp/acceptance-rejected.log 2>&1; then
+          if VITE_API_BASE=https://contractor-navigator.onrender.com VITE_PASHLOC_ACCEPTANCE_ONLY=true npm run build > /tmp/acceptance-rejected.log 2>&1; then
             echo 'FAIL: production-like API was accepted'
             exit 1
           fi

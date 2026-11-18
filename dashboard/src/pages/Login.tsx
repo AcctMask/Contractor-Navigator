@@ -47,6 +47,7 @@ export default function LoginPage() {
         const result = await pollSignedLogin(mfaChallenge, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]))
         if (controller.signal.aborted) return
         if (result.state === "approved") {
+          setTenantSlug(mfaChallenge.tenant)
           setToken(result.token)
           navigate("/")
         } else if (result.state === "pending") timer = setTimeout(poll, 1500)

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { createHmac, createHash, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
+import { registerNavigatorSignedMfa } from "./navigatorSignedMfa"
 import { createPashLocLoginChallenge } from "../services/pashlocChallenge"
 import { createPashLocPairing } from "../services/pashlocPairing"
 import { issuePashLocDeviceClaimNonce } from "../services/pashlocDeviceClaimChallenge"
@@ -130,6 +131,7 @@ export async function registerAuthRoutes(app: FastifyInstance, protectedLogin?: 
   authorize: (tenantSlug: string, origin: string | undefined) => boolean
   startMfa: (tenantSlug: string, user: { id: number; tenant_id: number }) => Promise<{ mfa_required: true; token: null }>
 }) {
+  if (!protectedLogin && process.env.PASHLOC_ACCEPTANCE_ONLY === undefined) registerNavigatorSignedMfa(app)
   app.post("/auth/storm-launch", async (request: any, reply) => {
     try {
       const token = getBearerToken(request)
@@ -491,9 +493,10 @@ export async function registerAuthRoutes(app: FastifyInstance, protectedLogin?: 
       const { tenantSlug } = request.params
       const { email, password } = request.body || {}
 
+      reply.header("Cache-Control", "no-store, private")
       if (protectedLogin && !protectedLogin.authorize(tenantSlug, request.headers.origin))
         return reply.code(403).send({ ok: false, error: "unavailable" })
-      const result = await loginUserByTenantSlug(tenantSlug, { email, password },
+      const result = await loginUserByTenantSlug(tenantSlug, { email, password }, request.headers.origin,
         protectedLogin ? user => protectedLogin.startMfa(tenantSlug, user) : undefined)
       return { ok: true, ...result, ...(protectedLogin ? { tenantSlug } : {}) }
     } catch (err: any) {

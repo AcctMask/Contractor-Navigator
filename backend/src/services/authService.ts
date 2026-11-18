@@ -4,6 +4,7 @@ import { randomBytes } from "crypto"
 import { createPashLocLoginChallenge } from "./pashlocChallenge"
 import { verifyPashLocReturningLogin } from "./pashlocVerifyLogin"
 import { pool } from "../db/db"
+import { startSignedMfa } from "./navigatorSignedMfa"
 
 type AppUser = {
   id: number
@@ -143,7 +144,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export function signToken(user: AppUser, mfaVerified = false) {
+export function signToken(user: AppUser, assurance: boolean | { epoch: string; signedMfa: boolean } = false) {
   return jwt.sign(
     {
       sub: user.id,
@@ -151,7 +152,8 @@ export function signToken(user: AppUser, mfaVerified = false) {
       email: user.email,
       full_name: user.full_name,
       role: user.role,
-      mfa_verified: mfaVerified,
+      mfa_verified: assurance === true,
+      ...(typeof assurance === "object" && { mfa_epoch: assurance.epoch, mfa_signed: assurance.signedMfa }),
     },
     JWT_SECRET,
     { expiresIn: "7d" }
@@ -168,6 +170,8 @@ export function verifyToken(token: string) {
     iat: number
     exp: number
     mfa_verified?: boolean
+    mfa_epoch?: string
+    mfa_signed?: boolean
   }
 }
 
@@ -693,6 +697,9 @@ export async function acceptInvitation(
       is_active = true,
       deactivated_at = null,
       updated_at = now()
+    where not app_users.pashloc_mfa_required
+      and not coalesce((to_jsonb(app_users)->>'navigator_mfa_required')::boolean, false)
+      and coalesce((to_jsonb(app_users)->>'navigator_mfa_epoch')::bigint, 0) = 0
     returning id, tenant_id, email, full_name, mobile_phone, role, is_active
     `,
     [
@@ -704,6 +711,8 @@ export async function acceptInvitation(
       invite.role,
     ]
   )
+
+  if (!userResult.rowCount) throw new Error("Use the normal sign-in for this account")
 
   await pool.query(
     `
@@ -776,101 +785,79 @@ export async function acceptInvitation(
 
 export async function loginUserByTenantSlug(
   tenantSlug: string,
-  input: {
-    email: string
-    password: string
-  },
+  input: { email: string; password: string },
+  origin?: string,
   startVerifiedMfa?: (user: { id: number; tenant_id: number }) => Promise<{ mfa_required: true; token: null }>
 ) {
   if (!startVerifiedMfa) await ensureAuthTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
-
   const email = cleanEmail(input.email)
   const password = String(input.password || "")
+  if (!email || !password) throw new Error("Email and password are required")
 
-  if (!email || !password) {
-    throw new Error("Email and password are required")
-  }
-
-  const result = await pool.query(
-    `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash
-    from app_users
-    where tenant_id = $1
-      and lower(email) = $2
-    limit 1
-    `,
-    [tenantId, email]
-  )
-
-  if (!result.rowCount) {
+  // Protected databases do not need the separate Navigator pilot schema.
+  // When the columns exist, however, enforce their policy and epoch.
+  const lookup = `select id, tenant_id, email, full_name, mobile_phone, role, is_active,
+    financials_authorized, password_hash, pashloc_mfa_required,
+    coalesce((to_jsonb(u)->>'navigator_mfa_required')::boolean, false) as navigator_mfa_required,
+    coalesce(to_jsonb(u)->>'navigator_mfa_epoch', '0') as navigator_mfa_epoch
+    from app_users u where tenant_id=$1 and lower(email)=$2 limit 1`
+  const { rows: [candidate] } = await pool.query(lookup, [tenantId, email])
+  if (!candidate || !await bcrypt.compare(password, candidate.password_hash)) {
     throw new Error("Invalid email or password")
   }
 
-  const row = result.rows[0]
+  const client = await pool.connect()
+  let pashlocUser: AppUser
+  try {
+    await client.query("begin")
+    const { rows: [row] } = await client.query(lookup + " for update", [tenantId, email])
+    if (!row?.is_active || String(row.id) !== String(candidate.id) || row.password_hash !== candidate.password_hash)
+      throw new Error("Invalid email or password")
 
-  if (!row.is_active) {
-    throw new Error("User account is inactive")
-  }
-
-  const ok = await bcrypt.compare(password, row.password_hash)
-  if (!ok) {
-    throw new Error("Invalid email or password")
-  }
-
-  const user: AppUser = {
-    id: Number(row.id),
-    tenant_id: Number(row.tenant_id),
-    email: row.email,
-    full_name: row.full_name,
-    mobile_phone: row.mobile_phone,
-    role: row.role,
-    is_active: row.is_active,
-    financials_authorized: Boolean(row.financials_authorized),
-  }
-
-  // Account-specific MFA: password alone cannot mint a Navigator JWT.
-  const mfaPolicy = await pool.query(
-    `select pashloc_mfa_required from app_users
-     where id = $1 and tenant_id = $2 and is_active = true`,
-    [user.id, user.tenant_id]
-  )
-  if (mfaPolicy.rowCount !== 1) throw new Error("User account is inactive")
-  if (mfaPolicy.rows[0]?.pashloc_mfa_required) {
-    if (startVerifiedMfa) return startVerifiedMfa(user)
-    const enrollment = await pool.query(
-      `select id from pashloc_mfa_enrollments
-       where tenant_id=$1 and app_user_id=$2 and status='confirmed'
-         and delivery_pairing_id is not null limit 1`,
-      [user.tenant_id,user.id]
-    )
-    if (enrollment.rowCount !== 1) {
-      // Enrollment is a separate, password-verified restricted flow.
-      // Do not create an orphaned enrollment challenge in the normal login.
-      return { mfa_required:true, enrollment_required:true, token:null }
+    const user: AppUser = {
+      id: Number(row.id), tenant_id: Number(row.tenant_id), email: row.email, full_name: row.full_name,
+      mobile_phone: row.mobile_phone, role: row.role, is_active: row.is_active,
+      financials_authorized: Boolean(row.financials_authorized),
     }
-    const challenge = await createPashLocLoginChallenge({
-      tenantId:user.tenant_id,userId:user.id,purpose:"verify"
-    })
-    return { mfa_required:true, challenge_id:challenge.challengeId,
-      expires_at:challenge.expiresAt, token:null }
-  }
+    const epoch = row.navigator_mfa_epoch
+    if (row.navigator_mfa_required || epoch !== "0" && (row.pashloc_mfa_required || startVerifiedMfa)) {
+      // Never substitute one authority for another when two policies apply.
+      const result = row.pashloc_mfa_required || startVerifiedMfa
+        ? { mfa_required: true as const, unavailable: true as const, token: null }
+        : await startSignedMfa(client, { ...user, password_hash: row.password_hash, navigator_mfa_epoch: epoch }, origin)
+      await client.query("commit")
+      return result
+    }
+    if (!row.pashloc_mfa_required) {
+      const mustEnroll = process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
+        process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
+        tenantSlug === "pashloc-genuine-acceptance-20261114" && email === "navigator-acceptance@example.invalid"
+      const result = mustEnroll
+        ? { mfa_required: true as const, enrollment_required: true as const, token: null }
+        : { user, token: signToken(user, epoch === "0" ? false : { epoch, signedMfa: false }) }
+      await client.query("commit")
+      return result
+    }
+    pashlocUser = user
+    await client.query("commit")
+  } catch (error) {
+    await client.query("rollback")
+    throw error
+  } finally { client.release() }
 
-  // The disposable acceptance user must enroll before receiving any CRM JWT.
-  // This does not change MFA defaults or authentication for other tenants.
-  if (process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
-      process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
-      tenantSlug === "pashloc-genuine-acceptance-20261114" &&
-      email === "navigator-acceptance@example.invalid") {
-    return {mfa_required:true,enrollment_required:true,token:null}
-  }
-
-  const token = signToken(user)
-
-  return {
-    user,
-    token,
-  }
+  if (startVerifiedMfa) return startVerifiedMfa(pashlocUser)
+  const enrollment = await pool.query(
+    `select id from pashloc_mfa_enrollments
+     where tenant_id=$1 and app_user_id=$2 and status='confirmed'
+       and delivery_pairing_id is not null limit 1`,
+    [pashlocUser.tenant_id, pashlocUser.id]
+  )
+  if (enrollment.rowCount !== 1) return { mfa_required: true, enrollment_required: true, token: null }
+  const challenge = await createPashLocLoginChallenge({
+    tenantId: pashlocUser.tenant_id, userId: pashlocUser.id, purpose: "verify",
+  })
+  return { mfa_required: true, challenge_id: challenge.challengeId, expires_at: challenge.expiresAt, token: null }
 }
 
 /** Only the PashLoc verifier may issue an MFA-assured Navigator token.
@@ -963,39 +950,28 @@ export async function getCurrentUserFromToken(token: string) {
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active,
-           preferred_language
-    from app_users
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, preferred_language,
+           financials_authorized,
+           pashloc_mfa_required as "pashlocRequired", pashloc_mfa_activated_at as "pashlocActivatedAt"
+    from app_users u
     where id = $1
       and tenant_id = $2
       and is_active = true
+      and coalesce(to_jsonb(u)->>'navigator_mfa_epoch', '0') = $3
+      and (not coalesce((to_jsonb(u)->>'navigator_mfa_required')::boolean, false) or $4::boolean)
     limit 1
     `,
-    [decoded.sub, decoded.tenant_id]
+    [decoded.sub, decoded.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true]
   )
-
-  if (!result.rowCount) {
-    throw new Error("User not found or account inactive")
+  if (!result.rowCount) throw new Error("User not found or session no longer valid")
+  const { pashlocRequired, pashlocActivatedAt, ...user } = result.rows[0]
+  if (pashlocRequired && (decoded.mfa_verified !== true || !pashlocActivatedAt ||
+      !Number.isSafeInteger(decoded.iat) ||
+      decoded.iat * 1000 < new Date(pashlocActivatedAt).getTime() - 1000)) {
+    throw new Error("PashLoc verification required")
   }
 
-  // Existing pre-MFA sessions cannot bypass an activated account policy.
-  // Later, verified MFA sessions must carry a server-verifiable assurance
-  // marker; until that integration is complete, fail closed for pilot users.
-  const policy = await pool.query(
-    `select pashloc_mfa_required,pashloc_mfa_activated_at from app_users
-     where id = $1 and tenant_id = $2 and is_active = true`,
-    [decoded.sub, decoded.tenant_id]
-  )
-  if (policy.rows[0]?.pashloc_mfa_required) {
-    const activatedAt = policy.rows[0].pashloc_mfa_activated_at
-    if (decoded.mfa_verified !== true || !activatedAt ||
-        !Number.isSafeInteger(decoded.iat) ||
-        decoded.iat * 1000 < new Date(activatedAt).getTime() - 1000) {
-      throw new Error("PashLoc verification required")
-    }
-  }
-
-  return result.rows[0]
+  return user
 }
 
 export async function listUsersByTenantSlug(tenantSlug: string) {
@@ -2035,7 +2011,8 @@ export async function changePasswordForUser(
 ) {
   await ensureAuthTables()
 
-  const decoded = verifyToken(token)
+  const currentUser = await getCurrentUserFromToken(token)
+  const decoded = { sub: currentUser.id, tenant_id: currentUser.tenant_id }
 
   const currentPassword = String(input.currentPassword || "")
   const newPassword = String(input.newPassword || "")
