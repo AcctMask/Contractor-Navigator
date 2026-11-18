@@ -134,7 +134,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export function signToken(user: AppUser) {
+export function signToken(user: AppUser, assurance: false | { epoch: string; signedMfa: boolean } = false) {
   return jwt.sign(
     {
       sub: user.id,
@@ -142,6 +142,7 @@ export function signToken(user: AppUser) {
       email: user.email,
       full_name: user.full_name,
       role: user.role,
+      ...(assurance && { mfa_epoch: assurance.epoch, mfa_signed: assurance.signedMfa }),
     },
     JWT_SECRET,
     { expiresIn: "7d" }
@@ -157,6 +158,8 @@ export function verifyToken(token: string) {
     role: string
     iat: number
     exp: number
+    mfa_epoch?: string
+    mfa_signed?: boolean
   }
 }
 
@@ -768,7 +771,8 @@ export async function loginUserByTenantSlug(
   input: {
     email: string
     password: string
-  }
+  },
+  origin?: string
 ) {
   await ensureAuthTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -782,7 +786,7 @@ export async function loginUserByTenantSlug(
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash, navigator_mfa_required, navigator_mfa_epoch
     from app_users
     where tenant_id = $1
       and lower(email) = $2
@@ -816,7 +820,14 @@ export async function loginUserByTenantSlug(
     is_active: row.is_active,
   }
 
-  const token = signToken(user)
+  if (row.navigator_mfa_required) {
+    const { startSignedMfa } = await import("./navigatorSignedMfa")
+    const challenge = await startSignedMfa(pool, { id: user.id, tenant_id: user.tenant_id,
+      password_hash: row.password_hash, navigator_mfa_epoch: String(row.navigator_mfa_epoch) }, origin)
+    return { user, token: null, ...challenge }
+  }
+  const token = signToken(user, Number(row.navigator_mfa_epoch) > 0
+    ? { epoch: String(row.navigator_mfa_epoch), signedMfa: false } : false)
 
   return {
     user,
@@ -883,7 +894,15 @@ export async function getCurrentUserFromToken(token: string) {
   if (!result.rowCount) {
     throw new Error("User not found or account inactive")
   }
-
+  const policy = await pool.query(
+    "select navigator_mfa_required, navigator_mfa_epoch from app_users where id=$1 and tenant_id=$2",
+    [decoded.sub, decoded.tenant_id])
+  const account = policy.rows[0]
+  if (account && (account.navigator_mfa_required || Number(account.navigator_mfa_epoch) > 0)) {
+    if (!decoded.mfa_signed || decoded.mfa_epoch !== String(account.navigator_mfa_epoch)) {
+      throw new Error("Session requires current PashLoc IV verification")
+    }
+  }
   return result.rows[0]
 }
 
