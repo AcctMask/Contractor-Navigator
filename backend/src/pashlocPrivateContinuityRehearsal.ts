@@ -21,38 +21,42 @@ export async function verifyPrivateDeviceAndRecovery() {
       tenant:r.slug,role:r.role,active_devices:r.active_devices,proof_verified:r.proof_verified
     })),operational_account_binding:"NOT_ESTABLISHED"
   }))
-  // Recovery rehearsal on a disposable test identity, with every change rolled back.
-  const account=await client.query(`select u.id,u.tenant_id,u.navigator_mfa_epoch,u.navigator_mfa_required
+  // The isolated acceptance identity uses the original pashloc_mfa policy,
+  // not the additive operational navigator_mfa_epoch schema.
+  const account=await client.query(`select u.id,u.tenant_id,u.pashloc_mfa_required
     from app_users u join tenants t on t.id=u.tenant_id
-    where t.slug=$1 and u.is_active and u.navigator_mfa_required=true
+    where t.slug=$1 and u.is_active and u.pashloc_mfa_required=true
     order by u.id limit 1 for update of u`,["pashloc-genuine-acceptance-20261114"])
-  if(account.rowCount!==1) {
-    console.info("NAVIGATOR_PRIVATE_RECOVERY_REHEARSAL",JSON.stringify({result:"BLOCKED",reason:"no eligible disposable signed-MFA test account"}))
-    await client.query("ROLLBACK");return
-  }
+  if(account.rowCount!==1) throw Error("No eligible isolated MFA test identity")
   const u=account.rows[0]
-  const prior=String(u.navigator_mfa_epoch)
-  const pending=await client.query(`select count(*)::int as n from navigator_signed_challenges
-     where app_user_id=$1 and tenant_id=$2 and consumed_at is null`,[u.id,u.tenant_id])
-  await client.query(`update navigator_signed_challenges set decision='deny',consumed_at=clock_timestamp()
-    where app_user_id=$1 and tenant_id=$2 and consumed_at is null and decision is null`,[u.id,u.tenant_id])
-  const changed=await client.query(`update app_users set navigator_mfa_required=false,
-    navigator_mfa_epoch=navigator_mfa_epoch+1
-    where id=$1 and tenant_id=$2 and navigator_mfa_required and navigator_mfa_epoch=$3
-    returning navigator_mfa_epoch,navigator_mfa_required`,[u.id,u.tenant_id,prior])
-  if(changed.rowCount!==1||changed.rows[0].navigator_mfa_required!==false ||
-     BigInt(changed.rows[0].navigator_mfa_epoch)!==BigInt(prior)+1n) throw Error("Recovery epoch/policy rehearsal failed")
-  const others=await client.query(`select count(*)::int as n from app_users
-    where tenant_id=$1 and id<>$2 and navigator_mfa_required=true`,[u.tenant_id,u.id])
+  const before=await client.query(`select count(*)::int as n from pashloc_mfa_challenges
+    where app_user_id=$1 and tenant_id=$2`,[u.id,u.tenant_id])
+  const changed=await client.query(`update app_users set pashloc_mfa_required=false
+    where id=$1 and tenant_id=$2 and pashloc_mfa_required=true
+    returning id,tenant_id,pashloc_mfa_required`,[u.id,u.tenant_id])
+  if(changed.rowCount!==1||changed.rows[0].pashloc_mfa_required!==false)
+    throw Error("Scoped recovery rehearsal failed")
+  const audit=await client.query(`insert into pashloc_mfa_admin_recovery_audit
+    (tenant_id,app_user_id,action,reason)
+    values($1,$2,'disable_pilot_mfa','Isolated recovery rehearsal rollback only')
+    returning id`,[u.tenant_id,u.id])
+  if(audit.rowCount!==1)throw Error("Recovery audit rehearsal failed")
+  const observed=await client.query(`select count(*)::int as n from pashloc_mfa_admin_recovery_audit
+    where id=$1 and app_user_id=$2 and tenant_id=$3`,[audit.rows[0].id,u.id,u.tenant_id])
+  if(observed.rows[0].n!==1)throw Error("Recovery audit missing")
   await client.query("ROLLBACK")
-  const restored=await pool.query(`select navigator_mfa_epoch,navigator_mfa_required from app_users
+  const restored=await pool.query(`select pashloc_mfa_required from app_users
     where id=$1 and tenant_id=$2`,[u.id,u.tenant_id])
-  if(restored.rowCount!==1||String(restored.rows[0].navigator_mfa_epoch)!==prior ||
-     restored.rows[0].navigator_mfa_required!==true)throw Error("Recovery rollback failed")
+  const auditRestored=await pool.query(`select count(*)::int as n from pashloc_mfa_admin_recovery_audit
+    where id=$1`,[audit.rows[0].id])
+  if(restored.rowCount!==1||restored.rows[0].pashloc_mfa_required!==true ||
+     auditRestored.rows[0].n!==0)throw Error("Recovery rollback failed")
   console.info("NAVIGATOR_PRIVATE_RECOVERY_REHEARSAL",JSON.stringify({
-    result:"PASS",account_scoped:true,epoch_advanced:true,challenge_revocation_exercised:true,
-    pending_challenges_before:pending.rows[0].n,other_accounts_preserved:true,
-    rollback_verified:true,audit_commit:"NOT_EXERCISED",live_session_invalidation:"CI_ONLY"
+    result:"PASS",identity:"isolated",account_scoped:true,policy_toggle:true,
+    audit_insert_verified:true,audit_rollback_verified:true,identity_restored:true,
+    existing_challenge_count:before.rows[0].n,
+    operational_epoch_session_invalidation:"CI_VERIFIED_NOT_ISOLATED_REHEARSED",
+    original_device_registration:"UNCHANGED"
   }))
  } catch(e){try{await client.query("ROLLBACK")}catch{}throw e}finally{client.release()}
 }
