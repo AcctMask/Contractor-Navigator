@@ -11,6 +11,7 @@ const TOKEN_KEY = "contractor_autopilot_token"
 export type AuthUser = {
   id: number
   tenant_id: number
+  tenant_slug?: string
   email: string
   full_name: string
   role: string
@@ -191,7 +192,18 @@ export async function getMe(): Promise<AuthUser | null> {
     return null
   }
 
-  return json.user || null
+  const user = json.user as AuthUser | undefined
+  if (!user || json.ok !== true) {
+    clearToken()
+    return null
+  }
+  // In protected acceptance, never reuse a session from another workspace.
+  // Production platform-owner workspace switching retains its existing authority.
+  if (PROTECTED && (typeof user.tenant_slug !== "string" || user.tenant_slug !== getTenantSlug())) {
+    clearToken()
+    return null
+  }
+  return user
 }
 
 export async function fetchInvite(inviteToken: string) {
