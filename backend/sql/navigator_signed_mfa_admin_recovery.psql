@@ -6,7 +6,7 @@
 -- expected_mfa_epoch, recovery_approval_reference, recovery_reason.
 -- All operations are atomic. Epoch change invalidates every existing token;
 -- challenge revocation prevents outstanding approvals from being consumed.
-\\set ON_ERROR_STOP on
+\set ON_ERROR_STOP on
 BEGIN;
 CREATE TABLE IF NOT EXISTS navigator_signed_admin_recovery_audit (
   id bigserial PRIMARY KEY,
