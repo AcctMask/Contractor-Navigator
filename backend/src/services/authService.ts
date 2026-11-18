@@ -956,8 +956,8 @@ export async function getCurrentUserFromToken(token: string) {
     from app_users u
     join tenants t on t.id = u.tenant_id
     where u.id = $1
-      and tenant_id = $2
-      and is_active = true
+      and u.tenant_id = $2
+      and u.is_active = true
       and coalesce(to_jsonb(u)->>'navigator_mfa_epoch', '0') = $3
       and (not coalesce((to_jsonb(u)->>'navigator_mfa_required')::boolean, false) or $4::boolean)
     limit 1
