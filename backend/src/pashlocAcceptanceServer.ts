@@ -166,7 +166,13 @@ export async function buildMfaAcceptanceServer() {
  return app
 }
 if (process.argv[1] && /pashlocAcceptanceServer\.(?:ts|js)$/.test(process.argv[1])) {
- void buildMfaAcceptanceServer()
+ if (process.env.NAVIGATOR_PRIVATE_REHEARSAL_ONCE === "yes") {
+   // Deliberately exit after one private check; do not serve HTTP or re-run on restart.
+   void import("./pashlocPrivateContinuityRehearsal")
+     .then(({verifyPrivateDeviceAndRecovery})=>verifyPrivateDeviceAndRecovery())
+     .then(()=>{console.info("NAVIGATOR_PRIVATE_REHEARSAL_FINISHED_NO_SERVER");process.exit(0)})
+     .catch(error=>{console.error("NAVIGATOR_PRIVATE_REHEARSAL_FAILED",String(error));process.exit(1)})
+ } else void buildMfaAcceptanceServer()
    .then(app => app.listen({host:"0.0.0.0",port:Number(process.env.PORT||8789)}))
    .catch(error => { console.error("MFA acceptance startup rejected", error); process.exitCode = 1 })
 }
