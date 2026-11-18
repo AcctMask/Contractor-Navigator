@@ -38,4 +38,16 @@ create table if not exists navigator_signed_enrollment_grants (
   expires_at timestamptz not null,
   used_at timestamptz
 );
+-- An immutable, tenant-scoped evidence trail for proof-verified device enrollment.
+create table if not exists navigator_signed_device_binding_audit (
+  id bigint generated always as identity primary key,
+  tenant_id bigint not null references tenants(id),
+  app_user_id bigint not null references app_users(id),
+  device_id text not null,
+  binding_method text not null check (binding_method in ('fresh_device_registration', 'acceptance_key_proof')),
+  enrollment_reference_hash text not null check (enrollment_reference_hash ~ '^[a-f0-9]{64}
+),
+  created_at timestamptz not null default clock_timestamp(),
+  unique (tenant_id, app_user_id, enrollment_reference_hash)
+);
 commit;
