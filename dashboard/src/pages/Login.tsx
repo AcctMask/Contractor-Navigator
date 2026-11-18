@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { login } from "../lib/auth"
+import { login, completeMfaLogin } from "../lib/auth"
 import {
   getTenantSlug,
   setTenantSlug,
@@ -22,6 +22,8 @@ export default function LoginPage() {
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [mfaChallenge, setMfaChallenge] = useState("")
+  const [mfaCode, setMfaCode] = useState("")
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -39,12 +41,31 @@ export default function LoginPage() {
         )}...`,
       )
 
-      await login(email.trim(), password)
+      const result = await login(email.trim(), password)
+      if (result?.mfa_required === true) {
+        setMfaChallenge(result.challenge_id)
+        setStatus("Enter the six-digit code from your registered PashLoc device.")
+        return
+      }
       setStatus("Login successful")
       navigate("/")
     } catch (err: any) {
       setError(err?.message || "Login failed")
       setStatus("Login failed")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handleMfaSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSubmitting(true)
+    setError("")
+    try {
+      await completeMfaLogin(mfaChallenge, mfaCode)
+      navigate("/")
+    } catch (err: any) {
+      setError(err?.message || "PashLoc verification failed")
     } finally {
       setSubmitting(false)
     }
@@ -61,7 +82,16 @@ export default function LoginPage() {
           Sign in to manage invitations, jobs, and staff controls.
         </p>
 
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+        {mfaChallenge ? (
+          <form onSubmit={handleMfaSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+            <label style={labelStyle}>PashLoc IV verification code</label>
+            <input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)}
+              inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+              placeholder="6-digit code" style={inputStyle} />
+            <button type="submit" disabled={submitting || !/^\\d{6}$/.test(mfaCode)} style={buttonStyle}>Verify and continue</button>
+            <button type="button" onClick={() => { setMfaChallenge(""); setMfaCode(""); setError(""); }} style={buttonStyle}>Back to login</button>
+          </form>
+        ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
           <div>
             <label style={labelStyle}>
               Company Workspace
@@ -117,7 +147,7 @@ export default function LoginPage() {
           </div>
 
           {error ? <div style={errorStyle}>{error}</div> : null}
-        </form>
+        </form>}
       </div>
     </div>
   )
