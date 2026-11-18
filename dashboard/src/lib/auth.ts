@@ -6,7 +6,6 @@ import {
 // Protected acceptance only: use the established November 17 signed authority,
 // never a second navigator_signed_* service or a cross-audience token exchange.
 const ACCEPTANCE_SIGNED_ORIGIN = import.meta.env.VITE_PASHLOC_ACCEPTANCE_SIGNED_ORIGIN
-const ACCEPTANCE_TENANT = "pashloc-genuine-acceptance-20261114"
 const acceptanceSigned = import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "true" &&
   typeof ACCEPTANCE_SIGNED_ORIGIN === "string" && /^https:\/\/[^/]+$/.test(ACCEPTANCE_SIGNED_ORIGIN)
 const API_BASE = acceptanceSigned ? ACCEPTANCE_SIGNED_ORIGIN : import.meta.env.VITE_API_BASE 
@@ -63,7 +62,8 @@ function validPhoneUrl(value: unknown, reference: string) {
 
 export async function login(email: string, password: string) {
   const tenant = getTenantSlug()
-  if (acceptanceSigned && tenant !== ACCEPTANCE_TENANT) throw new Error("Protected acceptance tenant required")
+  // Preserve the selected tenant. The protected authority must explicitly authorize it;
+  // never silently substitute an acceptance identity or grant a cross-tenant session.
   const res = await fetch(`${API_BASE}${acceptanceSigned ? "/auth/mfa/signed/start" : tenantLoginPath(tenant)}`, {
     method: "POST",
     headers: {
