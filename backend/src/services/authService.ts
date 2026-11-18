@@ -1943,6 +1943,7 @@ export async function changePasswordForUser(
 ) {
   await ensureAuthTables()
 
+  const currentAccount = await getCurrentUserFromToken(token)
   const decoded = verifyToken(token)
 
   const currentPassword = String(input.currentPassword || "")
@@ -1962,10 +1963,10 @@ export async function changePasswordForUser(
       id,
       password_hash
     from app_users
-    where id = $1
+    where id = $1 and tenant_id = $2
     limit 1
     `,
-    [decoded.sub]
+    [currentAccount.id, currentAccount.tenant_id]
   )
 
   if (!result.rowCount) {
@@ -1991,9 +1992,9 @@ export async function changePasswordForUser(
     set
       password_hash = $1,
       updated_at = now()
-    where id = $2
+    where id = $2 and tenant_id = $3
     `,
-    [passwordHash, user.id]
+    [passwordHash, user.id, currentAccount.tenant_id]
   )
 
   return { ok: true }
