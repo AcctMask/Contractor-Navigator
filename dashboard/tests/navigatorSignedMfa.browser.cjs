@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict")
 const { chromium } = require("playwright")
 ;(async () => {
-  const browser = await chromium.launch({headless:true})
+  const browser = await chromium.launch({channel:"chrome",headless:true})
   try {
     for (const mode of ["denied", "expired", "enrollment", "unavailable", "approved", "spanish"]) {
       const spanish = mode === "spanish"

@@ -51,12 +51,16 @@ jobs:
           VITE_NAVIGATOR_MFA_PHONE_ORIGIN: https://pashloc.example.invalid
       - name: Verify login presentation in Chromium with synthetic API responses
         working-directory: dashboard
+        timeout-minutes: 3
         run: |
           npm install --no-save --package-lock=false --no-audit playwright@1.57.0
-          npx playwright install --with-deps chromium
-          npm run preview -- --host 127.0.0.1 --port 5179 --strictPort &
+          google-chrome --version
+          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5179 --strictPort > "$RUNNER_TEMP/navigator-vite.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 20); do
             curl -fsS http://127.0.0.1:5179/login -o /dev/null && break
             sleep 1
           done
-          node tests/navigatorSignedMfa.browser.cjs
+          curl -fsS http://127.0.0.1:5179/login -o /dev/null
+          timeout 90s node tests/navigatorSignedMfa.browser.cjs
