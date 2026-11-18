@@ -17,6 +17,7 @@ assert.equal(process.env.JWT_SECRET, "synthetic-navigator-ci-only")
 const { pool } = await import("../src/db/db")
 const { registerAuthRoutes } = await import("../src/routes/auth")
 const { registerAdminRoutes } = await import("../src/routes/admin")
+const { registerCustomerRoutes } = await import("../src/routes/customers")
 const { registerCalendarRoutes } = await import("../src/routes/calendar")
 const { verifyToken } = await import("../src/services/authService")
 const app = Fastify({ logger: false })
@@ -30,6 +31,7 @@ const secondSlug = "qa-bravo"
 const opaque = () => randomBytes(32).toString("base64url")
 const hash = (v: string) => createHash("sha256").update(v).digest("hex")
 let tenant: number, userId: number, staffId: number
+const customers = new Map<string, number>()
 let keys: CryptoKeyPair, deviceId: string
 let approvedToken: string
 const post = (path: string, payload: Record<string, unknown>, origin = desktop) =>
@@ -66,13 +68,14 @@ before(async () => {
     `create table customers (
       id bigint generated always as identity primary key,
       tenant_id bigint not null references tenants(id),
-      full_name text not null
+      full_name text not null, created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     )`,
     `create table jobs (
       id bigint generated always as identity primary key,
       tenant_id bigint not null references tenants(id),
       customer_id bigint references customers(id),
-      external_job_id text, stage text, crm_flow_key text, crm_substatus text,
+      external_job_id text, stage text, job_type text, crm_flow_key text, crm_substatus text,
       bot_paused boolean, manual_owner text, address1 text, city text,
       state text, zip text, carrier text, claim_number text,
       wa_status text, estimate_status text, contract_status text,
@@ -91,7 +94,8 @@ before(async () => {
     )`,
     `create table timeline_events (
       id bigint generated always as identity primary key,
-      tenant_id bigint, job_id bigint, kind text, meta jsonb
+      tenant_id bigint, job_id bigint, kind text, meta jsonb, message text,
+      created_at timestamptz not null default now()
     )`,
   ]
 
@@ -102,6 +106,7 @@ before(async () => {
     if (name === slug) tenant = Number(workspace.id)
     const { rows: [customer] } = await pool.query("insert into customers(tenant_id,full_name) values($1,$2) returning id",
       [workspace.id, name + "-customer"])
+    customers.set(name, Number(customer.id))
     await pool.query("insert into jobs(tenant_id,customer_id,stage,external_job_id) values($1,$2,'lead',$3)",
       [workspace.id, customer.id, name + "-job"])
   }
@@ -115,6 +120,7 @@ before(async () => {
   }
   await registerAuthRoutes(app)
   await registerAdminRoutes(app)
+  await registerCustomerRoutes(app)
   await registerCalendarRoutes(app)
   await pool.query("insert into calendar_events(tenant_id,title,start_time) values($1,'QA Calendar',now())", [tenant])
   await app.ready()
@@ -231,4 +237,23 @@ test("customer-facing reports, timeline and scheduled reads reject unauthenticat
     assert.equal((await get(route + slug)).statusCode, 401, route + " requires login")
     assert.equal((await get(route + secondSlug, staffToken)).statusCode, 403, route + " denies other tenant")
   }
+})
+
+test("customer lists and individual histories stay within the authorized workspace", async () => {
+  const token = (await login(staff)).json().token
+  const list = "/admin/customers/"
+  const history = (name: string, record: string) =>
+    "/admin/customer/" + name + "/" + customers.get(record) + "/history"
+  assert.equal((await get(list + slug)).statusCode, 401)
+  assert.equal((await get(history(slug, slug))).statusCode, 401)
+  assert.equal((await get(list + secondSlug, token)).statusCode, 403)
+  assert.equal((await get(history(secondSlug, secondSlug), token)).statusCode, 403)
+  assert.equal((await get(history(slug, secondSlug), token)).statusCode, 404)
+  const visible = await get(list + slug, token)
+  assert.equal(visible.statusCode, 200)
+  assert.deepEqual(visible.json().items.map((record: { full_name: string }) => record.full_name), [slug+"-customer"])
+  const record = await get(history(slug, slug), token)
+  assert.equal(record.statusCode, 200)
+  assert.equal(record.json().customer.full_name, slug+"-customer")
+  assert.deepEqual(record.json().jobs.map((job: { external_job_id: string }) => job.external_job_id), [slug+"-job"])
 })
