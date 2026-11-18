@@ -950,11 +950,12 @@ export async function getCurrentUserFromToken(token: string) {
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, preferred_language,
-           financials_authorized,
-           pashloc_mfa_required as "pashlocRequired", pashloc_mfa_activated_at as "pashlocActivatedAt"
+    select u.id, u.tenant_id, t.slug as tenant_slug, u.email, u.full_name, u.mobile_phone,
+           u.role, u.is_active, u.preferred_language, u.financials_authorized,
+           u.pashloc_mfa_required as "pashlocRequired", u.pashloc_mfa_activated_at as "pashlocActivatedAt"
     from app_users u
-    where id = $1
+    join tenants t on t.id = u.tenant_id
+    where u.id = $1
       and tenant_id = $2
       and is_active = true
       and coalesce(to_jsonb(u)->>'navigator_mfa_epoch', '0') = $3
