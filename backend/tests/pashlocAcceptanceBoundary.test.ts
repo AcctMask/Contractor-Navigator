@@ -66,9 +66,9 @@ test("CRM jobs and recent activity enforce JWT and tenant isolation with disposa
    const id = tenants[String(params[0])]
    return {rows:id?[{id}]:[],rowCount:id?1:0}
   }
-  if (normalized.includes("from app_users") && normalized.includes("select id, tenant_id")) {
+  if (normalized.includes("from app_users") && normalized.includes("t.slug as tenant_slug")) {
    const user = users.find(u=>u.id===Number(params[0])&&u.tenant_id===Number(params[1]))
-   return {rows:user?[user]:[],rowCount:user?1:0}
+   return {rows:user?[{...user,tenant_slug:Object.keys(tenants).find(slug=>tenants[slug]===user.tenant_id)}]:[],rowCount:user?1:0}
   }
   if (normalized.includes("select pashloc_mfa_required")) return {rows:[{pashloc_mfa_required:false}],rowCount:1}
   if (normalized.includes("has_directory")) return {rows:[{has_directory:false}],rowCount:1}
@@ -142,7 +142,7 @@ test("acceptance startup is read-only; calendar GET authenticates and isolates t
    const id=({"acceptance-a":101,"acceptance-b":202} as Record<string,number>)[String(params[0])]
    return {rows:id?[{id}]:[],rowCount:id?1:0}
   }
-  if(normalized.includes("from app_users") && normalized.includes("select id, tenant_id")) {
+  if(normalized.includes("from app_users") && normalized.includes("t.slug as tenant_slug")) {
    const u=users.find(u=>u.id===Number(params[0])&&u.tenant_id===Number(params[1]))
    return {rows:u?[u]:[],rowCount:u?1:0}
   }
