@@ -1,5 +1,6 @@
 /** Isolated acceptance signed approval: atomic decision and one-time browser consumption. */
 import { signToken } from "./authService"
+import { signedAcceptanceTenants } from "./pashlocSignedAcceptancePolicy"
 import { pool } from "../db/db"
 import { verifySignedApproval, sameSessionDigest, type SignedApprovalContext } from "./pashlocSignedApprovalV1"
 
@@ -15,7 +16,6 @@ export async function decideSignedApproval(input:{
  const client=await pool.connect()
  try{
   await client.query("BEGIN")
-  await client.query("SELECT set_config($1,$2,true)",["app.pashloc_test_tenants",process.env.PASHLOC_SIGNED_TEST_TENANTS || "pashloc-genuine-acceptance-20261114"])
   const rows=await client.query(`select c.id,c.tenant_id,c.app_user_id,c.browser_session_hash,
     c.expires_at,c.decision,d.device_id,d.public_jwk
     from pashloc_signed_challenges c
@@ -23,11 +23,11 @@ export async function decideSignedApproval(input:{
     join app_users u on u.id=c.app_user_id and u.tenant_id=c.tenant_id
     join tenants t on t.id=c.tenant_id
     where c.challenge_id=$1 and d.device_id=$2
-      and t.slug = any(string_to_array(coalesce(nullif(current_setting('app.pashloc_test_tenants',true),''),'pashloc-genuine-acceptance-20261114'),','))
+      and t.slug = any($3::text[])
       and c.purpose='login' and c.expires_at>clock_timestamp() and c.consumed_at is null and c.decided_at is null
       and d.revoked_at is null and d.proof_verified_at is not null
       and u.is_active=true and u.pashloc_mfa_required=true
-    for update of c for share of d,u`,[input.context.challengeId,input.context.deviceId])
+    for update of c for share of d,u`,[input.context.challengeId,input.context.deviceId,signedAcceptanceTenants()])
   if(rows.rowCount!==1){await client.query("ROLLBACK");return false}
   const row=rows.rows[0]
   const expected={
@@ -61,11 +61,12 @@ export async function consumeSignedApproval(input:{
     join pashloc_signed_devices d on d.id=c.approved_device_id
       and d.tenant_id=c.tenant_id and d.app_user_id=c.app_user_id
     join app_users u on u.id=c.app_user_id and u.tenant_id=c.tenant_id
-    where c.challenge_id=$1 and c.tenant_id=$2 and c.app_user_id=$3
+    join tenants t on t.id=c.tenant_id
+    where c.challenge_id=$1 and c.tenant_id=$2 and c.app_user_id=$3 and t.slug = any($4::text[])
       and c.purpose='login' and c.decision='approve' and c.decided_at is not null and c.consumed_at is null
       and c.expires_at>clock_timestamp() and d.revoked_at is null and d.proof_verified_at is not null
       and u.is_active=true and u.pashloc_mfa_required=true
-    for update of c for share of d,u`,[input.challengeId,input.tenantId,input.userId])
+    for update of c for share of d,u`,[input.challengeId,input.tenantId,input.userId,signedAcceptanceTenants()])
   if(found.rowCount!==1 || !sameSessionDigest(found.rows[0].browser_session_hash,input.browserSessionHash)){
    await client.query("ROLLBACK");return null
   }

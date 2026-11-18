@@ -1,4 +1,4 @@
-/** MFA-only acceptance entrypoint. No Navigator CRM routes, jobs, schedulers or workers.
+/** Isolated MFA acceptance entrypoint with authenticated read-only Navigator routes.
  * Refuses startup unless bound to an explicitly named disposable database.
  * Never use against a production database.
  */
@@ -12,7 +12,9 @@ import { pool } from "./db/db"
 import { registerPashLocAcceptanceRateLimits } from "./services/pashlocAcceptanceRateLimit"
 import { registerChairmanPasswordSetup } from "./pashlocAcceptanceChairmanSetup"
 
-import { registerSignedAcceptance } from "./routes/pashlocSignedAcceptance"
+import { getCurrentUserFromToken } from "./services/authService"
+import { tenantAllowed } from "./services/pashlocSignedAcceptancePolicy"
+import { registerSignedAcceptance, startVerifiedSignedLogin } from "./routes/pashlocSignedAcceptance"
 import { migrateSignedAcceptance } from "./pashlocSignedAcceptanceMigration"
 
 const crmReadRoutes = [
@@ -99,7 +101,12 @@ export async function assertMfaAcceptanceSchema() {
 export async function buildMfaAcceptanceServer() {
  assertMfaAcceptanceEnvironment(process.env)
  const signed = process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated"
- if(signed) await migrateSignedAcceptance()
+ if (signed) {
+   const secret = process.env.JWT_SECRET
+   if (!secret || Buffer.byteLength(secret) < 32 || secret === "contractor-autopilot-local-secret")
+     throw new Error("Signed acceptance requires an isolated session signing secret")
+   await migrateSignedAcceptance()
+ }
  await assertMfaAcceptanceSchema()
  const app = Fastify({logger:false,bodyLimit:16*1024})
  // The protected Navigator browser and PashLoc phone are distinct origins.
@@ -114,14 +121,27 @@ export async function buildMfaAcceptanceServer() {
  app.addHook("onRequest", async (req, reply) => {
    const pathname = new URL(req.url,"http://localhost").pathname
    if (req.method === "GET" && pathname === "/healthz") return
+   // Explicitly reject a browser from an unapproved origin for all protected routes.
+   const origin = req.headers.origin
+   if (origin && origin !== process.env.APP_BASE_URL && origin !== process.env.PASHLOC_PHONE_ORIGIN)
+     return reply.code(403).send({ok:false})
    if (signed && (req.method === "POST" || req.method === "OPTIONS") &&
        /^\/auth\/mfa\/signed\/(start|registration-info|register|challenge|decision|complete|revoke)$/.test(pathname)) return
    // The CORS plugin handles approved OPTIONS preflights before route dispatch.
    // Unknown paths still fail the plugin/router preflight checks.
    if (req.method === "GET" && crmReadRoutes.some(pattern => pattern.test(pathname))) {
      const tenantSlug = /^(?:\/admin\/(?:jobs|recent-activity)\/|\/platform\/company-dna-runtime\/|\/calendar\/)([^/]+)/.exec(pathname)?.[1]
-     if(signed && tenantSlug && tenantSlug!=="pashloc-genuine-acceptance-20261114")
-       return reply.code(403).send({ok:false})
+     if (signed) {
+       const bearer = req.headers.authorization
+       if (!bearer?.startsWith("Bearer ")) return reply.code(401).send({ok:false})
+       let user
+       try { user = await getCurrentUserFromToken(bearer.slice(7)) }
+       catch { return reply.code(401).send({ok:false}) }
+       const result = await pool.query("select slug from tenants where id=$1", [user.tenant_id])
+       const sessionTenant = result.rows[0]?.slug
+       if (!tenantAllowed(sessionTenant) || (tenantSlug && tenantSlug !== sessionTenant))
+         return reply.code(403).send({ok:false})
+     }
      return
    }
    if (req.method === "OPTIONS" && (crmReadRoutes.some(pattern => pattern.test(pathname)) || allowed.has(pathname) ||
@@ -133,7 +153,10 @@ export async function buildMfaAcceptanceServer() {
  app.get("/healthz", async () => ({ok:true,service:"navigator-mfa-acceptance"}))
  registerPashLocAcceptanceRateLimits(app)
  if(signed) registerSignedAcceptance(app)
- await registerAuthRoutes(app)
+ await registerAuthRoutes(app, signed ? {
+   authorize: (slug, origin) => tenantAllowed(slug) && origin === process.env.APP_BASE_URL,
+   startMfa: startVerifiedSignedLogin,
+ } : undefined)
  registerChairmanPasswordSetup(app)
  // Reuse the established Navigator handlers; the onRequest allowlist blocks
  // every other route, including write operations, before handler execution.

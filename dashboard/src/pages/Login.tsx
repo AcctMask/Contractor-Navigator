@@ -1,11 +1,8 @@
 import { useEffect, useRef, useState } from "react"
-import { useLanguage } from "../context/LanguageContext"
-import { signedLoginText } from "../lib/workforceLanguage"
-import { pollSigned, signedEnabled, signedTenant, startSigned, storeSignedToken, type SignedRequest } from "../lib/pashlocSigned"
-import { clearToken } from "../lib/auth"
 import { useNavigate } from "react-router-dom"
-import { login, verifyPashLocLogin, startPashLocEnrollment, recoverPashLocEnrollment, approvePashLocEnrollment, confirmPashLocEnrollment, getPashLocRedemptionStatus } from "../lib/auth"
-import type { PashLocEnrollment } from "../lib/auth"
+import { login, PashLocLoginError, pollSignedLogin, setToken, type SignedLogin } from "../lib/auth"
+import { useLanguage } from "../context/LanguageContext"
+import type { WorkforceTranslationKey } from "../lib/workforceLanguage"
 import {
   getTenantSlug,
   setTenantSlug,
@@ -14,38 +11,7 @@ import {
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const {language} = useLanguage()
-  const signedText=signedLoginText[language]
-  const [signed,setSigned]=useState<SignedRequest|null>(null)
-  const [showRegistration,setShowRegistration]=useState(false)
-  const [useFallback,setUseFallback]=useState(false)
-  const [signedNotice,setSignedNotice]=useState<"denied"|"expired"|"unavailable"|"registered"|null>(null)
-  useEffect(()=>{
-    if(!signed)return
-    const controller=new AbortController()
-    let timer:number|undefined
-    const check=async()=>{
-      if(controller.signal.aborted)return
-      if(Date.now()>=Date.parse(signed.expiresAt)){setSigned(null);setSignedNotice("expired");return}
-      try{
-        const result=await pollSigned(signed,controller.signal)
-        if(controller.signal.aborted)return
-        if(result.state==="approved" && signed.mode==="login" && typeof result.token==="string" && result.token){
-          storeSignedToken(result.token);navigate("/");return
-        }
-        if(result.state==="denied"||result.state==="registered"){
-          setSigned(null);setSignedNotice(result.state);return
-        }
-      }catch(err){
-        if(controller.signal.aborted)return
-        if(err instanceof Error && err.message==="expired_or_used"){setSigned(null);setSignedNotice("expired");return}
-      }
-      timer=window.setTimeout(check,4000)
-    }
-    timer=window.setTimeout(check,1000)
-    return ()=>{controller.abort();window.clearTimeout(timer)}
-  },[signed,navigate])
-
+  const { t } = useLanguage()
   const [workspace, setWorkspace] = useState(() => {
     const queryTenant =
       new URLSearchParams(
@@ -56,75 +22,71 @@ export default function LoginPage() {
   })
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
-  const [showPassword,setShowPassword]=useState(false)
-  const [showRecoveryPassword,setShowRecoveryPassword]=useState(false)
-  const [clockNow,setClockNow]=useState(Date.now())
-  useEffect(()=>{const timer=window.setInterval(()=>setClockNow(Date.now()),1000);return ()=>window.clearInterval(timer)},[])
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [mfaChallenge, setMfaChallenge] = useState("")
-  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(false)
-  const [mfaCode, setMfaCode] = useState("")
-  const [enrollment, setEnrollment] = useState<PashLocEnrollment | null>(null)
-  const [deviceCode, setDeviceCode] = useState("")
-  const [deviceApproved, setDeviceApproved] = useState(false)
-  const [credentialRedeemed, setCredentialRedeemed] = useState(false)
-  const [recoveryPassword,setRecoveryPassword] = useState("")
-  const [recoveryApproved,setRecoveryApproved] = useState(false)
-  const qrContainer = useRef<HTMLDivElement | null>(null)
-  const [qrError, setQrError] = useState("")
-  const pashlocPhoneUrl = signed?.phoneUrl || (enrollment
-    ? enrollment.resume ? "https://pashloc-iv-acceptance-nu.vercel.app/" : enrollment.pairing_ref ? `https://pashloc-iv-acceptance-nu.vercel.app/?mode=enroll&issuer=Navigator&pairing=${encodeURIComponent(enrollment.pairing_ref)}`
-    : "" : mfaChallenge ? "https://pashloc-iv-acceptance-nu.vercel.app/" : "")
+  const [mfaChallenge, setMfaChallenge] = useState<SignedLogin | null>(null)
+  const [mfaError, setMfaError] = useState<WorkforceTranslationKey | null>(null)
+  const [qrFailed, setQrFailed] = useState(false)
+  const qrContainer = useRef<HTMLDivElement>(null)
+  const pendingPoll = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!pashlocPhoneUrl || !qrContainer.current) return
-    const container = qrContainer.current
-    container.replaceChildren()
-    setQrError("")
-    let cancelled = false
-    const renderQr = () => {
-      if (cancelled || !container.isConnected) return
+    if (!mfaChallenge) return
+    const controller = new AbortController()
+    pendingPoll.current = controller
+    let timer: ReturnType<typeof setTimeout>
+    const fail = (key: WorkforceTranslationKey) => {
+      setMfaChallenge(null)
+      setMfaError(key)
+    }
+    const poll = async () => {
+      if (controller.signal.aborted) return
       try {
-        const qr = (window as Window & { QRCode?: new (node: HTMLElement, options: {text:string;width:number;height:number;colorDark:string;colorLight:string;correctLevel:number}) => unknown }).QRCode
-        if (!qr) throw new Error("Local QR generator unavailable")
-        new qr(container, { text: pashlocPhoneUrl, width: 224, height: 224,
-          colorDark: "#000000", colorLight: "#ffffff", correctLevel: 2 })
-        const img = container.querySelector("img")
-        if (img) img.alt = signed ? "" : enrollment?.resume ? "Open existing PashLoc app on your phone" : "PashLoc Navigator enrollment QR code"
+        // The API clock is authoritative, including for approval expiry.
+        const result = await pollSignedLogin(mfaChallenge, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]))
+        if (controller.signal.aborted) return
+        if (result.state === "approved") {
+          setTenantSlug(mfaChallenge.tenant)
+          setToken(result.token)
+          navigate("/")
+        } else if (result.state === "pending") timer = setTimeout(poll, 1500)
+        else fail(result.state === "denied" ? "pashLocDenied" : "pashLocExpired")
       } catch {
-        setQrError("QR code unavailable. Use the secure enrollment link below.")
+        if (!controller.signal.aborted) fail("pashLocUnavailable")
       }
     }
+    void poll()
+    return () => { controller.abort(); clearTimeout(timer) }
+  }, [mfaChallenge, navigate])
+
+  useEffect(() => {
+    if (!mfaChallenge || !qrContainer.current) return
+    const container = qrContainer.current
+    const browser = window as Window & { QRCode?: new (
+      node: HTMLElement, options: { text: string; width: number; height: number; correctLevel: number },
+    ) => unknown }
+    const draw = () => {
+      try {
+        if (!browser.QRCode) throw new Error("QR renderer unavailable")
+        container.replaceChildren()
+        new browser.QRCode(container, { text: mfaChallenge.phoneUrl, width: 224, height: 224, correctLevel: 1 })
+      } catch { setQrFailed(true) }
+    }
+    if (browser.QRCode) { draw(); return }
     const script = document.createElement("script")
     script.src = "/vendor/qrcode.js"
-    script.async = true
-    script.onload = renderQr
-    script.onerror = () => { if (!cancelled) setQrError("QR code unavailable. Use the secure enrollment link below.") }
-    if ((window as Window & { QRCode?: unknown }).QRCode) renderQr()
-    else document.head.appendChild(script)
-    return () => { cancelled = true; script.remove(); container.replaceChildren() }
-  }, [pashlocPhoneUrl, enrollment?.resume, signed])
-
-  useEffect(()=>{
-    if(!enrollment || !deviceApproved || credentialRedeemed)return
-    let cancelled=false
-    const check=async()=>{
-      try{
-        const ready=await getPashLocRedemptionStatus(enrollment)
-        if(!cancelled && ready){setCredentialRedeemed(true);setStatus("Credential redeemed by PashLoc. Confirm it is saved on your phone, then enter your first six-digit code.")}
-      }catch{ /* Keep confirmation locked; retry until session expires. */ }
-    }
-    void check()
-    const interval=window.setInterval(()=>{void check()},2500)
-    return ()=>{cancelled=true;window.clearInterval(interval)}
-  },[enrollment,deviceApproved,credentialRedeemed])
+    script.onload = draw
+    script.onerror = () => setQrFailed(true)
+    document.head.append(script)
+    return () => { script.onload = script.onerror = null; script.remove() }
+  }, [mfaChallenge])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true)
     setError("")
+    setMfaError(null)
     setStatus("Logging in...")
 
     try {
@@ -137,56 +99,25 @@ export default function LoginPage() {
         )}...`,
       )
 
-      if(signedEnabled() && tenantSlug===signedTenant && !useFallback){
-        clearToken()
-        setSignedNotice(null)
-        try {
-          setSigned(await startSigned(email.trim(),password,showRegistration?"register":"login"))
-          setPassword("");setShowRegistration(false);setStatus("")
-        } catch (err) {
-          setStatus("")
-          if(err instanceof Error && err.message==="registration_required")setShowRegistration(true)
-          else setSignedNotice("unavailable")
-        }
-        return
-      }
       const result = await login(email.trim(), password)
-      let enrollmentChallenge = ""
-      if (result?.mfa_required && result.enrollment_required) {
-        const session = await startPashLocEnrollment(tenantSlug,email.trim(),password)
-        setEnrollment(session)
-        setDeviceApproved(session.resume===true)
-        setCredentialRedeemed(session.resume===true)
-        enrollmentChallenge = session.challenge_id
-      }
-      if (result?.mfa_required) {
-        setMfaChallenge(result.enrollment_required ? enrollmentChallenge : result.challenge_id)
-        setMfaEnrollmentRequired(Boolean(result.enrollment_required))
+      if (result?.mfa_required === true) {
+        setQrFailed(false)
         setPassword("")
-        setStatus(result.enrollment_required ? ("PashLoc verification required") : "Enter your PashLoc code")
+        setMfaChallenge(result)
+        setStatus("")
         return
       }
       setStatus("Login successful")
       navigate("/")
     } catch (err: any) {
-      setError(err?.message || "Login failed")
-      setStatus("Login failed")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  async function handleMfaVerify(e: React.FormEvent) {
-    e.preventDefault()
-    setSubmitting(true)
-    setError("")
-    try {
-      await verifyPashLocLogin(mfaChallenge, mfaCode.trim())
-      setMfaChallenge("")
-      setMfaCode("")
-      navigate("/")
-    } catch (err: any) {
-      setError(err?.message || "PashLoc verification failed")
+      if (err instanceof PashLocLoginError) {
+        setPassword("")
+        setMfaError(err.reason === "enrollment" ? "pashLocEnrollment" : "pashLocUnavailable")
+        setStatus("")
+      } else {
+        setError(err?.message || "Login failed")
+        setStatus("Login failed")
+      }
     } finally {
       setSubmitting(false)
     }
@@ -203,99 +134,23 @@ export default function LoginPage() {
           Sign in to manage invitations, jobs, and staff controls.
         </p>
 
-        {signedNotice && <p role="status">{signedText[signedNotice]}</p>}
-        {signed ? (
-          <div style={{display:"grid",gap:"14px",marginTop:"18px"}}>
-            <h2>{signed.mode==="register"?signedText.registration:signedText.approval}</h2>
-            <p>{signed.mode==="register"?signedText.scanRegister:signedText.scan}</p>
-            <div ref={qrContainer} role="img" aria-label={signedText.approval} style={{width:224,minHeight:224,padding:12,background:"white",borderRadius:12,boxSizing:"content-box"}}/>
-            {qrError&&<p role="status">{signedText.qrError}</p>}
-            <a href={signed.phoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>{signedText.open}</a>
-            <p role="status">{signedText.waiting} · {signed.reference.slice(-6).toUpperCase()}</p>
-            <button type="button" style={buttonStyle} onClick={()=>{setSigned(null);setUseFallback(true)}}>{signedText.fallback}</button>
-            <button type="button" style={buttonStyle} onClick={()=>{setSigned(null);setUseFallback(false)}}>{signedText.back}</button>
-          </div>
-        ) : mfaChallenge ? (
-          <form onSubmit={handleMfaVerify} style={{display:"grid",gap:"14px",marginTop:"18px"}}>
-            <h2 style={{margin:0}}>PashLoc security verification</h2>
-            {mfaEnrollmentRequired ? (
-              <div style={{display:"grid",gap:"12px"}}>
-                <p>Connect your PashLoc account to Navigator. Your normal Navigator session remains locked until enrollment is complete.</p>
-                {enrollment?.resume ? <>
-                  <p>An earlier enrollment was redeemed but never confirmed. This QR only opens the old PashLoc credential; it cannot repair a missing or mismatched code. If your iPhone cannot produce the correct code, use the recovery action below instead.</p>
-                  <div ref={qrContainer} role="img" aria-label="Open existing PashLoc IV on iPhone" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
-                  {qrError ? <p role="status">{qrError}</p> : null}
-                  <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV</a>
-                  <p>Unlock the original Safari or installed PashLoc vault, select your existing Navigator account, and enter its current six-digit code. If the phone shows no protected accounts, do not enter a random code or erase any vault. Open the original installation; the current browser cannot access credentials stored in another browser.</p>
-                  <p>If your original iPhone vault has no Navigator credential, you can explicitly authorize recovery of this pending acceptance enrollment. The old record is retained for audit and a fresh QR will be issued for the same user.</p>
-                  <label style={labelStyle}>Enter the password created for this isolated Navigator acceptance registration (not your normal production Navigator password)</label>
-                  <input type={showRecoveryPassword?"text":"password"} autoComplete="current-password" value={recoveryPassword} onChange={e=>setRecoveryPassword(e.target.value)} style={inputStyle}/>
-                  <label><input type="checkbox" checked={showRecoveryPassword} onChange={e=>setShowRecoveryPassword(e.target.checked)}/> Show recovery password</label>
-                  <label><input type="checkbox" checked={recoveryApproved} onChange={e=>setRecoveryApproved(e.target.checked)}/> I approve superseding the inaccessible pending PashLoc credential for this account.</label>
-                  <button type="button" style={buttonStyle} disabled={submitting || !recoveryPassword || !recoveryApproved} onClick={async()=>{
-                    if(!enrollment)return
-                    setSubmitting(true);setError("")
-                    try{
-                      const recovered=await recoverPashLocEnrollment(enrollment,recoveryPassword)
-                      setEnrollment(recovered);setRecoveryPassword("");setRecoveryApproved(false)
-                      setDeviceApproved(false);setCredentialRedeemed(false);setMfaCode("")
-                      setStatus("Recovery authorized. Scan the new enrollment QR on the iPhone.")
-                    }catch(err:any){setError(err.message)}finally{setSubmitting(false)}
-                  }}>Replace inaccessible credential and generate a NEW QR</button>
-                  <p style={{fontWeight:600}}>Only if your iPhone still has the ORIGINAL credential:</p>
-                  <label style={labelStyle}>Original credential’s six-digit PashLoc code</label>
-                  <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
-                  <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
-                    setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setMfaEnrollmentRequired(false);navigate("/")}catch(err:any){setError(err.message==="invalid_or_expired_code" ? "This code does not match the previously redeemed credential. If the original credential is missing or inaccessible, use the NEW QR recovery button above. Do not keep trying codes from another account." : err.message)}finally{setSubmitting(false)}
-                  }}>Verify existing PashLoc and open Navigator</button>
-                </> : enrollment ? <>
-                  <p>Pairing reference (expires {new Date(enrollment.expires_at).toLocaleTimeString()}):</p>
-                  {clockNow>=new Date(enrollment.expires_at).getTime() ? <p role="alert" style={{color:"#ffb6b6",fontWeight:700}}>This QR has expired. Do not attempt approval on the phone. Return to sign-in and request a fresh pairing using authorized recovery if required.</p> : <p role="status" style={{fontWeight:700}}>Time remaining to claim pairing: {Math.max(0,Math.ceil((new Date(enrollment.expires_at).getTime()-clockNow)/1000))} seconds. Scan and claim immediately.</p>}
-                  <code style={{overflowWrap:"anywhere",fontSize:"12px"}}>{enrollment.pairing_ref}</code>
-                  <p>Scan this QR using the device where you use PashLoc, or open the secure enrollment link there. The QR contains only the short-lived pairing reference—not your password or verification secret.</p>
-                  <div ref={qrContainer} role="img" aria-label="PashLoc enrollment QR code" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
-                  {qrError ? <p role="status">{qrError}</p> : null}
-                  <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" style={{color:"#a9d4ff",overflowWrap:"anywhere"}}>Open PashLoc enrollment</a>
-                  <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={async()=>{
-                    try{await navigator.clipboard.writeText(pashlocPhoneUrl);setStatus("PashLoc enrollment link copied. Open it on your PashLoc device.")}catch{setError("Unable to copy the link. Open the link directly instead.")}
-                  }}>Copy enrollment link</button>
-                  <p>Open PashLoc on your other device to claim this pairing. Enter the eight-digit number shown on the phone here.</p>
-                  <label style={labelStyle}>Eight-digit device approval</label>
-                  <input value={deviceCode} onChange={e=>setDeviceCode(e.target.value.replace(/\D/g,"").slice(0,8))} inputMode="numeric" maxLength={8} style={inputStyle}/>
-                  <button type="button" style={buttonStyle} disabled={submitting || deviceCode.length!==8} onClick={async()=>{
-                    setSubmitting(true);setError("");try{await approvePashLocEnrollment(enrollment,deviceCode);setDeviceApproved(true)}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
-                  }}>Approve this device</button>
-                  {deviceApproved && !credentialRedeemed ? <p role="status">Device approved. Waiting for PashLoc to redeem the credential. Save it on your phone before proceeding. Do not enter a six-digit code yet.</p> : null}
-                  {deviceApproved && credentialRedeemed ? <>
-                    <label style={labelStyle}>First six-digit PashLoc code</label>
-                    <input value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))} inputMode="numeric" maxLength={6} style={inputStyle}/>
-                    <button type="button" style={buttonStyle} disabled={submitting || mfaCode.length!==6} onClick={async()=>{
-                      setSubmitting(true);setError("");try{await confirmPashLocEnrollment(enrollment,mfaCode);setEnrollment(null);setMfaChallenge("");setMfaCode("");setDeviceCode("");setDeviceApproved(false);setCredentialRedeemed(false);setMfaEnrollmentRequired(false);setStatus("PashLoc enrollment complete");navigate("/")}catch(err:any){setError(err.message)}finally{setSubmitting(false)}
-                    }}>Complete PashLoc enrollment</button>
-                  </> : null}
-                </> : <p>Enrollment is unavailable. Please try signing in again.</p>}
-              </div>
-            ) : (
-              <>
-                <p>Navigator now uses PashLoc IV multi-factor verification. Scan this QR with your iPhone to open your existing PashLoc account, then enter its current six-digit code. You will not need to enroll again.</p>
-                <div ref={qrContainer} role="img" aria-label="Scan to open your existing PashLoc IV account on iPhone" style={{width:224,minHeight:224,padding:12,background:"#ffffff",borderRadius:12,boxSizing:"content-box"}} />
-                {qrError ? <p role="status">{qrError}</p> : null}
-                <a href={pashlocPhoneUrl} target="_blank" rel="noopener noreferrer" style={{color:"#a9d4ff"}}>Open PashLoc IV on this device</a>
-                <label style={labelStyle} htmlFor="pashloc-code">Six-digit PashLoc code</label>
-                <input id="pashloc-code" value={mfaCode} onChange={e=>setMfaCode(e.target.value.replace(/\D/g,"").slice(0,6))}
-                  inputMode="numeric" autoComplete="one-time-code" maxLength={6} pattern="[0-9]{6}" required style={inputStyle}/>
-                <button type="submit" disabled={submitting || mfaCode.length!==6} style={buttonStyle}>Verify and open Navigator</button>
-              </>
-            )}
-            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setMfaChallenge("");setMfaCode("");setError("");setStatus("");setMfaEnrollmentRequired(false);setEnrollment(null);setDeviceApproved(false);setCredentialRedeemed(false);setDeviceCode("")}}>Back to sign in</button>
-            {error ? <div style={errorStyle}>{error}</div> : null}
-          </form>
+        {mfaError && <div role="alert" style={errorStyle}>{t(mfaError)}</div>}
+        {mfaChallenge ? (
+          <section style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+            <h2>{t("pashLocTitle")}</h2>
+            <p>{t("pashLocScan")}</p>
+            <div ref={qrContainer} role="img" aria-label={t("pashLocTitle")}
+              style={{ width: 224, minHeight: 224, padding: 12, background: "white", boxSizing: "content-box" }} />
+            {qrFailed && <p role="status">{t("pashLocQrUnavailable")}</p>}
+            <a style={{ color: "#a9d4ff" }} href={mfaChallenge.phoneUrl} target="_blank" rel="noopener noreferrer">
+              {t("pashLocOpen")}
+            </a>
+            <p role="status">{t("pashLocWaiting")} · {mfaChallenge.reference.slice(-6).toUpperCase()}</p>
+            <button type="button" onClick={() => { pendingPoll.current?.abort(); setMfaChallenge(null) }} style={buttonStyle}>
+              {t("pashLocBack")}
+            </button>
+          </section>
         ) : <form onSubmit={handleSubmit} style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
-          {signedEnabled() && workspace===signedTenant && <>
-            {showRegistration&&<p role="status">{signedText.first}</p>}
-            <button type="button" style={{...buttonStyle,background:"#304a78"}} onClick={()=>{setUseFallback(!useFallback);setShowRegistration(false)}}>{useFallback?signedText.approval:signedText.fallback}</button>
-            <small>{signedText.recovery}</small>
-          </>}
           <div>
             <label style={labelStyle}>
               Company Workspace
@@ -335,18 +190,17 @@ export default function LoginPage() {
           <div>
             <label style={labelStyle}>Password</label>
             <input
-              type={showPassword?"text":"password"}
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
               style={inputStyle}
             />
-            <label><input type="checkbox" checked={showPassword} onChange={e=>setShowPassword(e.target.checked)}/> Show password</label>
           </div>
 
           <div style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
             <button type="submit" disabled={submitting} style={buttonStyle}>
-              {submitting ? "Signing In..." : showRegistration ? signedText.register : "Login"}
+              {submitting ? "Signing In..." : "Login"}
             </button>
             <span style={{ opacity: 0.85 }}>{status}</span>
           </div>

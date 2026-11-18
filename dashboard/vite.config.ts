@@ -5,9 +5,12 @@ import react from '@vitejs/plugin-react'
  * Production and ordinary development builds retain their existing behavior. */
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
-  if (env.VITE_PASHLOC_ACCEPTANCE_ONLY === 'yes') {
+  if (["yes", "true"].includes(env.VITE_PASHLOC_ACCEPTANCE_ONLY)) {
     const api = env.VITE_API_BASE || ''
     const expected = env.VITE_PASHLOC_ACCEPTANCE_API_ORIGIN || ''
+    if ([env.VITE_API_BASE_URL, env.VITE_PASHLOC_ACCEPTANCE_SIGNED_ORIGIN].some(value => value && value !== api)) {
+      throw new Error('Acceptance dashboard API origins must match')
+    }
     let parsed: URL
     try { parsed = new URL(api) }
     catch { throw new Error('Acceptance dashboard requires an explicit isolated HTTPS API') }

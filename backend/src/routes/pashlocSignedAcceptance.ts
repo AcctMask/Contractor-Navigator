@@ -7,14 +7,10 @@ import { completePashLocNavigatorLogin } from "../services/authService"
 
 import { verifyPashLocRestrictedCredentials } from "../services/pashlocRestrictedCredentialsV1"
 
+import { signedAcceptanceTenants, tenantAllowed } from "../services/pashlocSignedAcceptancePolicy"
+
 const prefix = "/auth/mfa/signed/"
-// The allowlist is test-only. Never infer tenant authorization from a browser-selected slug.
-const tenantAllowed = (slug: unknown): slug is string =>
-  typeof slug === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) &&
-  process.env.PASHLOC_ACCEPTANCE_ONLY === "yes" &&
-  process.env.PASHLOC_ACCEPTANCE_DATABASE_NAME === "pashloc_iv_disposable_mfa_isolated" &&
-  (process.env.PASHLOC_SIGNED_TEST_TENANTS || "pashloc-genuine-acceptance-20261114")
-    .split(",").map(x => x.trim()).includes(slug)
+
 const tenantForChallenge = async (reference: string): Promise<string | null> => {
   const result = await pool.query(`select t.slug from pashloc_signed_challenges c
     join tenants t on t.id=c.tenant_id where c.challenge_id=$1`,[reference])
@@ -26,6 +22,37 @@ const mint = () => randomBytes(32).toString("base64url")
 const eligible = "u.is_active=true and u.pashloc_mfa_required=true and t.slug=$2"
 const fail = (reply:FastifyReply, status:number,error:string) => reply.code(status).send({ok:false,error})
 const iso = (value: Date) => value.toISOString()
+
+async function startSignedChallenge(tenantSlug: string, identity: { userId: number; tenantId: number }, mode: "login" | "register") {
+    if (!tenantAllowed(tenantSlug)) return { error: "unavailable" } as const
+    const reference=mint(), browserProof=mint()
+    const row=await pool.query(`select u.tenant_id,u.id as app_user_id,exists(
+      select 1 from pashloc_signed_devices d where d.tenant_id=u.tenant_id and d.app_user_id=u.id
+      and d.revoked_at is null and d.proof_verified_at is not null) as registered
+      from app_users u join tenants t on t.id=u.tenant_id
+      where u.id=$1 and ${eligible} and u.tenant_id=$3`,
+      [identity.userId,tenantSlug,identity.tenantId])
+    const account=row.rows[0]
+    if(!account) return { error: "unavailable" } as const
+    if(account.registered!==(mode==="login"))
+      return { error: account.registered ? "already_registered" : "registration_required" } as const
+    const result=await pool.query(`insert into pashloc_signed_challenges
+      (challenge_id,browser_session_hash,tenant_id,app_user_id,purpose,expires_at)
+      values($1,$2,$3,$4,$5,clock_timestamp()+case when $5='register' then interval '10 minutes' else interval '110 seconds' end) returning expires_at`,
+      [reference,browserSessionDigest(browserProof),account.tenant_id,account.app_user_id,mode])
+    const phoneUrl=new URL("/", process.env.PASHLOC_PHONE_ORIGIN)
+    phoneUrl.hash=(mode==="login"?"navigator-sign=":"navigator-register=")+reference
+    return {ok:true,reference,browserProof,expiresAt:iso(result.rows[0].expires_at),phoneUrl:phoneUrl.href}
+}
+
+export async function startVerifiedSignedLogin(tenantSlug: string, user: { id: number; tenant_id: number }) {
+  const result = await startSignedChallenge(tenantSlug, { userId: user.id, tenantId: user.tenant_id }, "login")
+  if (!result.ok && result.error !== "registration_required") throw new Error("unavailable")
+  return {
+    mfa_required: true as const, token: null, method: "pashloc_signed" as const,
+    ...(result.ok ? result : { enrollment_required: true }),
+  }
+}
 
 export function registerSignedAcceptance(app:FastifyInstance) {
   const route = (path:string, phone:boolean,
@@ -44,24 +71,8 @@ export function registerSignedAcceptance(app:FastifyInstance) {
         !["login","register"].includes(b.mode)) return fail(r,400,"malformed")
     const identity=await verifyPashLocRestrictedCredentials({tenantSlug:b.tenantSlug,email:b.email,password:b.password})
     if(!identity) return fail(r,401,"invalid_credentials")
-    const reference=mint(), browserProof=mint()
-    const row=await pool.query(`select u.tenant_id,u.id as app_user_id,exists(
-      select 1 from pashloc_signed_devices d where d.tenant_id=u.tenant_id and d.app_user_id=u.id
-      and d.revoked_at is null and d.proof_verified_at is not null) as registered
-      from app_users u join tenants t on t.id=u.tenant_id
-      where u.id=$1 and ${eligible} and u.tenant_id=$3`,
-      [identity.userId,b.tenantSlug,identity.tenantId])
-    const account=row.rows[0]
-    if(!account) return fail(r,404,"unavailable")
-    if(account.registered!==(b.mode==="login"))
-      return fail(r,409,account.registered?"already_registered":"registration_required")
-    const result=await pool.query(`insert into pashloc_signed_challenges
-      (challenge_id,browser_session_hash,tenant_id,app_user_id,purpose,expires_at)
-      values($1,$2,$3,$4,$5,clock_timestamp()+case when $5='register' then interval '10 minutes' else interval '110 seconds' end) returning expires_at`,
-      [reference,browserSessionDigest(browserProof),account.tenant_id,account.app_user_id,b.mode])
-    const phoneUrl=new URL("/", process.env.PASHLOC_PHONE_ORIGIN)
-    phoneUrl.hash=(b.mode==="login"?"navigator-sign=":"navigator-register=")+reference
-    return {ok:true,reference,browserProof,expiresAt:iso(result.rows[0].expires_at),phoneUrl:phoneUrl.href}
+    const result = await startSignedChallenge(b.tenantSlug, identity, b.mode)
+    return result.ok ? result : fail(r,result.error==="unavailable"?404:409,result.error)
   })
   route("registration-info",true,async (b,r)=>{
     if(!opaque(b.reference)) return fail(r,400,"malformed")
@@ -85,8 +96,9 @@ export function registerSignedAcceptance(app:FastifyInstance) {
       await client.query("BEGIN")
       const {rows:[row]}=await client.query(`select c.id,c.tenant_id,c.app_user_id,c.expires_at,c.decided_at
         from pashloc_signed_challenges c join app_users u on u.id=c.app_user_id and u.tenant_id=c.tenant_id
-        join tenants t on t.id=c.tenant_id where c.challenge_id=$1 and ${eligible}
-        and c.purpose='register' for update of c,u`,[b.reference,tenant])
+        join tenants t on t.id=c.tenant_id where c.challenge_id=$1
+        and u.is_active and u.pashloc_mfa_required and t.slug = any($2::text[])
+        and c.purpose='register' for update of c,u`,[b.reference,signedAcceptanceTenants()])
       if(!row || row.expires_at<=new Date() || row.decided_at) {
         await client.query("ROLLBACK")
         return fail(r,row?410:404,row?"expired_or_used":"unavailable")
@@ -120,8 +132,8 @@ export function registerSignedAcceptance(app:FastifyInstance) {
       where c.challenge_id=$1 and ${eligible} and c.purpose='login'`,[b.reference,await tenantForChallenge(b.reference),b.deviceId])
     if(!row)return fail(r,404,"unavailable")
     if(row.expires_at<=new Date()||row.decided_at)return fail(r,410,"expired_or_used")
-    return {ok:true,context:{version:"AA-PASHLOC-LOGIN-V1",environment:"acceptance",tenantId:row.tenant_id,
-      userId:row.app_user_id,deviceId:b.deviceId,challengeId:b.reference,browserSessionHash:row.browser_session_hash,
+    return {ok:true,context:{version:"AA-PASHLOC-LOGIN-V1",environment:"acceptance",tenantId:Number(row.tenant_id),
+      userId:Number(row.app_user_id),deviceId:b.deviceId,challengeId:b.reference,browserSessionHash:row.browser_session_hash,
       expiresAt:iso(row.expires_at)},account:row.email,application:"Navigator"}
   })
   route("decision",true,async (b,r)=>{
@@ -132,7 +144,8 @@ export function registerSignedAcceptance(app:FastifyInstance) {
   })
   route("complete",false,async(b,r)=>{
     if(!opaque(b.reference)||!opaque(b.browserProof))return fail(r,400,"malformed")
-    if(!await tenantForChallenge(b.reference))return fail(r,404,"unavailable")
+    const tenantSlug = await tenantForChallenge(b.reference)
+    if(!tenantSlug)return fail(r,404,"unavailable")
     const digest=browserSessionDigest(b.browserProof)
     const {rows:[row]}=await pool.query(`select id,tenant_id,app_user_id,browser_session_hash,expires_at,consumed_at,decision,purpose
       from pashloc_signed_challenges where challenge_id=$1`,[b.reference])
@@ -142,7 +155,7 @@ export function registerSignedAcceptance(app:FastifyInstance) {
     if(row.purpose==="register")return {ok:true,state:"registered"}
     if(row.decision==="deny")return {ok:true,state:"denied"}
     const token=await consumeSignedApproval({challengeId:b.reference,browserSessionHash:digest,tenantId:Number(row.tenant_id),userId:Number(row.app_user_id)})
-    return token ? {ok:true,state:"approved",token} : fail(r,410,"expired_or_used")
+    return token ? {ok:true,state:"approved",token,tenantSlug} : fail(r,410,"expired_or_used")
   })
   route("revoke",false,async(b,r)=>{
     if(!opaque(b.fallbackChallengeId)||!opaque(b.deviceId)||typeof b.code!=="string"||!/^\d{6}$/.test(b.code))
@@ -151,8 +164,8 @@ export function registerSignedAcceptance(app:FastifyInstance) {
     try { account=(await completePashLocNavigatorLogin(b.fallbackChallengeId,b.code)).user }
     catch { return fail(r,404,"unavailable") }
     const revoked=await pool.query(`update pashloc_signed_devices d set revoked_at=clock_timestamp()
-      from tenants t where t.id=d.tenant_id and t.slug=$4 and d.tenant_id=$1 and d.app_user_id=$2
-      and d.device_id=$3 and d.revoked_at is null returning d.id`,[account.tenant_id,account.id,b.deviceId,await tenantForChallenge(b.fallbackChallengeId)])
+      from tenants t where t.id=d.tenant_id and t.slug = any($4::text[]) and d.tenant_id=$1 and d.app_user_id=$2
+      and d.device_id=$3 and d.revoked_at is null returning d.id`,[account.tenant_id,account.id,b.deviceId,signedAcceptanceTenants()])
     return revoked.rowCount===1 ? {ok:true} : fail(r,404,"unavailable")
   })
 }

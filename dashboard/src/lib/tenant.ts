@@ -32,7 +32,6 @@ export function normalizeTenantSlug(
 }
 
 export function getTenantSlug() {
-  if (import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "yes") return "pashloc-genuine-acceptance-20261114"
   if (typeof window === "undefined") {
     return DEFAULT_TENANT_SLUG
   }
@@ -47,7 +46,6 @@ export function getTenantSlug() {
 export function setTenantSlug(
   tenantSlug: string,
 ) {
-  if (import.meta.env.VITE_PASHLOC_ACCEPTANCE_ONLY === "yes") return "pashloc-genuine-acceptance-20261114"
   const normalized =
     normalizeTenantSlug(tenantSlug)
 

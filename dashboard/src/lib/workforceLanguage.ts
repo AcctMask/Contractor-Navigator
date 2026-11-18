@@ -13,6 +13,16 @@ export function normalizeWorkforceLanguage(
 
 const translations = {
   en: {
+    pashLocTitle: "Approve sign-in with PashLoc",
+    pashLocScan: "Scan this QR code with your registered iPhone. Open PashLoc and choose Approve or Deny.",
+    pashLocOpen: "Open PashLoc approval link",
+    pashLocWaiting: "Waiting for approval",
+    pashLocBack: "Back to login",
+    pashLocQrUnavailable: "The QR code could not load. Open the approval link on your registered iPhone.",
+    pashLocDenied: "Sign-in was denied. If this was you, enter your password again to start a new request.",
+    pashLocExpired: "This request expired. Sign in again and approve the new request on your iPhone.",
+    pashLocUnavailable: "PashLoc could not finish sign-in. Check your connection and try again. If it continues, contact your Navigator administrator.",
+    pashLocEnrollment: "This account needs a registered PashLoc device. Contact your Navigator administrator before trying again.",
     language: "Language",
     myAssignedJobs: "My Assigned Jobs",
     assignedJobs: "Assigned Jobs",
@@ -31,6 +41,16 @@ const translations = {
     languageSaved: "Language preference saved",
   },
   es: {
+    pashLocTitle: "Aprueba el acceso con PashLoc",
+    pashLocScan: "Escanea este código QR con tu iPhone registrado. Abre PashLoc y elige Aprobar o Rechazar.",
+    pashLocOpen: "Abrir enlace de aprobación de PashLoc",
+    pashLocWaiting: "Esperando aprobación",
+    pashLocBack: "Volver al inicio de sesión",
+    pashLocQrUnavailable: "No se pudo cargar el código QR. Abre el enlace de aprobación en tu iPhone registrado.",
+    pashLocDenied: "Se rechazó el acceso. Si fuiste tú, vuelve a introducir tu contraseña para iniciar otra solicitud.",
+    pashLocExpired: "La solicitud caducó. Vuelve a iniciar sesión y aprueba la nueva solicitud en tu iPhone.",
+    pashLocUnavailable: "PashLoc no pudo completar el acceso. Comprueba tu conexión e inténtalo de nuevo. Si el problema continúa, contacta con tu administrador de Navigator.",
+    pashLocEnrollment: "Esta cuenta necesita un dispositivo PashLoc registrado. Contacta con tu administrador de Navigator antes de intentarlo de nuevo.",
     language: "Idioma",
     myAssignedJobs: "Mis trabajos asignados",
     assignedJobs: "Trabajos asignados",

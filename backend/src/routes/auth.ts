@@ -126,7 +126,10 @@ async function requireTenantUserManager(
   }
 }
 
-export async function registerAuthRoutes(app: FastifyInstance) {
+export async function registerAuthRoutes(app: FastifyInstance, protectedLogin?: {
+  authorize: (tenantSlug: string, origin: string | undefined) => boolean
+  startMfa: (tenantSlug: string, user: { id: number; tenant_id: number }) => Promise<{ mfa_required: true; token: null }>
+}) {
   app.post("/auth/storm-launch", async (request: any, reply) => {
     try {
       const token = getBearerToken(request)
@@ -488,8 +491,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       const { tenantSlug } = request.params
       const { email, password } = request.body || {}
 
-      const result = await loginUserByTenantSlug(tenantSlug, { email, password })
-      return { ok: true, ...result }
+      if (protectedLogin && !protectedLogin.authorize(tenantSlug, request.headers.origin))
+        return reply.code(403).send({ ok: false, error: "unavailable" })
+      const result = await loginUserByTenantSlug(tenantSlug, { email, password },
+        protectedLogin ? user => protectedLogin.startMfa(tenantSlug, user) : undefined)
+      return { ok: true, ...result, ...(protectedLogin ? { tenantSlug } : {}) }
     } catch (err: any) {
       reply.code(400)
       return { ok: false, error: err?.message || String(err) }

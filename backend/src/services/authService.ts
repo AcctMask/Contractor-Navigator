@@ -779,9 +779,10 @@ export async function loginUserByTenantSlug(
   input: {
     email: string
     password: string
-  }
+  },
+  startVerifiedMfa?: (user: { id: number; tenant_id: number }) => Promise<{ mfa_required: true; token: null }>
 ) {
-  await ensureAuthTables()
+  if (!startVerifiedMfa) await ensureAuthTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
 
   const email = cleanEmail(input.email)
@@ -834,7 +835,9 @@ export async function loginUserByTenantSlug(
      where id = $1 and tenant_id = $2 and is_active = true`,
     [user.id, user.tenant_id]
   )
+  if (mfaPolicy.rowCount !== 1) throw new Error("User account is inactive")
   if (mfaPolicy.rows[0]?.pashloc_mfa_required) {
+    if (startVerifiedMfa) return startVerifiedMfa(user)
     const enrollment = await pool.query(
       `select id from pashloc_mfa_enrollments
        where tenant_id=$1 and app_user_id=$2 and status='confirmed'
