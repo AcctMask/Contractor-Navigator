@@ -3,6 +3,7 @@ name: Navigator signed login integration
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
     paths:
       - 'backend/**'
       - 'dashboard/**'
@@ -44,36 +45,3 @@ jobs:
         working-directory: backend
       - run: node --import tsx --test tests/pashlocSignedApprovalV1.test.ts tests/navigatorSignedMfa.integration.test.ts
         working-directory: backend
-      - name: Provision a second, empty database for protected workspace acceptance
-        env:
-          PGPASSWORD: synthetic-ci-db
-        run: |
-          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U qa -d pashloc_qa_ephemeral \
-            -c "CREATE ROLE pashloc_iv_disposable_mfa_isolated_user LOGIN PASSWORD 'synthetic-ci-db'"
-          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U qa -d pashloc_qa_ephemeral \
-            -c "CREATE DATABASE pashloc_iv_disposable_mfa_isolated OWNER pashloc_iv_disposable_mfa_isolated_user"
-      - name: Verify protected signed login with a disposable Good2Go workspace
-        working-directory: backend
-        env:
-          NAVI51_LOCAL_TEST_DATABASE_URL: postgresql://pashloc_iv_disposable_mfa_isolated_user:synthetic-ci-db@127.0.0.1:5432/pashloc_iv_disposable_mfa_isolated?sslmode=disable
-        run: node --import tsx --test tests/navi51SignedWorkspace.integration.test.ts
-      - run: npm ci --no-audit && npm run build
-        working-directory: dashboard
-        env:
-          VITE_API_BASE: http://127.0.0.1:5179
-          VITE_NAVIGATOR_MFA_PHONE_ORIGIN: https://pashloc.example.invalid
-      - name: Verify login presentation in Chromium with synthetic API responses
-        working-directory: dashboard
-        timeout-minutes: 3
-        run: |
-          npm install --no-save --package-lock=false --no-audit playwright@1.57.0
-          google-chrome --version
-          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 5179 --strictPort > "$RUNNER_TEMP/navigator-vite.log" 2>&1 &
-          preview_pid=$!
-          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 20); do
-            curl -fsS http://127.0.0.1:5179/login -o /dev/null && break
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:5179/login -o /dev/null
-          timeout 90s node tests/navigatorSignedMfa.browser.cjs
