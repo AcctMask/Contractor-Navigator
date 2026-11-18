@@ -4,6 +4,7 @@ import { createHash, randomBytes, webcrypto } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import Fastify from "fastify"
 import bcrypt from "bcryptjs"
+import jwt from "jsonwebtoken"
 import { canonicalSignedApproval, type SignedApprovalContext } from "../src/services/pashlocSignedApprovalV1"
 
 // Fail before importing the real database module if this is not disposable loopback QA.
@@ -19,18 +20,20 @@ const { registerAuthRoutes } = await import("../src/routes/auth")
 const { registerAdminRoutes } = await import("../src/routes/admin")
 const { registerCustomerRoutes } = await import("../src/routes/customers")
 const { registerCalendarRoutes } = await import("../src/routes/calendar")
-const { verifyToken } = await import("../src/services/authService")
+const inspectClaims = (token: string) => jwt.decode(token) as { sub: number; mfa_signed?: boolean }
 const app = Fastify({ logger: false })
 const desktop = "https://navigator.example.invalid"
 const phone = "https://pashloc.example.invalid"
 const password = "synthetic-password-qa-only"
 const signed = "signed@example.invalid"
 const staff = "staff@example.invalid"
+const owner = "owner@example.invalid"
 const slug = "qa-alpha"
 const secondSlug = "qa-bravo"
 const opaque = () => randomBytes(32).toString("base64url")
 const hash = (v: string) => createHash("sha256").update(v).digest("hex")
 let tenant: number, userId: number, staffId: number
+let preMfaToken: string
 const customers = new Map<string, number>()
 let keys: CryptoKeyPair, deviceId: string
 let approvedToken: string
@@ -111,12 +114,12 @@ before(async () => {
       [workspace.id, customer.id, name + "-job"])
   }
   const passwordHash = await bcrypt.hash(password, 4)
-  for (const email of [signed, staff]) {
+  for (const email of [signed, staff, owner]) {
     const { rows: [actor] } = await pool.query(
-      "insert into app_users(tenant_id,email,full_name,password_hash,role) values($1,$2,$2,$3,'staff') returning id",
-      [tenant, email, passwordHash])
+      "insert into app_users(tenant_id,email,full_name,password_hash,role) values($1,$2,$2,$3,$4) returning id",
+      [tenant, email, passwordHash, email === owner ? "platform_owner" : "staff"])
     if (email === signed) userId = Number(actor.id)
-    else staffId = Number(actor.id)
+    else if (email === staff) staffId = Number(actor.id)
   }
   await registerAuthRoutes(app)
   await registerAdminRoutes(app)
@@ -131,16 +134,20 @@ after(async () => { await app.close(); await pool.end() })
 test("optional MFA preserves existing password login and scoped CRM", async () => {
   const response = await login(staff)
   assert.equal(response.statusCode, 200)
-  assert.equal(verifyToken(response.json().token).sub, staffId)
+  assert.equal(inspectClaims(response.json().token).sub, staffId)
   assert.equal((await get("/auth/me", response.json().token)).statusCode, 200)
   assert.equal((await get("/admin/jobs/" + slug, response.json().token)).statusCode, 200)
   assert.equal((await get("/admin/jobs/" + secondSlug, response.json().token)).statusCode, 403)
 })
 
 test("approved device binding, signed approval and one-time Navigator session", async () => {
-  const oldToken = (await login(signed)).json().token
+  preMfaToken = (await login(signed)).json().token
   await pool.query("update app_users set navigator_mfa_required=true,navigator_mfa_epoch=1 where id=$1", [userId])
-  assert.equal((await get("/auth/me", oldToken)).statusCode, 401)
+  assert.equal((await get("/auth/me", preMfaToken)).statusCode, 401)
+  assert.equal((await get("/admin/jobs/" + slug, preMfaToken)).statusCode, 401)
+  const staleChange = await app.inject({method: "POST", url: "/auth/change-password",
+    headers: { authorization: "Bearer " + preMfaToken }, payload: { currentPassword: password, newPassword: password + "-changed" } })
+  assert.equal(staleChange.statusCode, 401)
   assert.deepEqual((await login(signed)).json(), { ok:true, mfa_required:true, enrollment_required:true })
   assert.equal((await login(signed, phone)).json().token, undefined)
 
@@ -194,8 +201,10 @@ test("approved device binding, signed approval and one-time Navigator session", 
   assert.equal((await doDecision(decision)).statusCode, 404)
   const consumed = await Promise.all([finish(challenge), finish(challenge)])
   assert.deepEqual(consumed.map((result) => result.statusCode).sort(), [200,410])
-  approvedToken = consumed.find((result) => result.statusCode === 200)!.json().token
-  assert.equal(verifyToken(approvedToken).mfa_signed, true)
+  const approved = consumed.find((result) => result.statusCode === 200)!.json()
+  assert.equal(approved.tenantSlug, slug)
+  approvedToken = approved.token
+  assert.equal(inspectClaims(approvedToken).mfa_signed, true)
   const identity = (await get("/auth/me", approvedToken)).json().user
   assert.equal(Number(identity.id), userId)
   assert.equal(Number(identity.tenant_id), tenant)
@@ -233,9 +242,10 @@ test("account-level recovery restores only the selected password login and inval
   assert.equal((await pool.query(query, [userId,tenant,0])).rowCount, 0)
   assert.equal((await pool.query(query, [userId,tenant,1])).rowCount, 1)
   assert.equal((await get("/auth/me", approvedToken)).statusCode, 401)
+  assert.equal((await get("/auth/me", preMfaToken)).statusCode, 401)
   assert.equal((await finish(pending)).statusCode, 404)
   const recovered = (await login(signed)).json().token
-  assert.equal(verifyToken(recovered).mfa_signed, false)
+  assert.equal(inspectClaims(recovered).mfa_signed, false)
   assert.equal((await get("/auth/me", recovered)).statusCode, 200)
   assert.equal((await get("/auth/me", staffToken)).statusCode, 200)
 })
@@ -265,4 +275,16 @@ test("customer lists and individual histories stay within the authorized workspa
   assert.equal(record.statusCode, 200)
   assert.equal(record.json().customer.full_name, slug+"-customer")
   assert.deepEqual(record.json().jobs.map((job: { external_job_id: string }) => job.external_job_id), [slug+"-job"])
+})
+
+
+test("existing platform owner can switch workspaces and return without issuing another session", async () => {
+  const { token } = (await login(owner)).json()
+  assert.ok(token)
+  for (const workspace of [slug, secondSlug, slug]) {
+    const response = await get("/admin/jobs/" + workspace, token)
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.json().jobs.map((job: { external_job_id: string }) => job.external_job_id),
+      [workspace + "-job"])
+  }
 })
