@@ -1,3 +1,4 @@
+import { registerNavigatorSignedMfa } from "./routes/navigatorSignedMfa"
 import Fastify from "fastify"
 import cors from "@fastify/cors"
 import formbody from "@fastify/formbody"
@@ -78,6 +79,7 @@ await registerTwilioWebhook(app)
 await registerCustomerRoutes(app)
 await registerDevSettingsRoutes(app)
 await registerAuthRoutes(app)
+registerNavigatorSignedMfa(app)
 await registerWorkforceCrewRoutes(app)
 await registerJobSearchRoutes(app)
 await registerDocumentPipelineRoutes(app)
