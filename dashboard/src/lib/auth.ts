@@ -48,12 +48,42 @@ export async function login(email: string, password: string) {
 
   const json = await res.json()
 
-  if (!res.ok || !json?.token) {
+  if (!res.ok || json?.ok === false) {
     throw new Error(json?.error || "Login failed")
+  }
+
+  if (json?.mfa_required === true) {
+    // Never retain a previous session while an MFA challenge is pending.
+    clearToken()
+    if (typeof json.challenge_id !== "string" || !json.challenge_id || json.token) {
+      throw new Error("PashLoc verification is not ready for this account")
+    }
+    return { mfa_required: true as const, challenge_id: json.challenge_id }
+  }
+  if (typeof json?.token !== "string" || !json.token) {
+    throw new Error("Login failed")
   }
 
   setToken(json.token)
   return json
+}
+
+export async function completeMfaLogin(challengeId: string, code: string) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challengeId) || !/^\\d{6}$/.test(code)) {
+    throw new Error("Invalid PashLoc verification input")
+  }
+  const response = await fetch(`${API_BASE}/auth/mfa/login/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ challenge_id: challengeId, code }),
+    cache: "no-store",
+  })
+  const result = await response.json()
+  if (!response.ok || result?.ok !== true || typeof result.token !== "string" || !result.token) {
+    throw new Error("PashLoc verification failed")
+  }
+  setToken(result.token)
+  return result
 }
 
 export async function acceptInvite(inviteToken: string, password: string) {
