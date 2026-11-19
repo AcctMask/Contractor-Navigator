@@ -1,5 +1,6 @@
 -- Additive Navigator MFA schema. Apply before the integration backend.
 begin;
+alter table tenants add column if not exists navigator_mfa_mandatory boolean not null default false;
 alter table app_users add column if not exists navigator_mfa_required boolean not null default false;
 alter table app_users add column if not exists navigator_mfa_epoch bigint not null default 0;
 
@@ -38,6 +39,38 @@ create table if not exists navigator_signed_enrollment_grants (
   expires_at timestamptz not null,
   used_at timestamptz
 );
+alter table navigator_signed_enrollment_grants add column if not exists authorization_id uuid;
+create unique index if not exists navigator_signed_one_grant_per_authorization
+  on navigator_signed_enrollment_grants (authorization_id) where authorization_id is not null;
+
+create table if not exists navigator_mfa_policy_audit (
+  tenant_id bigint primary key references tenants(id),
+  actor_user_id bigint not null references app_users(id),
+  required_at timestamptz not null default clock_timestamp()
+);
+
+create table if not exists navigator_mfa_recovery_audit (
+  tenant_id bigint not null references tenants(id),
+  app_user_id bigint not null references app_users(id),
+  new_epoch bigint not null,
+  recovered_at timestamptz not null default clock_timestamp(),
+  primary key (tenant_id,app_user_id,new_epoch)
+);
+
+-- Reactivation cannot revive a session issued before deactivation.
+create or replace function navigator_mfa_invalidate_on_active_change() returns trigger language plpgsql as $navigator_mfa$
+begin
+  if exists (select 1 from tenants t where t.id=new.tenant_id and t.navigator_mfa_mandatory) then
+    new.navigator_mfa_epoch := greatest(new.navigator_mfa_epoch, old.navigator_mfa_epoch + 1);
+  end if;
+  return new;
+end;
+$navigator_mfa$;
+drop trigger if exists navigator_mfa_active_change on app_users;
+create trigger navigator_mfa_active_change before update of is_active on app_users
+for each row when (old.is_active is distinct from new.is_active)
+execute function navigator_mfa_invalidate_on_active_change();
+
 -- Audit must commit atomically with device enrollment.
 create table if not exists navigator_signed_device_binding_audit (
   id bigint generated always as identity primary key,

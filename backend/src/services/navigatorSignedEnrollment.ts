@@ -64,6 +64,12 @@ export async function registerSignedDevice(input: Record<string, unknown>) {
       await client.query("rollback")
       return null
     }
+    if (row.authorization_id) {
+      await client.query(`update app_users u set navigator_mfa_epoch=navigator_mfa_epoch+1
+        where id=$1 and tenant_id=$2 and exists (
+          select 1 from tenants t where t.id=u.tenant_id and t.navigator_mfa_mandatory)`,
+        [row.app_user_id, row.tenant_id])
+    }
     await client.query("commit")
     return { deviceId, tenantId: Number(row.tenant_id), userId: Number(row.app_user_id) }
   } catch (err) {

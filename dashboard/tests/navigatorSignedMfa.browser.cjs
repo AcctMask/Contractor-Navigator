@@ -3,8 +3,12 @@ const { chromium } = require("playwright")
 ;(async () => {
   const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : { channel: "chrome" })
   try {
-    for (const mode of ["denied", "expired", "enrollment", "unavailable", "wrongTenant", "approved", "spanish"]) {
-      const spanish = mode === "spanish"
+    for (const mode of ["denied", "expired", "enrollment", "enrollmentSpanish", "enrollmentUnavailable", "unavailable", "wrongTenant", "approved", "spanish"]) {
+      const spanish = mode === "spanish" || mode === "enrollmentSpanish"
+      const enrolls = mode === "enrollment" || mode === "enrollmentSpanish"
+      const enrollmentLink = "https://pashloc.example.invalid/#navigator-register=" + "r".repeat(43)
+      const grant = "g".repeat(43)
+      let firstSignIn = true
       const page = await browser.newPage({ locale: spanish ? "es-ES" : "en-US" })
       const reference = "a".repeat(43), browserProof = "b".repeat(43)
       let shouldComplete = false
@@ -15,17 +19,26 @@ const { chromium } = require("playwright")
         const send = (json,status=200)=>route.fulfill({status,json})
         if (url.pathname.endsWith("/login")) {
           assert.equal(url.pathname, "/auth/qa-alpha/login")
-          if (mode === "enrollment") return send({ok:true,mfa_required:true,enrollment_required:true})
+          if (mode === "enrollmentUnavailable") return send({ok:true,mfa_required:true,enrollment_required:true})
+          if (enrolls && firstSignIn) {
+            firstSignIn = false
+            return send({ok:true,mfa_required:true,enrollment_required:true,enrollmentToken:"synthetic-enrollment-only"})
+          }
           return send({ok:true,mfa_required:true,method:"pashloc_signed",reference,browserProof,expiresAt:new Date(Date.now()+110000).toISOString(),phoneUrl:"https://pashloc.example.invalid/#navigator-sign="+reference})
+        }
+        if (url.pathname === "/auth/restricted-enrollment/signed") {
+          assert.equal(req.headers().authorization, undefined)
+          assert.deepEqual(req.postDataJSON(), {enrollmentToken:"synthetic-enrollment-only"})
+          return send({ok:true,enrollmentLink,oneTimeGrant:grant,expiresAt:new Date(Date.now()+300000).toISOString()})
         }
         if (url.pathname === "/auth/mfa/signed/complete") {
           assert.deepEqual(req.postDataJSON(), {reference, browserProof})
           if (!shouldComplete) return send({ok:true,state:"pending"},202)
           if (mode === "unavailable") return send({ok:false},503)
           if (mode === "expired") return send({ok:false,state:"expired"},410)
-          if (mode === "approved" || mode === "wrongTenant")
+          if (mode === "approved" || mode === "wrongTenant" || enrolls)
             return send({ok:true,state:"approved",token:"synthetic-navigator-browser-token",
-              tenantSlug:mode === "approved" ? "qa-alpha" : "qa-bravo"})
+              tenantSlug:mode === "wrongTenant" ? "qa-bravo" : "qa-alpha"})
           return send({ok:true,state:spanish ? "denied" : mode})
         }
         const authorized = req.headers().authorization === "Bearer synthetic-navigator-browser-token"
@@ -38,7 +51,18 @@ const { chromium } = require("playwright")
       await page.getByPlaceholder("you@yourcompany.com").fill("signed@example.invalid")
       await page.getByPlaceholder("Enter password").fill("synthetic-browser-test")
       await page.getByRole("button",{name:"Login",exact:true}).click()
-      if (mode !== "enrollment") {
+      if (enrolls) {
+        await page.getByRole("heading",{name:spanish ? "Registra tu teléfono con PashLoc IV" : "Register your phone with PashLoc IV"}).waitFor()
+        await page.locator('[role="img"] canvas, [role="img"] img').first().waitFor({state:"attached"})
+        assert.equal(await page.getByRole("link",{name:spanish ? "Abrir registro de PashLoc" : "Open PashLoc registration"}).getAttribute("href"), enrollmentLink)
+        assert.equal(await page.locator("code").textContent(), grant)
+        assert.equal(await page.evaluate(()=>localStorage.getItem("contractor_autopilot_token")),null)
+        assert.match(page.url(), /\/login$/)
+        await page.getByRole("button",{name:spanish ? "Volver al inicio de sesión" : "Return to sign-in"}).click()
+        await page.getByPlaceholder("Enter password").fill("synthetic-browser-test")
+        await page.getByRole("button",{name:"Login",exact:true}).click()
+      }
+      if (mode !== "enrollmentUnavailable") {
         await page.getByRole("heading",{name:spanish ? "Aprueba el acceso con PashLoc" : "Approve sign-in with PashLoc"}).waitFor()
         await page.locator('[role="img"] canvas, [role="img"] img').first().waitFor({state:"attached"})
         assert.equal(await page.getByRole("link",{name:spanish ? "Abrir enlace de aprobación de PashLoc" : "Open PashLoc approval link"}).getAttribute("href"),"https://pashloc.example.invalid/#navigator-sign="+reference)
@@ -46,14 +70,14 @@ const { chromium } = require("playwright")
         assert.equal(await page.evaluate(()=>localStorage.getItem("contractor_autopilot_token")),null)
         shouldComplete = true
       }
-      if (mode === "approved") {
+      if (mode === "approved" || enrolls) {
         await page.waitForURL("http://127.0.0.1:5179/")
         await page.getByRole("heading", {name:/Command Center/}).waitFor()
         await page.waitForFunction(() => localStorage.getItem("contractor_autopilot_token")==="synthetic-navigator-browser-token")
         for(let i=0;i<20 && !observedSession;i++) await new Promise(r=>setTimeout(r,50))
         assert.equal(observedSession,true)
       } else {
-        const text = {spanish:/Se rechazó el acceso/,denied:/Sign-in was denied/, expired:/This request expired/, enrollment:/needs a registered PashLoc device/, unavailable:/PashLoc could not finish sign-in/,wrongTenant:/PashLoc could not finish sign-in/}[mode]
+        const text = {spanish:/Se rechazó el acceso/,denied:/Sign-in was denied/, expired:/This request expired/, enrollmentUnavailable:/needs a registered PashLoc device/, unavailable:/PashLoc could not finish sign-in/,wrongTenant:/PashLoc could not finish sign-in/}[mode]
         await page.getByRole("alert").filter({hasText:text}).waitFor()
         assert.equal(await page.evaluate(()=>localStorage.getItem("contractor_autopilot_token")),null)
       }

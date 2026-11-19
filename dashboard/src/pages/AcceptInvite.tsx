@@ -75,6 +75,11 @@ export default function AcceptInvitePage() {
         )
       }
 
+      if (accepted?.mfa_required === true) {
+        navigate("/login", { replace: true, state: { enrollmentEmail: invite?.email } })
+        return
+      }
+
       setAccepted(true)
       setStatus(
         "Congratulations — your Navigator account has been created successfully."

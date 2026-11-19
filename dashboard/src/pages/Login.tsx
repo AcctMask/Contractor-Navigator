@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { login, PashLocLoginError, pollSignedLogin, setToken, type SignedLogin } from "../lib/auth"
+import { useLocation, useNavigate } from "react-router-dom"
+import { getMe, login, PashLocLoginError, pollSignedLogin, requestEnrollment, setToken, type EnrollmentGrant, type SignedLogin } from "../lib/auth"
 import { useLanguage } from "../context/LanguageContext"
 import type { WorkforceTranslationKey } from "../lib/workforceLanguage"
 import {
@@ -11,6 +11,7 @@ import {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { state } = useLocation()
   const { t } = useLanguage()
   const [workspace, setWorkspace] = useState(() => {
     const queryTenant =
@@ -20,11 +21,12 @@ export default function LoginPage() {
 
     return queryTenant || getTenantSlug()
   })
-  const [email, setEmail] = useState("")
+  const [email, setEmail] = useState(() => typeof state?.enrollmentEmail === "string" ? state.enrollmentEmail : "")
   const [password, setPassword] = useState("")
   const [status, setStatus] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [enrollment, setEnrollment] = useState<EnrollmentGrant | null>(null)
   const [mfaChallenge, setMfaChallenge] = useState<SignedLogin | null>(null)
   const [mfaError, setMfaError] = useState<WorkforceTranslationKey | null>(null)
   const [qrFailed, setQrFailed] = useState(false)
@@ -49,7 +51,8 @@ export default function LoginPage() {
         if (result.state === "approved") {
           setTenantSlug(mfaChallenge.tenant)
           setToken(result.token)
-          navigate("/")
+          const user = await getMe()
+          if (!controller.signal.aborted) navigate(user?.role === "crew" ? "/crew" : "/")
         } else if (result.state === "pending") timer = setTimeout(poll, 1500)
         else fail(result.state === "denied" ? "pashLocDenied" : "pashLocExpired")
       } catch {
@@ -61,7 +64,8 @@ export default function LoginPage() {
   }, [mfaChallenge, navigate])
 
   useEffect(() => {
-    if (!mfaChallenge || !qrContainer.current) return
+    const phoneUrl = mfaChallenge?.phoneUrl ?? enrollment?.enrollmentLink
+    if (!phoneUrl || !qrContainer.current) return
     const container = qrContainer.current
     const browser = window as Window & { QRCode?: new (
       node: HTMLElement, options: { text: string; width: number; height: number; correctLevel: number },
@@ -70,7 +74,7 @@ export default function LoginPage() {
       try {
         if (!browser.QRCode) throw new Error("QR renderer unavailable")
         container.replaceChildren()
-        new browser.QRCode(container, { text: mfaChallenge.phoneUrl, width: 224, height: 224, correctLevel: 1 })
+        new browser.QRCode(container, { text: phoneUrl, width: 224, height: 224, correctLevel: 1 })
       } catch { setQrFailed(true) }
     }
     if (browser.QRCode) { draw(); return }
@@ -80,7 +84,16 @@ export default function LoginPage() {
     script.onerror = () => setQrFailed(true)
     document.head.append(script)
     return () => { script.onload = script.onerror = null; script.remove() }
-  }, [mfaChallenge])
+  }, [mfaChallenge, enrollment])
+
+  useEffect(() => {
+    if (!enrollment) return
+    const timer = setTimeout(() => {
+      setEnrollment(null)
+      setMfaError("pashLocEnrollmentExpired")
+    }, Math.max(0, Math.min(300000, Date.parse(enrollment.expiresAt) - Date.now())))
+    return () => clearTimeout(timer)
+  }, [enrollment])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -103,12 +116,17 @@ export default function LoginPage() {
       if (result?.mfa_required === true) {
         setQrFailed(false)
         setPassword("")
-        setMfaChallenge(result)
+        if ("enrollmentToken" in result) {
+          setEnrollment(await requestEnrollment(result.enrollmentToken, AbortSignal.timeout(10000)))
+        } else {
+          setMfaChallenge(result)
+        }
         setStatus("")
         return
       }
       setStatus("Login successful")
-      navigate("/")
+      const user = await getMe()
+      navigate(user?.role === "crew" ? "/crew" : "/")
     } catch (err: any) {
       if (err instanceof PashLocLoginError) {
         setPassword("")
@@ -135,7 +153,23 @@ export default function LoginPage() {
         </p>
 
         {mfaError && <div role="alert" style={errorStyle}>{t(mfaError)}</div>}
-        {mfaChallenge ? (
+        {enrollment ? (
+          <section style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
+            <h2>{t("pashLocRegisterTitle")}</h2>
+            <p>{t("pashLocRegisterInstructions")}</p>
+            <div ref={qrContainer} role="img" aria-label={t("pashLocRegisterTitle")}
+              style={{ width: 224, minHeight: 224, padding: 12, background: "white", boxSizing: "content-box" }} />
+            {qrFailed && <p role="status">{t("pashLocRegisterQrUnavailable")}</p>}
+            <a style={{ color: "#a9d4ff" }} href={enrollment.enrollmentLink} target="_blank" rel="noopener noreferrer">
+              {t("pashLocRegisterOpen")}
+            </a>
+            <div>{t("pashLocRegisterCode")} <code>{enrollment.oneTimeGrant}</code></div>
+            <p>{t("pashLocRegisterNext")}</p>
+            <button type="button" onClick={() => setEnrollment(null)} style={buttonStyle}>
+              {t("pashLocRegisterContinue")}
+            </button>
+          </section>
+        ) : mfaChallenge ? (
           <section style={{ display: "grid", gap: "14px", marginTop: "18px" }}>
             <h2>{t("pashLocTitle")}</h2>
             <p>{t("pashLocScan")}</p>

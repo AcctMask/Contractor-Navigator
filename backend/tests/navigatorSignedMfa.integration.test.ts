@@ -16,6 +16,7 @@ assert.equal(db.pathname, "/pashloc_qa_ephemeral")
 assert.equal(process.env.JWT_SECRET, "synthetic-navigator-ci-only")
 
 const { pool } = await import("../src/db/db")
+const { acceptInvitation } = await import("../src/services/authService")
 const { registerAuthRoutes } = await import("../src/routes/auth")
 const { registerAdminRoutes } = await import("../src/routes/admin")
 const { registerCustomerRoutes } = await import("../src/routes/customers")
@@ -66,6 +67,7 @@ before(async () => {
       email text not null, full_name text not null, password_hash text,
       mobile_phone text, role text not null, is_active boolean not null default true,
       preferred_language text, financials_authorized boolean not null default false,
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
       unique (tenant_id,email)
     )`,
     `create table customers (
@@ -94,6 +96,9 @@ before(async () => {
     `create table job_assets (
       id bigint generated always as identity primary key,
       tenant_id bigint, job_id bigint, asset_type text
+    )`,
+    `create table scheduled_actions (
+      tenant_id bigint, action_key text, status text, payload jsonb, updated_at timestamptz
     )`,
     `create table timeline_events (
       id bigint generated always as identity primary key,
@@ -179,13 +184,24 @@ test("approved device binding, signed approval and one-time Navigator session", 
   const staleChange = await app.inject({method: "POST", url: "/auth/change-password",
     headers: { authorization: "Bearer " + preMfaToken }, payload: { currentPassword: password, newPassword: password + "-changed" } })
   assert.equal(staleChange.statusCode, 401)
-  assert.deepEqual((await login(signed)).json(), { ok:true, mfa_required:true, enrollment_required:true })
+  const firstLogin = (await login(signed)).json()
+  assert.equal(firstLogin.ok, true)
+  assert.equal(firstLogin.mfa_required, true)
+  assert.equal(firstLogin.enrollment_required, true)
+  assert.equal(firstLogin.token, undefined)
+  assert.equal(typeof firstLogin.enrollmentToken, "string")
+  assert.equal((await get("/auth/me", firstLogin.enrollmentToken)).statusCode, 401)
+  assert.equal((await get("/admin/jobs/" + slug, firstLogin.enrollmentToken)).statusCode, 401)
+  assert.equal((await post("/auth/restricted-enrollment/signed",
+    { enrollmentToken: firstLogin.enrollmentToken }, phone)).statusCode, 403)
+  const restricted = await post("/auth/restricted-enrollment/signed",
+    { enrollmentToken: firstLogin.enrollmentToken })
+  assert.equal(restricted.statusCode, 200)
+  assert.equal(typeof restricted.json().oneTimeGrant, "string")
   assert.equal((await login(signed, phone)).json().token, undefined)
 
-  const reference = opaque(), grant = opaque()
-  await pool.query(`insert into navigator_signed_enrollment_grants
-    (reference,grant_hash,tenant_id,app_user_id,policy_epoch,expires_at)
-    values($1,$2,$3,$4,1,clock_timestamp()+interval '5 minutes')`, [reference,hash(grant),tenant,userId])
+  const grant = restricted.json().oneTimeGrant
+  const reference = new URL(restricted.json().enrollmentLink).hash.slice("#navigator-register=".length)
   const infoResponse = await post(api + "registration-info", { reference }, phone)
   assert.equal(infoResponse.statusCode, 200)
   const info = infoResponse.json()
@@ -291,3 +307,93 @@ test("existing platform owner can switch workspaces and return without issuing a
       [workspace + "-job"])
   }
 })
+
+test("tenant policy gates unauthenticated, stale, future and reactivated access and recovery", async () => {
+  const prior = (await login(staff)).json().token
+  const activate = (token: string) => app.inject({ method: "POST", url: "/auth/tenant/mfa/require",
+    headers: { origin: desktop, authorization: "Bearer " + token } })
+  assert.equal((await activate(prior)).statusCode, 403)
+  await pool.query("update app_users set role='admin',navigator_mfa_required=true where id=$1", [userId])
+  const admin = (await login(signed)).json()
+  const { context } = (await post(api + "challenge", { reference: admin.reference, deviceId }, phone)).json()
+  assert.equal((await doDecision({ ...context, decision: "approve" })).statusCode, 200)
+  const adminToken = (await finish(admin)).json().token
+  assert.equal((await activate(adminToken)).statusCode, 200)
+  assert.equal((await activate(adminToken)).statusCode, 200)
+  assert.equal((await pool.query("select * from navigator_mfa_policy_audit where tenant_id=$1",[tenant])).rowCount, 1)
+  assert.equal((await get("/auth/me", adminToken)).statusCode, 200)
+  for (const path of ["/admin/jobs/" + slug, "/admin/customers/" + slug, "/calendar/" + slug + "/events"]) {
+    assert.equal((await get(path)).statusCode, 401)
+    assert.equal((await get(path, prior)).statusCode, 401)
+    assert.equal((await get(path, adminToken)).statusCode, 200)
+  }
+  assert.equal((await get("/admin/jobs/" + secondSlug)).statusCode, 200)
+  const { rows: [otherTenant] } = await pool.query("select id from tenants where slug=$1", [secondSlug])
+  const { rows: [otherUser] } = await pool.query(
+    "insert into app_users (tenant_id,email,full_name,role,password_hash) values($1,$2,$2,'staff',$3) returning id",
+    [otherTenant.id,"other@example.invalid",await bcrypt.hash(password,4)])
+  const otherToken = (await post("/auth/"+secondSlug+"/login", { email:"other@example.invalid",password })).json().token
+  assert.equal(inspectClaims(otherToken).sub, Number(otherUser.id))
+  assert.equal((await get("/admin/jobs/"+slug, otherToken)).statusCode, 401)
+
+  const invitedEmail = "invited@example.invalid"
+  const invitationToken = opaque()
+  await pool.query(`insert into user_invitations (tenant_id,email,full_name,role,invite_token,expires_at)
+    values($1,$2,$2,'staff',$3,now()+interval '1 hour')`, [tenant,invitedEmail,invitationToken])
+  const accepted = await acceptInvitation(invitationToken,{password})
+  assert.equal(accepted.mfa_required,true)
+  assert.equal(accepted.token,undefined)
+  assert.equal((await login(invitedEmail)).json().enrollment_required,true)
+
+  const newEmail = "new@example.invalid"
+  await pool.query("insert into app_users (tenant_id,email,full_name,role,password_hash) values($1,$2,$2,'staff',$3)",
+    [tenant,newEmail,await bcrypt.hash(password,4)])
+  for (const email of [staff,newEmail]) {
+    const result = (await login(email)).json()
+    assert.equal(result.enrollment_required, true)
+    assert.equal(result.token, undefined)
+  }
+  const { enrollmentToken } = (await login(staff)).json()
+  const issue = () => post("/auth/restricted-enrollment/signed", { enrollmentToken })
+  const issued = await issue()
+  assert.equal(issued.statusCode, 200)
+  assert.equal((await issue()).statusCode, 409)
+  const { oneTimeGrant, enrollmentLink } = issued.json()
+  const reference = new URL(enrollmentLink).hash.slice("#navigator-register=".length)
+  const { expiresAt, userId: registeredUser, tenantId } =
+    (await post(api + "registration-info", { reference }, phone)).json()
+  assert.equal(registeredUser, staffId)
+  assert.equal(tenantId, tenant)
+  const staffKeys = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign","verify"])
+  const { kty, crv, x, y } = await webcrypto.subtle.exportKey("jwk",staffKeys.publicKey)
+  const staffDevice = opaque()
+  const proof = Buffer.from(["AA-PASHLOC-LOGIN-V1/REGISTER","production",tenant,staffId,reference,staffDevice,expiresAt,x,y].join("\n"))
+  const registered = await post(api + "register", { reference, grant:oneTimeGrant, deviceId:staffDevice,
+    publicJwk:{kty,crv,x,y}, signature:await sign(proof,staffKeys.privateKey) },phone)
+  assert.equal(registered.statusCode, 200)
+  assert.equal((await get("/admin/jobs/"+slug, enrollmentToken)).statusCode, 401)
+  const staffChallenge = (await login(staff)).json()
+  assert.equal(staffChallenge.token, undefined)
+  assert.equal((await finish(staffChallenge)).statusCode, 202)
+  const pending = (await post(api+"challenge",{reference:staffChallenge.reference,deviceId:staffDevice},phone)).json()
+  assert.equal((await doDecision({...pending.context,decision:"approve"},staffKeys.privateKey)).statusCode, 200)
+  const staffToken = (await finish(staffChallenge)).json().token
+  assert.equal((await get("/admin/jobs/"+slug,staffToken)).statusCode, 200)
+  await pool.query("update app_users set is_active=false where id=$1",[staffId])
+  assert.equal((await login(staff)).statusCode, 400)
+  await pool.query("update app_users set is_active=true where id=$1",[staffId])
+  assert.equal((await get("/admin/jobs/"+slug,staffToken)).statusCode, 401)
+  assert.equal((await login(staff)).json().method,"pashloc_signed")
+
+  const recovery = await readFile(new URL("../sql/navigator_signed_mfa_recovery.sql", import.meta.url), "utf8")
+  const { rows: [current] } = await pool.query("select navigator_mfa_epoch from app_users where id=$1",[staffId])
+  assert.equal((await pool.query(recovery,[staffId,otherTenant.id,current.navigator_mfa_epoch])).rowCount,0)
+  assert.equal((await pool.query(recovery,[staffId,tenant,current.navigator_mfa_epoch])).rowCount,1)
+  assert.equal((await pool.query(recovery,[staffId,tenant,current.navigator_mfa_epoch])).rowCount,0)
+  const recovered = (await login(staff)).json()
+  assert.equal(recovered.enrollment_required, true)
+  assert.equal(recovered.token, undefined)
+  assert.equal((await get("/admin/jobs/"+slug,adminToken)).statusCode,200)
+  assert.equal((await pool.query("select 1 from navigator_signed_devices where device_id=$1 and revoked_at is not null",[staffDevice])).rowCount,1)
+})
+

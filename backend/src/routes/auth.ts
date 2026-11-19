@@ -6,6 +6,9 @@ import { signedMfaConfig } from "../services/navigatorSignedMfa"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
+  getRestrictedEnrollmentIdentity,
+  isRestrictedEnrollmentToken,
+  isSignedOperationalToken,
   updateOwnPreferredLanguage,
   getInvitationByToken,
   inviteUserByTenantSlug,
@@ -114,7 +117,138 @@ async function requireTenantUserManager(
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  // Enrollment-only credentials are never operational bearer tokens, including on
+  // legacy read routes that do not otherwise require a session.
+  app.addHook("onRequest", async (request: any, reply) => {
+    const token = getBearerToken(request)
+    if (!token) return
+    if (isRestrictedEnrollmentToken(token))
+      return reply.code(401).send({ ok: false, error: "Operational session required" })
+  })
+  app.addHook("preHandler", async (request, reply) => {
+    const route = request.routeOptions.url || ""
+    if (route === "/auth/:tenantSlug/login" || route.startsWith("/integrations/") ||
+        ["/platform/tenant-runtime/:tenantSlug", "/platform/conversation-profile/:tenantSlug",
+         "/platform/company-dna-runtime/:tenantSlug", "/platform/provisioning-status/:tenantSlug"]
+          .includes(route)) return
+
+    // Fastify's resolved path parameters identify the target, never a
+    // tenant header or a JWT claim supplied in place of route scope.
+    const params = (request.params ?? {}) as Record<string, unknown>
+    const query = (request.query ?? {}) as Record<string, unknown>
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const report = route.startsWith("/reporting/")
+    const rawSlug = params.tenantSlug ?? params.tenant_slug ?? params.tenant ??
+      (report ? query.tenant : route === "/events" && request.method === "POST" ? body.tenant_slug : undefined)
+    const slug = typeof rawSlug === "string" ? rawSlug.trim() : ""
+    if (!slug) {
+      if (!report) return
+      // Aggregate reads have no single tenant to authorize. Once any
+      // tenant requires MFA, keep its data out of unscoped report reads.
+      const { rows: [required] } = await pool.query(
+        "select 1 from tenants where navigator_mfa_mandatory limit 1")
+      if (required) return reply.code(400).send({ ok: false, error: "Tenant-scoped report required" })
+      return
+    }
+    const { rows: [target] } = await pool.query(
+      "select id, navigator_mfa_mandatory from tenants where slug=$1", [slug])
+    if (!target?.navigator_mfa_mandatory) return
+    const token = getBearerToken(request)
+    if (!isSignedOperationalToken(token))
+      return reply.code(401).send({ ok: false, error: "Signed Navigator session required" })
+    const actor = await getCurrentUserFromToken(token).catch(() => null)
+    if (!actor) return reply.code(401).send({ ok: false, error: "Signed Navigator session required" })
+    if (String(actor.tenant_id) !== String(target.id))
+      return reply.code(403).send({ ok: false, error: "Tenant access denied" })
+  })
   registerNavigatorSignedMfa(app)
+  // Tenant administrator explicitly enables mandatory MFA. No client-selected tenant ID.
+  app.post("/auth/tenant/mfa/require", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const token = getBearerToken(request)
+    if (!token) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    let actor: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { actor = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
+    if (!["tenant_admin", "admin", "platform_owner"].includes(String(actor.role)))
+      return reply.code(403).send({ ok: false, error: "Forbidden" })
+    const config = signedMfaConfig()
+    if (!config || request.headers.origin !== config.browser)
+      return reply.code(403).send({ ok: false, error: "PashLoc activation unavailable" })
+    const { rows: [device] } = await pool.query(
+      `select 1 from navigator_signed_devices where tenant_id=$1 and app_user_id=$2
+        and revoked_at is null and proof_verified_at is not null`, [actor.tenant_id, actor.id])
+    if (!device || !isSignedOperationalToken(token))
+      return reply.code(403).send({ ok: false, error: "Signed administrator session required" })
+    const { rows: [tenant] } = await pool.query(
+      `with changed as (
+        update tenants set navigator_mfa_mandatory=true where id=$1 and not navigator_mfa_mandatory returning id
+      ), recorded as (
+        insert into navigator_mfa_policy_audit(tenant_id,actor_user_id) select id,$2 from changed returning tenant_id
+      )
+      select tenant_id as id from recorded
+      union all select id from tenants where id=$1 and navigator_mfa_mandatory`, [actor.tenant_id, actor.id])
+    if (!tenant) return reply.code(409).send({ ok: false, error: "Tenant policy changed, retry" })
+    return { ok: true, mandatory: true, tenantId: Number(tenant.id) }
+  })
+  // Enrollment-only authorization never passes getCurrentUserFromToken or operational guards.
+  app.post("/auth/restricted-enrollment/signed", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const config = signedMfaConfig()
+    if (!config || request.headers.origin !== config.browser)
+      return reply.code(403).send({ ok: false, error: "Enrollment unavailable" })
+    const enrollmentToken = (request.body as any)?.enrollmentToken
+    if (typeof enrollmentToken !== "string")
+      return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const user = await getRestrictedEnrollmentIdentity(enrollmentToken)
+    if (!user) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const client = await pool.connect()
+    try {
+      await client.query("begin")
+      const { rows: [eligible] } = await client.query(
+        `select id, tenant_id, navigator_mfa_epoch, password_hash from app_users
+         where id=$1 and tenant_id=$2 and is_active and navigator_mfa_epoch=$3 and
+         (navigator_mfa_required or exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory)) for update`,
+        [user.id, user.tenant_id, user.epoch])
+      if (!eligible || createHash("sha256").update(eligible.password_hash).digest("hex") !== user.fingerprint) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Enrollment unavailable" })
+      }
+      const { rows: [existing] } = await client.query(
+        `select device_id from navigator_signed_devices
+         where tenant_id=$1 and app_user_id=$2 and revoked_at is null limit 1`,
+        [user.tenant_id, user.id])
+      if (existing) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Device already registered" })
+      }
+      await client.query(
+        `update navigator_signed_enrollment_grants set used_at=clock_timestamp()
+         where tenant_id=$1 and app_user_id=$2 and used_at is null`,
+        [user.tenant_id, user.id])
+      const reference = randomBytes(32).toString("base64url")
+      const grant = randomBytes(32).toString("base64url")
+      const { rows: [issued] } = await client.query(
+        `insert into navigator_signed_enrollment_grants
+         (reference,grant_hash,tenant_id,app_user_id,policy_epoch,expires_at,authorization_id)
+         values ($1,$2,$3,$4,$5,clock_timestamp()+interval '5 minutes',$6)
+         on conflict (authorization_id) where authorization_id is not null do nothing
+         returning expires_at`,
+        [reference, createHash("sha256").update(grant).digest("hex"),
+         user.tenant_id, user.id, eligible.navigator_mfa_epoch, user.authorizationId])
+      if (!issued) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Enrollment authorization already used" })
+      }
+      await client.query("commit")
+      return { ok: true, enrollmentLink: config.phone + "/#navigator-register=" + reference,
+        oneTimeGrant: grant, expiresAt: issued.expires_at }
+    } catch (err) {
+      await client.query("rollback").catch(() => undefined)
+      request.log.error(err)
+      return reply.code(503).send({ ok: false, error: "Enrollment unavailable" })
+    } finally { client.release() }
+  })
   // Registration status is scoped to the bearer-session identity, never a client-supplied user ID.
   app.get("/auth/me/mfa/signed/device-status", async (request: any, reply) => {
     reply.header("Cache-Control", "no-store, private")
