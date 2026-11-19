@@ -1,33 +1,25 @@
 import { useEffect, useState } from "react";
 
-import { getToken } from "../lib/auth"
-
 const API = import.meta.env.VITE_API_BASE;
-
-function commercialFetch(url: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers)
-  headers.set("Authorization", `Bearer ${getToken()}`)
-  return fetch(url, { ...init, headers })
-}
 
 export default function Commercial() {
   const [targets, setTargets] = useState<any[]>([]);
   const [selected, setSelected] = useState<any | null>(null);
 
   async function loadTargets() {
-    const res = await commercialFetch(`${API}/commercial/targets`);
+    const res = await fetch(`${API}/commercial/targets`);
     const data = await res.json();
     setTargets(data.targets || []);
   }
 
   async function loadTargetDetail(id: string) {
-    const res = await commercialFetch(`${API}/commercial/targets/${id}`);
+    const res = await fetch(`${API}/commercial/targets/${id}`);
     const data = await res.json();
     setSelected(data.target);
   }
 
   async function queueEmail(id: string) {
-    await commercialFetch(`${API}/commercial/targets/${id}/queue-email`, {
+    await fetch(`${API}/commercial/targets/${id}/queue-email`, {
       method: "POST",
     });
     alert("Queued");
@@ -39,7 +31,7 @@ export default function Commercial() {
 
     const latest = selected.email_history[0];
 
-    await commercialFetch(`${API}/commercial/email-queue/${latest.id}/send`, {
+    await fetch(`${API}/commercial/email-queue/${latest.id}/send`, {
       method: "POST",
     });
 
@@ -48,7 +40,7 @@ export default function Commercial() {
   }
 
   async function toggleDNC() {
-    await commercialFetch(`${API}/commercial/targets/${selected.id}/dnc`, {
+    await fetch(`${API}/commercial/targets/${selected.id}/dnc`, {
       method: "POST",
     });
 
