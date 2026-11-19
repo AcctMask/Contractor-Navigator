@@ -1,0 +1,79 @@
+name: Navigator 5.2 one-time activation and recovery rehearsal
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  disposable-rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qa
+          POSTGRES_PASSWORD: synthetic-ci-db
+          POSTGRES_DB: pashloc_qa_ephemeral
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U qa -d pashloc_qa_ephemeral"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: qa
+      PGPASSWORD: synthetic-ci-db
+      PGDATABASE: pashloc_qa_ephemeral
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Disposable schema and two-account fixture
+        run: |
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE TABLE tenants(id bigint primary key);
+          CREATE TABLE app_users(
+            id bigint primary key, tenant_id bigint not null references tenants(id),
+            is_active boolean not null, navigator_mfa_required boolean not null default false,
+            navigator_mfa_epoch bigint not null default 0
+          );
+          CREATE TABLE navigator_signed_devices(
+            device_id text primary key,tenant_id bigint not null,app_user_id bigint not null,
+            revoked_at timestamptz,proof_verified_at timestamptz
+          );
+          CREATE TABLE navigator_signed_challenges(
+            reference text primary key,tenant_id bigint not null,app_user_id bigint not null,
+            decision text,consumed_at timestamptz
+          );
+          CREATE TABLE navigator_signed_enrollment_grants(
+            reference text primary key,tenant_id bigint not null,app_user_id bigint not null,used_at timestamptz
+          );
+          INSERT INTO tenants(id) VALUES (1),(2);
+          INSERT INTO app_users(id,tenant_id,is_active) VALUES (3,1,true),(4,1,true),(5,2,true);
+          INSERT INTO navigator_signed_devices(device_id,tenant_id,app_user_id,proof_verified_at)
+          VALUES ('synthetic-verified-device',1,3,clock_timestamp());
+          SQL
+      - name: Execute EXACT PR 9 activation script and assert account isolation
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -v approval_reference=CHM-20261119-NAVI52 -f backend/sql/navigator_signed_mfa_activate_chairman.psql
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM app_users WHERE id=3 AND tenant_id=1 AND navigator_mfa_required AND navigator_mfa_epoch=1)
+            OR EXISTS (SELECT 1 FROM app_users WHERE id IN (4,5) AND (navigator_mfa_required OR navigator_mfa_epoch<>0))
+            OR (SELECT count(*) FROM navigator_signed_mfa_activation_audit WHERE tenant_id=1 AND app_user_id=3 AND old_epoch=0 AND new_epoch=1)<>1
+            THEN RAISE EXCEPTION 'Activation/isolation assertion failed'; END IF;
+          END $$;
+          SQL
+      - name: Execute EXACT existing administrative recovery script and assert isolation
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -v chairman_user_id=3 -v chairman_tenant_id=1 -v expected_mfa_epoch=1 -v recovery_approval_reference=CHM-20261119-NAVI52 -v recovery_reason='Authorized disposable recovery rehearsal' -f backend/sql/navigator_signed_mfa_admin_recovery.psql
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM app_users WHERE id=3 AND tenant_id=1 AND NOT navigator_mfa_required AND navigator_mfa_epoch=2)
+            OR EXISTS (SELECT 1 FROM app_users WHERE id IN (4,5) AND (navigator_mfa_required OR navigator_mfa_epoch<>0))
+            OR (SELECT count(*) FROM navigator_signed_admin_recovery_audit WHERE tenant_id=1 AND app_user_id=3 AND previous_epoch=1 AND new_epoch=2)<>1
+            THEN RAISE EXCEPTION 'Recovery/isolation assertion failed'; END IF;
+          END $$;
+          SQL
