@@ -7,7 +7,7 @@ const DEFAULT_BATCH_SIZE = 50
 
 async function runPass() {
   try {
-    const result = await runCommercialEmailScheduler(DEFAULT_BATCH_SIZE, "g2g-roofing")
+    const result = await runCommercialEmailScheduler(DEFAULT_BATCH_SIZE)
 
     console.log("📬 Commercial scheduler run:", {
       processed: result.processed,
