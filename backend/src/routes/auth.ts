@@ -141,7 +141,8 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       await client.query("begin")
       const { rows: [eligible] } = await client.query(
         `select id, tenant_id, navigator_mfa_epoch from app_users
-         where id=$1 and tenant_id=$2 and is_active and navigator_mfa_required for update`,
+         where id=$1 and tenant_id=$2 and is_active and
+         (navigator_mfa_required or exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory)) for update`,
         [user.id, user.tenant_id])
       if (!eligible) {
         await client.query("rollback")
