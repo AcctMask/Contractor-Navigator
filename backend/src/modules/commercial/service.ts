@@ -121,7 +121,7 @@ function calculatePriority(target: any) {
 
 // -------- IMPORT --------
 
-export async function importCommercialTargets(rows: any[], tenantSlug: string) {
+export async function importCommercialTargets(rows: any[]) {
   let inserted = 0;
   let skipped = 0;
   let queued = 0;
@@ -135,11 +135,11 @@ export async function importCommercialTargets(rows: any[], tenantSlug: string) {
     const existing = await pool.query(
       `
       select id from commercial_targets
-      where tenant_slug=$3 and lower(business_name) = lower($1)
+      where lower(business_name) = lower($1)
         and coalesce(lower(city),'') = coalesce(lower($2),'')
       limit 1
       `,
-      [r.business_name, r.city || "", tenantSlug]
+      [r.business_name, r.city || ""]
     );
 
     if (existing.rowCount) {
@@ -154,9 +154,9 @@ export async function importCommercialTargets(rows: any[], tenantSlug: string) {
       insert into commercial_targets (
         business_name, city, state, email,
         target_type, campaign_priority, fit_score,
-        pipeline_status, priority_level, tenant_slug
+        pipeline_status, priority_level
       )
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       returning *
       `,
       [
@@ -168,7 +168,7 @@ export async function importCommercialTargets(rows: any[], tenantSlug: string) {
         c.priority,
         c.score,
         "working",
-        "low", tenantSlug,
+        "low",
       ]
     );
 
@@ -178,11 +178,11 @@ export async function importCommercialTargets(rows: any[], tenantSlug: string) {
       await pool.query(
         `
         insert into commercial_email_queue (
-          target_id, status, scheduled_at, tenant_slug
+          target_id, status, scheduled_at
         )
-        values ($1,'pending',now(),$2)
+        values ($1,'pending',now())
         `,
-        [result.rows[0].id, tenantSlug]
+        [result.rows[0].id]
       );
       queued++;
     }
@@ -193,18 +193,15 @@ export async function importCommercialTargets(rows: any[], tenantSlug: string) {
 
 // -------- SEND --------
 
-export async function sendQueuedCommercialEmail(queueId: string, tenantSlug: string) {
-  // The legacy sender and templates identify Good2Go. Other tenants use
-  // their existing branded sender in the separate Commercial Engine.
-  if (tenantSlug !== "g2g-roofing") return { ok: false, error: "Legacy sender unavailable for this tenant" };
+export async function sendQueuedCommercialEmail(queueId: string) {
   const result = await pool.query(
     `
     select q.id, t.*
     from commercial_email_queue q
-    join commercial_targets t on t.id = q.target_id and t.tenant_slug=q.tenant_slug
-    where q.id = $1 and q.tenant_slug=$2
+    join commercial_targets t on t.id = q.target_id
+    where q.id = $1
     `,
-    [queueId, tenantSlug]
+    [queueId]
   );
 
   if (!result.rowCount) {
@@ -219,8 +216,8 @@ export async function sendQueuedCommercialEmail(queueId: string, tenantSlug: str
 
   if (target.do_not_contact || target.pipeline_status === "opted_out") {
     await pool.query(
-      `update commercial_email_queue set status='skipped', error=$2 where id=$1 and tenant_slug=$3`,
-      [queueId, "DNC / opted out", tenantSlug]
+      `update commercial_email_queue set status='skipped', error=$2 where id=$1`,
+      [queueId, "DNC / opted out"]
     );
     return { ok: false, skipped: true, error: "DNC / opted out" };
   }
@@ -239,8 +236,8 @@ const sendResult = await sendCommercialEmail(
 
   if (!sendResult.ok) {
     await pool.query(
-      `update commercial_email_queue set status='failed', error=$2 where id=$1 and tenant_slug=$3`,
-      [queueId, sendResult.error, tenantSlug]
+      `update commercial_email_queue set status='failed', error=$2 where id=$1`,
+      [queueId, sendResult.error]
     );
     return sendResult;
   }
@@ -254,14 +251,14 @@ const sendResult = await sendCommercialEmail(
       priority_level = $2,
       last_touch_at = now(),
       updated_at = now()
-    where id = $1 and tenant_slug=$3
+    where id = $1
     `,
-    [target.id, calculatePriority(target), tenantSlug]
+    [target.id, calculatePriority(target)]
   );
 
   await pool.query(
-    `update commercial_email_queue set status='sent', sent_at=now() where id=$1 and tenant_slug=$2`,
-    [queueId, tenantSlug]
+    `update commercial_email_queue set status='sent', sent_at=now() where id=$1`,
+    [queueId]
   );
 
   await logEvent({
@@ -269,7 +266,7 @@ const sendResult = await sendCommercialEmail(
     entity_type: "contractor",
     entity_id: target.id,
     metadata: {
-      queue_id: queueId, tenant_slug: tenantSlug,
+      queue_id: queueId,
       email: target.email,
       business_name: target.business_name,
     },
@@ -281,8 +278,7 @@ const sendResult = await sendCommercialEmail(
 
 // -------- COMMERCIAL EMAIL SCHEDULER --------
 
-export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug: string) {
-  if (tenantSlug !== "g2g-roofing") return { ok: false, error: "Legacy sender unavailable for this tenant" };
+export async function runCommercialEmailScheduler(maxToSend = 10) {
   const safeLimit = Math.max(1, Math.min(Number(maxToSend || 10), 100));
   const cooldownDays = 10;
 
@@ -290,8 +286,8 @@ export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug:
     `
     select q.id
     from commercial_email_queue q
-    join commercial_targets t on t.id = q.target_id and t.tenant_slug=q.tenant_slug
-    where q.status = 'pending' and q.tenant_slug=$3
+    join commercial_targets t on t.id = q.target_id
+    where q.status = 'pending'
       and coalesce(t.do_not_contact,false) = false
       and coalesce(t.pipeline_status,'working') <> 'opted_out'
       and t.email is not null
@@ -311,7 +307,7 @@ export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug:
       q.created_at asc
     limit $1
     `,
-    [safeLimit, cooldownDays, tenantSlug]
+    [safeLimit, cooldownDays]
   );
 
   let sent = 0;
@@ -320,7 +316,7 @@ export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug:
   const results: any[] = [];
 
   for (const row of pending.rows) {
-    const result = await sendQueuedCommercialEmail(row.id, tenantSlug);
+    const result = await sendQueuedCommercialEmail(row.id);
 
     if (result.ok && result.sent) {
       sent++;
@@ -340,7 +336,7 @@ export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug:
     event_type: "scheduler_run",
     entity_type: "system",
     metadata: {
-      requested_limit: safeLimit, tenant_slug: tenantSlug,
+      requested_limit: safeLimit,
       cooldown_days: cooldownDays,
       processed: pending.rowCount,
       sent,
@@ -363,15 +359,14 @@ export async function runCommercialEmailScheduler(maxToSend: number, tenantSlug:
 
 // -------- GROUPED VIEW (for UI) --------
 
-export async function getPipelineView(tenantSlug: string) {
+export async function getPipelineView() {
   const rows = await pool.query(`
     select
       pipeline_status,
       count(*) as count
     from commercial_targets
-    where tenant_slug=$1
     group by pipeline_status
-  `, [tenantSlug]);
+  `);
 
   return rows.rows;
 }
