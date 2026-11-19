@@ -115,6 +115,15 @@ async function requireTenantUserManager(
 }
 
 export async function registerAuthRoutes(app: FastifyInstance) {
+  // Enrollment-only credentials are never operational bearer tokens, including on
+  // legacy read routes that do not otherwise require a session.
+  app.addHook("onRequest", async (request: any, reply) => {
+    const token = getBearerToken(request)
+    if (!token) return
+    const { isRestrictedEnrollmentToken } = await import("../services/authService")
+    if (isRestrictedEnrollmentToken(token))
+      return reply.code(401).send({ ok: false, error: "Operational session required" })
+  })
   registerNavigatorSignedMfa(app)
   // Enrollment-only authorization never passes getCurrentUserFromToken or operational guards.
   app.post("/auth/mfa/signed/restricted-enrollment", async (request: any, reply) => {
