@@ -319,9 +319,10 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         'navigator_health_failure',
         'navigator_health_recovered'
       )
+      ${tenant ? "and metadata->>'tenant_id'=$1::bigint::text" : "and false"}
     order by created_at desc, id desc
     limit 100
-    `
+    `, params
   )
 
   const navigatorHealthEvents = navigatorHealthResult.rows

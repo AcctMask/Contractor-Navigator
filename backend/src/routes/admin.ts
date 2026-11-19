@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { pool } from "../db/db";
 import { schedulerTick } from "../services/scheduler";
+import { requireNavigatorOffice } from "../services/navigatorOperationalAccess";
 import { listJobAssetsByTenantSlug } from "../services/jobAssetsService";
 import { getCurrentUserFromToken } from "../services/authService";
 import { sendSMS } from "../services/twilioService";
@@ -338,6 +339,7 @@ export async function registerAdminRoutes(app: FastifyInstance) {
   });
 
   app.post("/admin/scheduler/tick", async (req, reply) => {
+    if (!await requireNavigatorOffice(req, reply, true)) return;
     const body: any = (req as any).body || {};
     const limit = Number(body.limit || 25);
 

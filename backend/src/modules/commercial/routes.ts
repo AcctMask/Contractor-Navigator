@@ -7,23 +7,73 @@ import {
   getPipelineView,
 } from "./service";
 import { commercialPool as pool } from "./db";
+import { pool as navigatorPool } from "../../db/db";
+import type { FastifyRequest } from "fastify";
+import { requireNavigatorOffice } from "../../services/navigatorOperationalAccess";
 import { calculateCommercialPriority } from "./priorityEngine";
 
 export async function commercialRoutes(app: FastifyInstance) {
-  // SYSTEM EVENTS - RECENT ACTIVITY
-  app.get("/events", async (_req, reply) => {
-    const result = await pool.query(`
-      select *
-      from system_events
-      order by created_at desc
-      limit 100
-    `);
+  const scopes = new WeakMap<FastifyRequest, string>();
+  const tenantOf = (request: FastifyRequest) => {
+    const slug = scopes.get(request);
+    if (!slug) throw new Error("Missing Commercial tenant authorization");
+    return slug;
+  };
+  app.addHook("preHandler", async (request, reply) => {
+    const route = request.routeOptions.url ?? "";
+    if (!route.startsWith("/commercial/")) return;
+    if (route === "/commercial/health" || route === "/commercial/unsubscribe/:id") return;
 
-    return reply.send({
-      ok: true,
-      count: result.rowCount,
-      rows: result.rows,
-    });
+    const actor = await requireNavigatorOffice(request, reply);
+    if (!actor) return;
+    const { rows: [tenant] } = await navigatorPool.query("select slug from tenants where id=$1", [actor.tenant_id]);
+    if (!tenant) return reply.code(403).send({ ok: false, error: "Commercial tenant unavailable" });
+    scopes.set(request, tenant.slug);
+  });
+
+  // The former global dump mixed tenant data with platform diagnostics.
+  app.get("/events", async (request, reply) => {
+    const { scope } = (request.query ?? {}) as { scope?: string };
+    if (scope !== undefined && scope !== "tenant" && scope !== "platform")
+      return reply.code(400).send({ ok: false, error: "Invalid event scope" });
+    const actor = await requireNavigatorOffice(request, reply, scope === "platform");
+    if (!actor) return;
+
+    const result = scope === "platform"
+      ? await navigatorPool.query(`
+        select id,event_type,entity_type,entity_id,metadata,created_at
+        from system_events
+        where entity_type='navigator_health'
+          and event_type in ('navigator_health_failure','navigator_health_recovered')
+          and metadata->>'tenant_id' is null
+          and metadata->>'tenant_slug' is null
+          and metadata->>'job_id' is null and metadata->>'action_id' is null
+          and entity_id is null
+        order by created_at desc, id desc limit 100`)
+      : await navigatorPool.query(`
+        select e.id,e.event_type,e.entity_type,e.entity_id,e.metadata,e.created_at
+        from system_events e
+        where (e.entity_type='job' and exists (
+          select 1 from jobs j join tenants t on t.id=j.tenant_id
+          where j.id::text=e.entity_id::text and j.tenant_id=$1
+            and e.metadata->>'tenant_slug'=t.slug
+        )) or (e.entity_type='navigator_health'
+          and e.event_type in ('navigator_health_failure','navigator_health_recovered')
+          and e.metadata->>'tenant_id'=$1::bigint::text)
+        order by e.created_at desc, e.id desc limit 100`, [actor.tenant_id]);
+    return { ok: true, count: result.rowCount, rows: result.rows };
+  });
+
+  app.get("/commercial/events", async (req) => {
+    const result = await pool.query(`
+      select id,event_type,entity_type,entity_id,metadata,created_at from system_events e
+      where (entity_type='contractor' and event_type='email_sent' and exists (
+        select 1 from commercial_targets t where t.id::text=e.entity_id::text and t.tenant_slug=$1
+      ) and (e.metadata->>'tenant_slug' is null or e.metadata->>'tenant_slug'=$1))
+      or (entity_type='system' and event_type in ('scheduler_run','rotation_queue_built')
+        and e.metadata->>'tenant_slug'=$1)
+      order by created_at desc, id desc limit 100`, [tenantOf(req)]);
+    return { ok: true, count: result.rowCount, rows: result.rows };
   });
 
   // HEALTH
@@ -55,11 +105,11 @@ export async function commercialRoutes(app: FastifyInstance) {
         `
         select id
         from commercial_targets
-        where lower(business_name) = lower($1)
+        where tenant_slug=$3 and lower(business_name) = lower($1)
           and coalesce(lower(city),'') = coalesce(lower($2),'')
         limit 1
         `,
-        [business_name, city]
+        [business_name, city, tenantOf(req)]
       );
 
       if (existing.rowCount) {
@@ -76,9 +126,9 @@ export async function commercialRoutes(app: FastifyInstance) {
           business_name, city, state, email,
           target_type, contractor_category, campaign_priority, fit_score,
           pipeline_status, priority_level,
-          telephone, website, source, notes, zip, license_number
+          telephone, website, source, notes, zip, license_number, tenant_slug
         )
-        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
         returning *
         `,
         [
@@ -97,7 +147,7 @@ export async function commercialRoutes(app: FastifyInstance) {
           body.source || campaign_priority,
           body.notes || null,
           body.zip || null,
-          body.license_number || null,
+          body.license_number || null, tenantOf(req),
         ]
       );
 
@@ -127,7 +177,7 @@ export async function commercialRoutes(app: FastifyInstance) {
         return reply.code(400).send({ ok: false, error: "rows required" });
       }
 
-      const result = await importCommercialTargets(rows);
+      const result = await importCommercialTargets(rows, tenantOf(req));
       return reply.send({ ok: true, ...result });
     } catch (err: any) {
       return reply.code(500).send({ ok: false, error: err.message });
@@ -145,7 +195,7 @@ export async function commercialRoutes(app: FastifyInstance) {
       `
       select *
       from commercial_targets
-      where coalesce(do_not_contact,false) = false
+      where tenant_slug=$3 and coalesce(do_not_contact,false) = false
       order by 
         case priority_level
           when 'high' then 1
@@ -156,15 +206,15 @@ export async function commercialRoutes(app: FastifyInstance) {
         created_at desc
       limit $1 offset $2
       `,
-      [limit, offset]
+      [limit, offset, tenantOf(req)]
     );
 
     const total = await pool.query(
       `
       select count(*)::int as total
       from commercial_targets
-      where coalesce(do_not_contact,false) = false
-      `
+      where tenant_slug=$1 and coalesce(do_not_contact,false) = false
+      `, [tenantOf(req)]
     );
 
     return reply.send({
@@ -180,8 +230,8 @@ export async function commercialRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
 
     const target = await pool.query(
-      `select * from commercial_targets where id = $1`,
-      [id]
+      `select * from commercial_targets where id = $1 and tenant_slug=$2`,
+      [id, tenantOf(req)]
     );
 
     if (!target.rowCount) {
@@ -192,10 +242,10 @@ export async function commercialRoutes(app: FastifyInstance) {
       `
       select *
       from commercial_email_queue
-      where target_id = $1
+      where target_id = $1 and tenant_slug=$2
       order by created_at desc
       `,
-      [id]
+      [id, tenantOf(req)]
     );
 
     return reply.send({
@@ -223,7 +273,7 @@ export async function commercialRoutes(app: FastifyInstance) {
           else opted_out_at
         end,
         updated_at = now()
-      where id = $1
+      where id = $1 and tenant_slug=$6
       returning *
       `,
       [
@@ -231,7 +281,7 @@ export async function commercialRoutes(app: FastifyInstance) {
         body.pipeline_status || null,
         body.priority_level || null,
         typeof body.do_not_contact === "boolean" ? body.do_not_contact : null,
-        body.opt_out_reason || null,
+        body.opt_out_reason || null, tenantOf(req),
       ]
     );
 
@@ -257,10 +307,10 @@ export async function commercialRoutes(app: FastifyInstance) {
         opt_out_reason = coalesce($2, 'manual_do_not_contact'),
         opted_out_at = now(),
         updated_at = now()
-      where id = $1
+      where id = $1 and tenant_slug=$3
       returning *
       `,
-      [id, body?.reason || null]
+      [id, body?.reason || null, tenantOf(req)]
     );
 
     if (!result.rowCount) {
@@ -275,8 +325,8 @@ export async function commercialRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
 
     const current = await pool.query(
-      `select do_not_contact from commercial_targets where id = $1`,
-      [id]
+      `select do_not_contact from commercial_targets where id = $1 and tenant_slug=$2`,
+      [id, tenantOf(req)]
     );
 
     if (!current.rowCount) {
@@ -295,10 +345,10 @@ export async function commercialRoutes(app: FastifyInstance) {
         opt_out_reason = case when $2 then 'manual_dnc_toggle' else opt_out_reason end,
         opted_out_at = case when $2 then now() else opted_out_at end,
         updated_at = now()
-      where id = $1
+      where id = $1 and tenant_slug=$3
       returning *
       `,
-      [id, next]
+      [id, next, tenantOf(req)]
     );
 
     return reply.send({ ok: true, dnc: next, target: result.rows[0] });
@@ -342,9 +392,9 @@ export async function commercialRoutes(app: FastifyInstance) {
       `
       select id, email, do_not_contact
       from commercial_targets
-      where id = $1
+      where id = $1 and tenant_slug=$2
       `,
-      [id]
+      [id, tenantOf(req)]
     );
 
     if (!target.rowCount) {
@@ -361,12 +411,13 @@ export async function commercialRoutes(app: FastifyInstance) {
 
     const result = await pool.query(
       `
-      insert into commercial_email_queue (target_id, status)
-      values ($1, 'pending')
+      insert into commercial_email_queue (target_id, status, tenant_slug)
+      select id, 'pending', tenant_slug from commercial_targets where id=$1 and tenant_slug=$2
       returning id
       `,
-      [id]
+      [id, tenantOf(req)]
     );
+    if (!result.rowCount) return reply.code(404).send({ ok: false, error: "Contractor not found" });
 
     return reply.send({
       ok: true,
@@ -380,7 +431,7 @@ export async function commercialRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
 
     try {
-      const result = await sendQueuedCommercialEmail(id);
+      const result = await sendQueuedCommercialEmail(id, tenantOf(req));
       return reply.send(result);
     } catch (err: any) {
       return reply.send({ ok: false, error: err.message });
@@ -388,17 +439,17 @@ export async function commercialRoutes(app: FastifyInstance) {
   });
 
   // EMAIL QUEUE VIEW - PENDING
-  app.get("/commercial/email-queue/pending", async (_req, reply) => {
+  app.get("/commercial/email-queue/pending", async (req, reply) => {
     const result = await pool.query(`
       select q.id as queue_id, q.status, q.scheduled_at, q.created_at,
              t.id as target_id, t.business_name, t.city, t.state, t.email,
              t.pipeline_status, t.priority_level
       from commercial_email_queue q
-      join commercial_targets t on t.id = q.target_id
-      where q.status = 'pending'
+      join commercial_targets t on t.id = q.target_id and t.tenant_slug=q.tenant_slug
+      where q.status = 'pending' and q.tenant_slug=$1
       order by q.created_at desc
       limit 100
-    `);
+    `, [tenantOf(req)]);
 
     return reply.send({
       ok: true,
@@ -408,17 +459,17 @@ export async function commercialRoutes(app: FastifyInstance) {
   });
 
   // EMAIL QUEUE VIEW - SENT
-  app.get("/commercial/email-queue/sent", async (_req, reply) => {
+  app.get("/commercial/email-queue/sent", async (req, reply) => {
     const result = await pool.query(`
       select q.id as queue_id, q.status, q.scheduled_at, q.created_at, q.sent_at,
              t.id as target_id, t.business_name, t.city, t.state, t.email,
              t.pipeline_status, t.priority_level
       from commercial_email_queue q
-      join commercial_targets t on t.id = q.target_id
-      where q.status = 'sent'
+      join commercial_targets t on t.id = q.target_id and t.tenant_slug=q.tenant_slug
+      where q.status = 'sent' and q.tenant_slug=$1
       order by q.sent_at desc nulls last, q.created_at desc
       limit 100
-    `);
+    `, [tenantOf(req)]);
 
     return reply.send({
       ok: true,
@@ -428,7 +479,7 @@ export async function commercialRoutes(app: FastifyInstance) {
   });
 
   // CAMPAIGN / EMAIL HISTORY SUMMARY
-  app.get("/commercial/campaigns/batches", async (_req, reply) => {
+  app.get("/commercial/campaigns/batches", async (req, reply) => {
     const result = await pool.query(`
       select
         batch_id as id,
@@ -444,16 +495,17 @@ export async function commercialRoutes(app: FastifyInstance) {
         max(sent_at) as last_sent_at
       from (
         select
-          coalesce(campaign_id::text, 'manual-email-queue') as batch_id,
-          status,
-          created_at,
-          sent_at
-        from commercial_email_queue
+          coalesce(q.campaign_id::text, 'manual-email-queue') as batch_id,
+          q.status,
+          q.created_at,
+          q.sent_at
+        from commercial_email_queue q join commercial_targets t on t.id=q.target_id and t.tenant_slug=q.tenant_slug
+        where q.tenant_slug=$1
       ) q
       group by batch_id
       order by coalesce(max(sent_at), max(created_at)) desc
       limit 50
-    `)
+    `, [tenantOf(req)])
 
     return reply.send({
       ok: true,
@@ -485,14 +537,14 @@ export async function commercialRoutes(app: FastifyInstance) {
         t.priority_level,
         t.do_not_contact
       from commercial_email_queue q
-      join commercial_targets t on t.id = q.target_id
-      where
-        ($1 = 'manual-email-queue' and q.campaign_id is null)
-        or q.campaign_id::text = $1
+      join commercial_targets t on t.id = q.target_id and t.tenant_slug=q.tenant_slug
+      where q.tenant_slug=$2 and (
+        ($1 = 'manual-email-queue' and q.campaign_id is null) or q.campaign_id::text = $1
+      )
       order by q.created_at desc
       limit 1000
       `,
-      [id]
+      [id, tenantOf(req)]
     )
 
     return reply.send({
@@ -520,7 +572,7 @@ export async function commercialRoutes(app: FastifyInstance) {
         with eligible as (
           select t.id
           from commercial_targets t
-          where coalesce(t.do_not_contact,false) = false
+          where t.tenant_slug=$7 and coalesce(t.do_not_contact,false) = false
             and coalesce(t.pipeline_status,'working') <> 'opted_out'
             and t.email is not null
             and t.email <> ''
@@ -534,7 +586,7 @@ export async function commercialRoutes(app: FastifyInstance) {
             and not exists (
               select 1
               from commercial_email_queue q
-              where q.target_id = t.id
+              where q.target_id = t.id and q.tenant_slug=t.tenant_slug
                 and q.status = 'pending'
             )
           order by
@@ -552,24 +604,24 @@ export async function commercialRoutes(app: FastifyInstance) {
           target_id,
           status,
           scheduled_at,
-          campaign_id
+          campaign_id, tenant_slug
         )
         select
           id,
           'pending',
           now(),
-          $6::uuid
+          $6::uuid, $7
         from eligible
         returning id, target_id
         `,
-        [limit, city, contractorCategory, priorityLevel, cooldownDays, campaignId]
+        [limit, city, contractorCategory, priorityLevel, cooldownDays, campaignId, tenantOf(req)]
       );
 
       await logEvent({
         event_type: "rotation_queue_built",
         entity_type: "system",
         metadata: {
-          campaign_id: campaignId,
+          campaign_id: campaignId, tenant_slug: tenantOf(req),
           queued: result.rowCount,
           limit,
           cooldown_days: cooldownDays,
@@ -606,7 +658,7 @@ export async function commercialRoutes(app: FastifyInstance) {
       const body = req.body as any;
       const max = Number(body?.max || body?.limit || 10);
 
-      const result = await runCommercialEmailScheduler(max);
+      const result = await runCommercialEmailScheduler(max, tenantOf(req));
       return reply.send(result);
     } catch (err: any) {
       return reply.code(500).send({
@@ -617,8 +669,8 @@ export async function commercialRoutes(app: FastifyInstance) {
   });
 
   // PRIORITY ENGINE
-  app.post("/commercial/prioritize", async (_req, reply) => {
-    const result = await pool.query(`select * from commercial_targets`);
+  app.post("/commercial/prioritize", async (req, reply) => {
+    const result = await pool.query(`select * from commercial_targets where tenant_slug=$1`, [tenantOf(req)]);
 
     let updated = 0;
 
@@ -632,9 +684,9 @@ export async function commercialRoutes(app: FastifyInstance) {
           engagement_score = $2,
           priority_level = $3,
           updated_at = now()
-        where id = $1
+        where id = $1 and tenant_slug=$4
         `,
-        [target.id, p.score, p.priority]
+        [target.id, p.score, p.priority, tenantOf(req)]
       );
 
       updated++;
@@ -644,8 +696,8 @@ export async function commercialRoutes(app: FastifyInstance) {
   });
 
   // PIPELINE VIEW
-  app.get("/commercial/pipeline", async (_req, reply) => {
-    const result = await getPipelineView();
+  app.get("/commercial/pipeline", async (req, reply) => {
+    const result = await getPipelineView(tenantOf(req));
     return reply.send({ ok: true, rows: result });
   });
 }
