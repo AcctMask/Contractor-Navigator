@@ -187,9 +187,9 @@ test("approved device binding, signed approval and one-time Navigator session", 
   assert.equal(typeof firstLogin.enrollmentToken, "string")
   assert.equal((await get("/auth/me", firstLogin.enrollmentToken)).statusCode, 401)
   assert.equal((await get("/admin/jobs/" + slug, firstLogin.enrollmentToken)).statusCode, 401)
-  assert.equal((await post("/auth/mfa/signed/restricted-enrollment",
+  assert.equal((await post("/auth/restricted-enrollment/signed",
     { enrollmentToken: firstLogin.enrollmentToken }, phone)).statusCode, 403)
-  const restricted = await post("/auth/mfa/signed/restricted-enrollment",
+  const restricted = await post("/auth/restricted-enrollment/signed",
     { enrollmentToken: firstLogin.enrollmentToken })
   assert.equal(restricted.statusCode, 200)
   assert.equal(typeof restricted.json().oneTimeGrant, "string")
