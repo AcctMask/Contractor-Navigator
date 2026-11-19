@@ -29,7 +29,7 @@ const { chromium } = require("playwright")
           return send({ok:true,state:spanish ? "denied" : mode})
         }
         const authorized = req.headers().authorization === "Bearer synthetic-navigator-browser-token"
-        if (url.pathname === "/admin/jobs/qa-alpha" && authorized) observedSession = true
+        if (url.pathname === "/auth/me" && authorized) observedSession = true
         if (url.pathname === "/auth/me") return send({ok:true,user:{id:1,tenant_id:1,role:"staff",is_active:true}},authorized ? 200 : 401)
         return send({ok:true,jobs:[],events:[],rows:[],tenants:[]})
       })
