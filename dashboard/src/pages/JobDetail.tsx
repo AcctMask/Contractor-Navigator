@@ -1092,7 +1092,7 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/admin/job/${getTenantSlug()}/${id}/archive`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reason: "Archived from Job Detail screen" }),
     })
 
@@ -1665,7 +1665,6 @@ export default function JobDetail() {
 
     const res = await fetch(`${API_BASE}/assets/${getTenantSlug()}/job/${id}/notes/${noteId}`, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${getToken()}` },
     })
 
     const data = await res.json()
