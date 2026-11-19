@@ -1,0 +1,61 @@
+name: PashLoc V1 isolated synthetic verification
+on:
+  pull_request:
+    paths:
+      - "backend/src/services/pashlocEnrollV1Crypto.ts"
+      - "backend/src/pashlocIsolatedServer.ts"
+      - "backend/src/routes/pashlocIsolated*.ts"
+      - "backend/src/services/pashloc*.ts"
+      - "backend/tsconfig.pashloc-isolated.json"
+      - "backend/scripts/verifyPashlocIsolatedRouting.ts"
+      - "backend/scripts/verifyPashlocPostgresIntegration.ts"
+      - "backend/sql/pashloc_iv_mfa_*.sql"
+      - "backend/src/services/pashlocDeviceClaimV2.ts"
+      - "backend/scripts/verifyPashlocEnrollV1Synthetic.ts"
+      - "backend/src/services/pashlocRestrictedBrowserV1.ts"
+      - "backend/scripts/verifyPashlocRestrictedBrowserV1.ts"
+      - ".github/workflows/pashloc-v1-synthetic.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  synthetic-crypto:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: isolated_test
+          POSTGRES_PASSWORD: isolated_test
+          POSTGRES_DB: isolated_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U isolated_test -d isolated_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://isolated_test:isolated_test@127.0.0.1:5432/isolated_test
+      NODE_ENV: test
+      PASHLOC_ISOLATED_PG_NO_SSL: "yes"
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck Navigator backend
+        run: npx tsc -p tsconfig.pashloc-isolated.json
+      - name: Run isolated HTTP boundary smoke tests
+        run: npx tsx scripts/verifyPashlocIsolatedRouting.ts
+      - name: Run disposable PostgreSQL MFA integration acceptance
+        run: npx tsx scripts/verifyPashlocPostgresIntegration.ts
+      - name: Run V1 synthetic cryptographic acceptance
+        run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts
+      - name: Run restricted browser boundary acceptance
+        run: npx tsx scripts/verifyPashlocRestrictedBrowserV1.ts

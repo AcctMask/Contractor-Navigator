@@ -1,0 +1,51 @@
+/** Synthetic only. Run: npx tsx scripts/verifyPashlocEnrollV1Synthetic.ts */
+import assert from "node:assert/strict"
+import { createECDH, createHash, createPublicKey, generateKeyPairSync, sign, webcrypto } from "node:crypto"
+import {claimTranscript, redeemTranscript, normalizedP256PublicKey, publicKeyFingerprint, verifyP1363Proof, encodeCanonicalContext, encryptSyntheticEnrollmentV1} from "../src/services/pashlocEnrollV1Crypto"
+
+const b64=(v:Buffer)=>v.toString("base64url")
+const sig=generateKeyPairSync("ec",{namedCurve:"prime256v1"})
+const signing=normalizedP256PublicKey(sig.publicKey.export({format:"jwk"}))
+const agreement=createECDH("prime256v1");agreement.generateKeys()
+const ecdhKey=agreement.getPublicKey()
+const agreementJwk=normalizedP256PublicKey({kty:"EC",crv:"P-256",x:b64(ecdhKey.subarray(1,33)),y:b64(ecdhKey.subarray(33,65))})
+const pair=b64(Buffer.alloc(32,1)),nonce=b64(Buffer.alloc(32,2)),claim=b64(Buffer.alloc(32,3))
+const transcript=claimTranscript({pairingRef:pair,nonce,signingKey:signing,agreementKey:agreementJwk})
+const signature=b64(sign("sha256",transcript,{key:sig.privateKey,dsaEncoding:"ieee-p1363"}))
+assert.equal(verifyP1363Proof(signing,transcript,signature),true)
+assert.equal(verifyP1363Proof(signing,claimTranscript({pairingRef:pair,nonce:b64(Buffer.alloc(32,5)),signingKey:signing,agreementKey:agreementJwk}),signature),false)
+const swapped=createECDH("prime256v1");swapped.generateKeys()
+const swapPub=swapped.getPublicKey()
+const swapKey={kty:"EC",crv:"P-256",x:b64(swapPub.subarray(1,33)),y:b64(swapPub.subarray(33,65))}
+assert.equal(verifyP1363Proof(signing,claimTranscript({pairingRef:pair,nonce,signingKey:signing,agreementKey:swapKey}),signature),false)
+assert.throws(()=>claimTranscript({pairingRef:pair+"\n",nonce,signingKey:signing,agreementKey:agreementJwk}))
+assert.throws(()=>normalizedP256PublicKey({...signing,x:"invalid"}))
+assert.throws(()=>normalizedP256PublicKey({...signing,unknown:"value"}))
+assert.throws(()=>normalizedP256PublicKey({...signing,key_ops:["sign"]}))
+const redeem=redeemTranscript({claimId:claim,pairingRef:pair,nonce,signingKey:signing,agreementKey:agreementJwk})
+const redeemSig=b64(sign("sha256",redeem,{key:sig.privateKey,dsaEncoding:"ieee-p1363"}))
+assert.equal(verifyP1363Proof(signing,redeem,redeemSig),true)
+const ctx={version:"AA-PASHLOC-ENROLL-V1",environment:"isolated",application:"Navigator",tenantId:"12",userId:"34",accountId:"account_123",pairingRef:pair,claimId:claim,signingFingerprint:publicKeyFingerprint(signing),agreementFingerprint:publicKeyFingerprint(agreementJwk),redeemNonce:nonce,approvalId:"approval_789"} as const
+const encoded=encodeCanonicalContext(ctx)
+const domain=Buffer.from("AA-PASHLOC-ENROLL-V1/CONTEXT")
+assert.deepEqual(encoded.subarray(0,domain.length),domain)
+assert.equal(encoded.readUInt32BE(domain.length),ctx.version.length)
+assert.throws(()=>encodeCanonicalContext({...ctx,tenantId:"bad\nvalue"}))
+assert.throws(()=>encodeCanonicalContext({...ctx,unexpected:"extra"} as any))
+const env=encryptSyntheticEnrollmentV1({syntheticSecret:"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",deviceEcdhPublicJwk:agreementJwk,context:ctx})
+assert.equal(env.version,"AA-PASHLOC-ENROLL-V1")
+assert.deepEqual(Buffer.from(env.context,"base64url"),encoded)
+const remote=env.ephemeral_public_key_jwk
+const point=Buffer.concat([Buffer.from([4]),Buffer.from(remote.x,"base64url"),Buffer.from(remote.y,"base64url")])
+const shared=agreement.computeSecret(point)
+const hkdfInfo=Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/HKDF-AES256GCM\0"),encoded])
+const aesBits=await webcrypto.subtle.deriveBits({name:"HKDF",hash:"SHA-256",salt:Buffer.from(env.salt,"base64url"),info:hkdfInfo},await webcrypto.subtle.importKey("raw",shared,"HKDF",false,["deriveBits"]),256)
+const aesKey=await webcrypto.subtle.importKey("raw",aesBits,{name:"AES-GCM",length:256},false,["decrypt"])
+const aad=Buffer.concat([Buffer.from("AA-PASHLOC-ENROLL-V1/AES-GCM\0"),encoded,Buffer.from(publicKeyFingerprint(remote),"hex")])
+const combined=Buffer.concat([Buffer.from(env.ciphertext,"base64url"),Buffer.from(env.tag,"base64url")])
+const plain=Buffer.from(await webcrypto.subtle.decrypt({name:"AES-GCM",iv:Buffer.from(env.nonce,"base64url"),additionalData:aad,tagLength:128},aesKey,combined)).toString()
+assert.equal(plain,"GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+await assert.rejects(webcrypto.subtle.decrypt({name:"AES-GCM",iv:Buffer.from(env.nonce,"base64url"),additionalData:Buffer.concat([aad,Buffer.from("altered")]),tagLength:128},aesKey,combined))
+const tampered=Buffer.from(combined);tampered[tampered.length-1]^=1
+await assert.rejects(webcrypto.subtle.decrypt({name:"AES-GCM",iv:Buffer.from(env.nonce,"base64url"),additionalData:aad,tagLength:128},aesKey,tampered))
+console.log("PASS: dual key signed claim/redeem, swapping and replay-negative, canonical context validation, Node HKDF/AES-GCM to WebCrypto positive/negative synthetic decryption")

@@ -1,0 +1,36 @@
+name: PashLoc IV MFA isolated verification
+
+on:
+  push:
+    branches:
+      - engineering/pashloc-iv3-isolated-mfa-v2-20261112
+    paths:
+      - 'backend/src/services/pashlocTotp.ts'
+      - 'backend/src/services/pashlocSecretCrypto.ts'
+      - 'backend/src/services/pashlocVerifyLogin.ts'
+      - 'backend/src/services/pashlocChallenge.ts'
+      - 'backend/scripts/testPashlocTotp.ts'
+      - '.github/workflows/pashloc-iv-mfa-isolated.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  totp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated backend dependencies
+        run: npm install --no-audit --no-fund --ignore-scripts
+      - name: Run RFC 6238 and replay checks
+        run: npx tsx --test scripts/testPashlocTotp.ts
+      - name: Typecheck backend
+        run: npx tsc --noEmit
