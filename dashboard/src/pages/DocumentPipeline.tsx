@@ -271,7 +271,7 @@ export default function DocumentPipelinePage() {
     setStatus("Loading pipeline...")
 
     try {
-      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}`)
+      const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}`, { headers: { Authorization: `Bearer ${getToken()}` } })
       const json = await res.json()
 
       if (!res.ok) {
@@ -375,6 +375,7 @@ export default function DocumentPipelinePage() {
       const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/estimate-details`, {
         method: "POST",
         headers: {
+          Authorization: `Bearer ${getToken()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(cleanEstimatePayload(form)),
@@ -756,6 +757,7 @@ export default function DocumentPipelinePage() {
           {
             method: "POST",
             headers: {
+              Authorization: `Bearer ${getToken()}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify(cleanEstimatePayload(form)),
@@ -776,6 +778,7 @@ export default function DocumentPipelinePage() {
       const res = await fetch(`${API_BASE}/pipeline/${getTenantSlug()}/job/${jobId}/create-package`, {
         method: "POST",
         headers: {
+          Authorization: `Bearer ${getToken()}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

@@ -887,6 +887,10 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           })
         }
 
+        const { rows: [tenantPolicy] } = await client.query(
+          "select slug,navigator_mfa_mandatory from tenants where id=$1 for share", [member.tenant_id])
+        if (!tenantPolicy) throw new Error("Tenant unavailable")
+        const tenantMandatory = tenantPolicy.navigator_mfa_mandatory === true
         await client.query("COMMIT")
 
         const crewUser = crewAppUserId === null ? null : {
@@ -905,7 +909,9 @@ export async function registerWorkforceCrewRoutes(app: FastifyInstance) {
           accepted: true,
           account_activated: crewUser !== null,
           crew_member: member,
-          token: crewUser ? signToken(crewUser) : null,
+          ...(tenantMandatory && crewUser
+            ? { mfa_required: true, tenant_slug: tenantPolicy.slug, login_email: crewUser.email }
+            : { token: crewUser ? signToken(crewUser) : null }),
         }
       } catch (error) {
         await client.query("ROLLBACK")

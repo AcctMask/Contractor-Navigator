@@ -29,7 +29,7 @@ export async function startSignedMfa(client: Db, account: SignedAccount, origin:
   if (!config || origin !== config.browser) return { mfa_required: true as const, unavailable: true as const }
   const { rows: [device] } = await client.query(
     `select device_id from navigator_signed_devices
-       where tenant_id=$1 and app_user_id=$2 and revoked_at is null`,
+       where tenant_id=$1 and app_user_id=$2 and revoked_at is null and proof_verified_at is not null`,
     [account.tenant_id, account.id],
   )
   if (!device) return { mfa_required: true as const, enrollment_required: true as const }
@@ -61,8 +61,9 @@ const currentChallenge = `select c.*, d.public_jwk, u.email, u.full_name, u.mobi
   from navigator_signed_challenges c
   join app_users u on u.id=c.app_user_id and u.tenant_id=c.tenant_id
   join navigator_signed_devices d on d.device_id=c.device_id and d.tenant_id=c.tenant_id and d.app_user_id=c.app_user_id
-  where c.reference=$1 and u.is_active and u.navigator_mfa_required and c.policy_epoch=u.navigator_mfa_epoch
-    and d.revoked_at is null`
+  join tenants t on t.id=u.tenant_id
+  where c.reference=$1 and u.is_active and (u.navigator_mfa_required or t.navigator_mfa_mandatory)
+    and c.policy_epoch=u.navigator_mfa_epoch and d.revoked_at is null and d.proof_verified_at is not null`
 
 type Challenge = {
   reference: string; device_id: string; tenant_id: string; app_user_id: string; browser_hash: string;

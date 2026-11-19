@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { setToken } from "../lib/auth"
+import { clearToken, setToken } from "../lib/auth"
+import { setTenantSlug } from "../lib/tenant"
 
 const API_BASE =
   import.meta.env.VITE_API_BASE ||
@@ -49,6 +50,13 @@ export default function WorkforceAcceptInvite() {
 
       if (!response.ok || !result.ok) {
         throw new Error("Invitation could not be accepted")
+      }
+
+      if (result.account_activated && result.mfa_required === true) {
+        clearToken()
+        setTenantSlug(result.tenant_slug)
+        navigate("/login", { replace: true, state: { enrollmentEmail: result.login_email } })
+        return
       }
 
       if (!result.account_activated || !result.token) {

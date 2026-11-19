@@ -43,6 +43,31 @@ export type SignedLogin = {
   expiresAt: string
   tenant: string
 }
+export type RestrictedEnrollment = {
+  mfa_required: true
+  enrollment_required: true
+  enrollmentToken: string
+}
+export type EnrollmentGrant = { enrollmentLink: string; oneTimeGrant: string; expiresAt: string }
+
+export async function requestEnrollment(enrollmentToken: string, signal: AbortSignal): Promise<EnrollmentGrant> {
+  const response = await fetch(`${API_BASE}/auth/restricted-enrollment/signed`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enrollmentToken }), credentials: "omit", cache: "no-store",
+    referrerPolicy: "no-referrer", signal,
+  })
+  const result = await response.json()
+  if (!response.ok || result?.ok !== true || !opaque(result.oneTimeGrant) ||
+      typeof result.enrollmentLink !== "string" || typeof result.expiresAt !== "string" ||
+      !Number.isFinite(Date.parse(result.expiresAt))) throw new PashLocLoginError("enrollment")
+  const link = new URL(result.enrollmentLink)
+  if (!/^#navigator-register=[A-Za-z0-9_-]{43}$/.test(link.hash) ||
+      link.protocol !== "https:" || link.origin !== import.meta.env.VITE_NAVIGATOR_MFA_PHONE_ORIGIN ||
+      link.username || link.password || link.pathname !== "/" || link.search)
+    throw new PashLocLoginError("enrollment")
+  return { enrollmentLink: link.href, oneTimeGrant: result.oneTimeGrant, expiresAt: result.expiresAt }
+}
+
 export class PashLocLoginError extends Error {
   readonly reason: "enrollment" | "unavailable"
   constructor(reason: "enrollment" | "unavailable") { super(reason); this.reason = reason }
@@ -57,7 +82,7 @@ function validPhoneUrl(value: unknown, reference: string) {
   } catch { return false }
 }
 
-export async function login(email: string, password: string) {
+export async function login(email: string, password: string): Promise<SignedLogin | RestrictedEnrollment | { mfa_required: false }> {
   const tenant = getTenantSlug()
   const res = await fetch(`${API_BASE}${tenantLoginPath(tenant)}`, {
     method: "POST",
@@ -79,7 +104,11 @@ export async function login(email: string, password: string) {
   if (json?.mfa_required === true) {
     // Never retain a previous session while an MFA challenge is pending.
     clearToken()
-    if (json.enrollment_required === true) throw new PashLocLoginError("enrollment")
+    if (json.enrollment_required === true) {
+      if (json.token || typeof json.enrollmentToken !== "string" || !json.enrollmentToken)
+        throw new PashLocLoginError("enrollment")
+      return { mfa_required: true, enrollment_required: true, enrollmentToken: json.enrollmentToken }
+    }
     if (json.token || json.method !== "pashloc_signed" || !opaque(json.reference) || !opaque(json.browserProof) ||
         !validPhoneUrl(json.phoneUrl, json.reference) || !Number.isFinite(Date.parse(json.expiresAt))) {
       throw new PashLocLoginError("unavailable")
@@ -95,7 +124,7 @@ export async function login(email: string, password: string) {
 
   setTenantSlug(tenant)
   setToken(json.token)
-  return json
+  return { mfa_required: false }
 }
 
 export async function pollSignedLogin(request: SignedLogin, signal: AbortSignal): Promise<
@@ -131,11 +160,12 @@ export async function acceptInvite(inviteToken: string, password: string) {
 
   const json = await res.json()
 
-  if (!res.ok || !json?.token) {
+  if (!res.ok || json?.ok !== true || (!json.token && json?.mfa_required !== true)) {
     throw new Error(json?.error || "Accept invitation failed")
   }
 
-  setToken(json.token)
+  if (json.mfa_required === true) clearToken()
+  else setToken(json.token)
   return json
 }
 

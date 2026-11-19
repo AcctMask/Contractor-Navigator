@@ -1,3 +1,4 @@
+import { getToken } from "../lib/auth"
 import { useEffect, useMemo, useState } from "react";
 import { getTenantSlug } from "../lib/tenant";
 
@@ -508,7 +509,7 @@ export default function BusinessPerformanceV2() {
         const params = new URLSearchParams({ tenant, range });
 
         const response = await fetch(
-          `${API_BASE}/reporting/business-performance-v2.json?${params}`
+          `${API_BASE}/reporting/business-performance-v2.json?${params}`, { headers: { Authorization: `Bearer ${getToken()}` } }
         );
 
         if (!response.ok) {

@@ -24,7 +24,8 @@ FROM app_users u
 WHERE u.id = :chairman_user_id
   AND u.tenant_id = :chairman_tenant_id
   AND u.navigator_mfa_epoch = :expected_mfa_epoch
-  AND u.navigator_mfa_required = true AND u.is_active = true;
+  AND u.navigator_mfa_required = true AND u.is_active = true
+  AND NOT (SELECT t.navigator_mfa_mandatory FROM tenants t WHERE t.id=u.tenant_id);
 DO $$ BEGIN
  IF (SELECT count(*) FROM navigator_recovery_target) <> 1 THEN
    RAISE EXCEPTION 'Recovery target is not exactly one active MFA-enabled account';

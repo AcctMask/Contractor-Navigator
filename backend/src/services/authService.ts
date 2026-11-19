@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
-import { randomBytes, createHash } from "crypto"
+import { randomBytes, createHash, randomUUID } from "crypto"
 import { pool } from "../db/db"
 
 type AppUser = {
@@ -138,7 +138,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
 // Restricted enrollment JWT: deliberately incompatible with operational-session validation.
 export function signEnrollmentToken(user: AppUser, epoch: string, passwordHash: string) {
   return jwt.sign({
-    sub: user.id, tenant_id: user.tenant_id, purpose: "pashloc_enrollment_only",
+    sub: user.id, tenant_id: user.tenant_id, purpose: "pashloc_enrollment_only", jti: randomUUID(),
     mfa_epoch: epoch, password_fingerprint: requirePasswordFingerprint(passwordHash),
   }, JWT_SECRET, { expiresIn: "5m" })
 }
@@ -149,8 +149,8 @@ function requirePasswordFingerprint(passwordHash: string) {
 
 export function isRestrictedEnrollmentToken(token: string): boolean {
   try {
-    const claims = jwt.verify(token, JWT_SECRET) as { purpose?: string }
-    return claims.purpose === "pashloc_enrollment_only"
+    const claims = jwt.decode(token) as { purpose?: string } | null
+    return claims?.purpose === "pashloc_enrollment_only"
   } catch {
     // Invalid tokens remain subject to existing operational authorization checks.
     return false
@@ -158,10 +158,10 @@ export function isRestrictedEnrollmentToken(token: string): boolean {
 }
 
 export async function getRestrictedEnrollmentIdentity(token: string) {
-  let decoded: ReturnType<typeof verifyToken> & { purpose?: string; password_fingerprint?: string }
+  let decoded: ReturnType<typeof verifyToken> & { purpose?: string; password_fingerprint?: string; jti?: string }
   try { decoded = jwt.verify(token, JWT_SECRET) as typeof decoded }
   catch { return null }
-  if (decoded.purpose !== "pashloc_enrollment_only" || !decoded.password_fingerprint) return null
+  if (decoded.purpose !== "pashloc_enrollment_only" || !decoded.password_fingerprint || !decoded.jti) return null
   const { rows: [row] } = await pool.query(
     `select id, tenant_id, navigator_mfa_epoch, password_hash from app_users
      where id=$1 and tenant_id=$2 and is_active and
@@ -169,7 +169,8 @@ export async function getRestrictedEnrollmentIdentity(token: string) {
        and navigator_mfa_epoch=$3`,
     [decoded.sub, decoded.tenant_id, decoded.mfa_epoch])
   if (!row || requirePasswordFingerprint(row.password_hash) !== decoded.password_fingerprint) return null
-  return { id: Number(row.id), tenant_id: Number(row.tenant_id) }
+  return { id: Number(row.id), tenant_id: Number(row.tenant_id), epoch: decoded.mfa_epoch,
+    fingerprint: decoded.password_fingerprint, authorizationId: decoded.jti }
 }
 
 export function signToken(user: AppUser, assurance: false | { epoch: string; signedMfa: boolean } = false) {
@@ -199,6 +200,11 @@ function verifyToken(token: string) {
     mfa_epoch?: string
     mfa_signed?: boolean
   }
+}
+
+export function isSignedOperationalToken(token: string) {
+  try { return !isRestrictedEnrollmentToken(token) && verifyToken(token).mfa_signed === true }
+  catch { return false }
 }
 
 function cleanEmail(value: unknown) {
@@ -723,7 +729,12 @@ export async function acceptInvitation(
       is_active = true,
       deactivated_at = null,
       updated_at = now()
-    where not app_users.navigator_mfa_required and app_users.navigator_mfa_epoch = 0
+    where not app_users.navigator_mfa_required and (
+      (app_users.navigator_mfa_epoch = 0 and not exists (
+        select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory))
+      or (not app_users.is_active and exists (
+        select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory))
+    )
     returning id, tenant_id, email, full_name, mobile_phone, role, is_active
     `,
     [
@@ -788,11 +799,13 @@ export async function acceptInvitation(
     }
   )
 
-  const token = signToken(user)
+  const { rows: [policy] } = await pool.query(
+    "select navigator_mfa_mandatory from tenants where id=$1", [user.tenant_id])
+  if (!policy) throw new Error("Tenant unavailable")
 
   return {
     user,
-    token,
+    ...(policy.navigator_mfa_mandatory ? { mfa_required: true as const } : { token: signToken(user) }),
     tenant_slug: invite.tenant_slug,
     invitation: {
       id: invite.id,
@@ -827,7 +840,7 @@ export async function loginUserByTenantSlug(
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash, navigator_mfa_required, navigator_mfa_epoch,
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, financials_authorized, password_hash, navigator_mfa_required, navigator_mfa_epoch,
       (select navigator_mfa_mandatory from tenants where id=app_users.tenant_id) as tenant_mfa_mandatory
     from app_users
     where tenant_id = $1
@@ -860,9 +873,13 @@ export async function loginUserByTenantSlug(
     mobile_phone: row.mobile_phone,
     role: row.role,
     is_active: row.is_active,
+    financials_authorized: row.financials_authorized,
   }
 
   if (row.navigator_mfa_required || row.tenant_mfa_mandatory) {
+    const { signedMfaConfig, startSignedMfa } = await import("./navigatorSignedMfa")
+    const config = signedMfaConfig()
+    if (!config || origin !== config.browser) return { mfa_required: true as const, unavailable: true as const }
     const { rows: [binding] } = await pool.query(
       `select exists(select 1 from navigator_signed_devices
         where tenant_id=$1 and app_user_id=$2 and revoked_at is null
@@ -872,7 +889,6 @@ export async function loginUserByTenantSlug(
       return { mfa_required: true as const, enrollment_required: true as const,
         enrollmentToken: signEnrollmentToken(user, String(row.navigator_mfa_epoch), row.password_hash) }
     }
-    const { startSignedMfa } = await import("./navigatorSignedMfa")
     const client = await pool.connect()
     try {
       await client.query("begin")
@@ -945,6 +961,7 @@ class SessionUnauthorized extends Error {
 }
 
 export async function getCurrentUserFromToken(token: string) {
+  if (isRestrictedEnrollmentToken(token)) throw new SessionUnauthorized("Session no longer authorized")
   let decoded: ReturnType<typeof verifyToken>
   try { decoded = verifyToken(token) }
   catch { throw new SessionUnauthorized("Session no longer authorized") }
@@ -2061,6 +2078,7 @@ export async function changePasswordForUser(
       updated_at = now()
     where id = $2 and tenant_id = $3 and is_active
       and navigator_mfa_epoch = $4 and (not navigator_mfa_required or $5)
+      and (not exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory) or $5)
       and password_hash = $6
     `,
     [passwordHash, user.id, currentAccount.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true, user.password_hash]
