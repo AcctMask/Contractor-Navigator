@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
-import { randomBytes } from "crypto"
+import { randomBytes, createHash } from "crypto"
 import { pool } from "../db/db"
 
 type AppUser = {
@@ -143,7 +143,7 @@ export function signEnrollmentToken(user: AppUser, epoch: string, passwordHash: 
 }
 
 function requirePasswordFingerprint(passwordHash: string) {
-  return require("node:crypto").createHash("sha256").update(passwordHash).digest("hex")
+  return createHash("sha256").update(passwordHash).digest("hex")
 }
 
 export async function getRestrictedEnrollmentIdentity(token: string) {
