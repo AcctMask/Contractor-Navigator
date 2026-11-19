@@ -17,6 +17,9 @@ type AppUser = {
 const JWT_SECRET = process.env.JWT_SECRET || "contractor-autopilot-local-secret"
 
 async function ensureAuthTables() {
+  // Existing enrollment grants may predate the signed-enrollment authorization ID.
+  await pool.query(`alter table navigator_signed_enrollment_grants add column if not exists authorization_id uuid`)
+  await pool.query(`create unique index if not exists navigator_signed_one_grant_per_authorization on navigator_signed_enrollment_grants (authorization_id) where authorization_id is not null`)
   await pool.query(`alter table tenants add column if not exists navigator_mfa_mandatory boolean not null default false`)
   await pool.query(`
     create table if not exists app_users (
