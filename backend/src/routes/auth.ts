@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify"
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
 import { registerNavigatorSignedMfa } from "./navigatorSignedMfa"
+import { signedMfaConfig } from "../services/navigatorSignedMfa"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
@@ -114,6 +115,21 @@ async function requireTenantUserManager(
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   registerNavigatorSignedMfa(app)
+  // Registration status is scoped to the bearer-session identity, never a client-supplied user ID.
+  app.get("/auth/me/mfa/signed/device-status", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const token = getBearerToken(request)
+    if (!token) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    let user: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { user = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
+    const { rows: [status] } = await pool.query(
+      `select exists(select 1 from navigator_signed_devices
+          where tenant_id=$1 and app_user_id=$2 and revoked_at is null
+            and proof_verified_at is not null) as registered`,
+      [user.tenant_id, user.id])
+    return { ok: true, registered: status?.registered === true }
+  })
   // Self-service MFA enrollment: the bearer session identifies the ONLY eligible account.
   // A short-lived one-use grant is issued only while MFA is disabled and no device is bound.
   app.post("/auth/me/mfa/signed/enrollment", async (request: any, reply) => {
@@ -124,6 +140,10 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     try { user = await getCurrentUserFromToken(token) }
     catch { return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
     if (!user?.is_active) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const config = signedMfaConfig()
+    if (!config) return reply.code(503).send({ ok: false, error: "PashLoc enrollment is not available on this deployment" })
+    if (request.headers.origin !== config.browser)
+      return reply.code(403).send({ ok: false, error: "Enrollment unavailable" })
     const reference = randomBytes(32).toString("base64url")
     const grant = randomBytes(32).toString("base64url")
     const client = await pool.connect()
@@ -159,7 +179,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
         [reference,createHash("sha256").update(grant).digest("hex"),
          user.tenant_id,user.id,eligible.navigator_mfa_epoch])
       await client.query("commit")
-      return { ok: true, enrollmentLink: "https://pashloc-iv.vercel.app/#navigator-register=" + reference,
+      return { ok: true, enrollmentLink: config.phone + "/#navigator-register=" + reference,
         oneTimeGrant: grant, expiresAt: issued.expires_at, tenantId: user.tenant_id, userId: user.id }
     } catch (err) {
       await client.query("rollback").catch(() => undefined)
