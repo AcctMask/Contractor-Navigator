@@ -134,7 +134,7 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
-export function signToken(user: AppUser) {
+export function signToken(user: AppUser, assurance: false | { epoch: string; signedMfa: boolean } = false) {
   return jwt.sign(
     {
       sub: user.id,
@@ -142,13 +142,14 @@ export function signToken(user: AppUser) {
       email: user.email,
       full_name: user.full_name,
       role: user.role,
+      ...(assurance && { mfa_epoch: assurance.epoch, mfa_signed: assurance.signedMfa }),
     },
     JWT_SECRET,
     { expiresIn: "7d" }
   )
 }
 
-export function verifyToken(token: string) {
+function verifyToken(token: string) {
   return jwt.verify(token, JWT_SECRET) as {
     sub: number
     tenant_id: number
@@ -157,6 +158,8 @@ export function verifyToken(token: string) {
     role: string
     iat: number
     exp: number
+    mfa_epoch?: string
+    mfa_signed?: boolean
   }
 }
 
@@ -682,6 +685,7 @@ export async function acceptInvitation(
       is_active = true,
       deactivated_at = null,
       updated_at = now()
+    where not app_users.navigator_mfa_required and app_users.navigator_mfa_epoch = 0
     returning id, tenant_id, email, full_name, mobile_phone, role, is_active
     `,
     [
@@ -693,6 +697,8 @@ export async function acceptInvitation(
       invite.role,
     ]
   )
+
+  if (userResult.rowCount !== 1) throw new Error("Invitation cannot modify a PashLoc account")
 
   await pool.query(
     `
@@ -768,7 +774,8 @@ export async function loginUserByTenantSlug(
   input: {
     email: string
     password: string
-  }
+  },
+  origin?: string
 ) {
   await ensureAuthTables()
   const tenantId = await getTenantIdBySlug(tenantSlug)
@@ -782,7 +789,7 @@ export async function loginUserByTenantSlug(
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash, navigator_mfa_required, navigator_mfa_epoch
     from app_users
     where tenant_id = $1
       and lower(email) = $2
@@ -816,7 +823,30 @@ export async function loginUserByTenantSlug(
     is_active: row.is_active,
   }
 
-  const token = signToken(user)
+  if (row.navigator_mfa_required) {
+    const { startSignedMfa } = await import("./navigatorSignedMfa")
+    const client = await pool.connect()
+    try {
+      await client.query("begin")
+      const locked = await client.query(
+        `select id from app_users where id=$1 and tenant_id=$2 and is_active
+         and navigator_mfa_required and navigator_mfa_epoch=$3 and password_hash=$4 for update`,
+        [user.id, user.tenant_id, row.navigator_mfa_epoch, row.password_hash])
+      const result = locked.rowCount === 1
+        ? await startSignedMfa(client, { id: user.id, tenant_id: user.tenant_id,
+            password_hash: row.password_hash, navigator_mfa_epoch: String(row.navigator_mfa_epoch) }, origin)
+        : { mfa_required: true as const, unavailable: true as const }
+      await client.query("commit")
+      return result
+    } catch (error) {
+      await client.query("rollback")
+      throw error
+    } finally {
+      client.release()
+    }
+  }
+  const token = signToken(user, Number(row.navigator_mfa_epoch) > 0
+    ? { epoch: String(row.navigator_mfa_epoch), signedMfa: false } : false)
 
   return {
     user,
@@ -862,8 +892,14 @@ export async function updateOwnPreferredLanguage(
   return result.rows[0]
 }
 
+class SessionUnauthorized extends Error {
+  statusCode = 401
+}
+
 export async function getCurrentUserFromToken(token: string) {
-  const decoded = verifyToken(token)
+  let decoded: ReturnType<typeof verifyToken>
+  try { decoded = verifyToken(token) }
+  catch { throw new SessionUnauthorized("Session no longer authorized") }
 
   await ensureAuthTables()
 
@@ -875,15 +911,16 @@ export async function getCurrentUserFromToken(token: string) {
     where id = $1
       and tenant_id = $2
       and is_active = true
+      and navigator_mfa_epoch = $3
+      and (not navigator_mfa_required or $4)
     limit 1
     `,
-    [decoded.sub, decoded.tenant_id]
+    [decoded.sub, decoded.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true]
   )
 
-  if (!result.rowCount) {
-    throw new Error("User not found or account inactive")
+  if (result.rowCount !== 1) {
+    throw new SessionUnauthorized("Session no longer authorized")
   }
-
   return result.rows[0]
 }
 
@@ -1924,6 +1961,7 @@ export async function changePasswordForUser(
 ) {
   await ensureAuthTables()
 
+  const currentAccount = await getCurrentUserFromToken(token)
   const decoded = verifyToken(token)
 
   const currentPassword = String(input.currentPassword || "")
@@ -1943,10 +1981,10 @@ export async function changePasswordForUser(
       id,
       password_hash
     from app_users
-    where id = $1
+    where id = $1 and tenant_id = $2
     limit 1
     `,
-    [decoded.sub]
+    [currentAccount.id, currentAccount.tenant_id]
   )
 
   if (!result.rowCount) {
@@ -1966,16 +2004,19 @@ export async function changePasswordForUser(
 
   const passwordHash = await bcrypt.hash(newPassword, 10)
 
-  await pool.query(
+  const updated = await pool.query(
     `
     update app_users
     set
       password_hash = $1,
       updated_at = now()
-    where id = $2
+    where id = $2 and tenant_id = $3 and is_active
+      and navigator_mfa_epoch = $4 and (not navigator_mfa_required or $5)
+      and password_hash = $6
     `,
-    [passwordHash, user.id]
+    [passwordHash, user.id, currentAccount.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true, user.password_hash]
   )
 
+  if (updated.rowCount !== 1) throw new SessionUnauthorized("Session or password changed")
   return { ok: true }
 }

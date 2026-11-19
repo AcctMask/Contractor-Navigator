@@ -1,0 +1,71 @@
+name: Navigator signed login integration
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: qa
+          POSTGRES_PASSWORD: synthetic-ci-db
+          POSTGRES_DB: pashloc_qa_ephemeral
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U qa -d pashloc_qa_ephemeral"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://qa:synthetic-ci-db@127.0.0.1:5432/pashloc_qa_ephemeral?sslmode=disable
+      JWT_SECRET: synthetic-navigator-ci-only
+      NODE_ENV: test
+      NAVIGATOR_SIGNED_MFA_QA: ephemeral
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            dashboard/package-lock.json
+      - run: npm ci --no-audit
+        working-directory: backend
+      - run: node --import tsx --test tests/pashlocSignedApprovalV1.test.ts tests/navigatorSignedMfa.integration.test.ts
+        working-directory: backend
+  dashboard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci --no-audit
+      - run: npm run build
+        env:
+          VITE_API_BASE: http://127.0.0.1:5179
+          VITE_NAVIGATOR_MFA_PHONE_ORIGIN: https://pashloc.example.invalid
+      - run: |
+          ./node_modules/.bin/vite preview --host 127.0.0.1 --port 5179 --strictPort &
+          server=$!
+          trap 'kill "$server" || true' EXIT
+          curl --fail --silent --retry 10 --retry-connrefused http://127.0.0.1:5179/login > /dev/null
+          node tests/navigatorSignedMfa.browser.cjs
