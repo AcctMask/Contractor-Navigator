@@ -16,6 +16,7 @@ assert.equal(db.pathname, "/pashloc_qa_ephemeral")
 assert.equal(process.env.JWT_SECRET, "synthetic-navigator-ci-only")
 
 const { pool } = await import("../src/db/db")
+const { acceptInvitation } = await import("../src/services/authService")
 const { registerAuthRoutes } = await import("../src/routes/auth")
 const { registerAdminRoutes } = await import("../src/routes/admin")
 const { registerCustomerRoutes } = await import("../src/routes/customers")
@@ -94,6 +95,9 @@ before(async () => {
     `create table job_assets (
       id bigint generated always as identity primary key,
       tenant_id bigint, job_id bigint, asset_type text
+    )`,
+    `create table scheduled_actions (
+      tenant_id bigint, action_key text, status text, payload jsonb, updated_at timestamptz
     )`,
     `create table timeline_events (
       id bigint generated always as identity primary key,
@@ -330,6 +334,15 @@ test("tenant policy gates unauthenticated, stale, future and reactivated access 
   const otherToken = (await post("/auth/"+secondSlug+"/login", { email:"other@example.invalid",password })).json().token
   assert.equal(inspectClaims(otherToken).sub, Number(otherUser.id))
   assert.equal((await get("/admin/jobs/"+slug, otherToken)).statusCode, 401)
+
+  const invitedEmail = "invited@example.invalid"
+  const invitationToken = opaque()
+  await pool.query(`insert into user_invitations (tenant_id,email,full_name,role,invite_token,expires_at)
+    values($1,$2,$2,'staff',$3,now()+interval '1 hour')`, [tenant,invitedEmail,invitationToken])
+  const accepted = await acceptInvitation(invitationToken,{password})
+  assert.equal(accepted.mfa_required,true)
+  assert.equal(accepted.token,undefined)
+  assert.equal((await login(invitedEmail)).json().enrollment_required,true)
 
   const newEmail = "new@example.invalid"
   await pool.query("insert into app_users (tenant_id,email,full_name,role,password_hash) values($1,$2,$2,'staff',$3)",

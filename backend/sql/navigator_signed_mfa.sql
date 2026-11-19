@@ -58,14 +58,14 @@ create table if not exists navigator_mfa_recovery_audit (
 );
 
 -- Reactivation cannot revive a session issued before deactivation.
-create or replace function navigator_mfa_invalidate_on_active_change() returns trigger language plpgsql as $
+create or replace function navigator_mfa_invalidate_on_active_change() returns trigger language plpgsql as $navigator_mfa$
 begin
   if exists (select 1 from tenants t where t.id=new.tenant_id and t.navigator_mfa_mandatory) then
     new.navigator_mfa_epoch := greatest(new.navigator_mfa_epoch, old.navigator_mfa_epoch + 1);
   end if;
   return new;
-end
-$;
+end;
+$navigator_mfa$;
 drop trigger if exists navigator_mfa_active_change on app_users;
 create trigger navigator_mfa_active_change before update of is_active on app_users
 for each row when (old.is_active is distinct from new.is_active)
