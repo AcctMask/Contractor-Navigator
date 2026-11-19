@@ -6,6 +6,7 @@ import { signedMfaConfig } from "../services/navigatorSignedMfa"
 import {
   acceptInvitation,
   getCurrentUserFromToken,
+  getRestrictedEnrollmentIdentity,
   updateOwnPreferredLanguage,
   getInvitationByToken,
   inviteUserByTenantSlug,
@@ -115,6 +116,58 @@ async function requireTenantUserManager(
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   registerNavigatorSignedMfa(app)
+  // Enrollment-only authorization never passes getCurrentUserFromToken or operational guards.
+  app.post("/auth/mfa/signed/restricted-enrollment", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const config = signedMfaConfig()
+    if (!config || request.headers.origin !== config.browser)
+      return reply.code(403).send({ ok: false, error: "Enrollment unavailable" })
+    const enrollmentToken = (request.body as any)?.enrollmentToken
+    if (typeof enrollmentToken !== "string")
+      return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const user = await getRestrictedEnrollmentIdentity(enrollmentToken)
+    if (!user) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const client = await pool.connect()
+    try {
+      await client.query("begin")
+      const { rows: [eligible] } = await client.query(
+        `select id, tenant_id, navigator_mfa_epoch from app_users
+         where id=$1 and tenant_id=$2 and is_active and navigator_mfa_required for update`,
+        [user.id, user.tenant_id])
+      if (!eligible) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Enrollment unavailable" })
+      }
+      const { rows: [existing] } = await client.query(
+        `select device_id from navigator_signed_devices
+         where tenant_id=$1 and app_user_id=$2 and revoked_at is null limit 1`,
+        [user.tenant_id, user.id])
+      if (existing) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Device already registered" })
+      }
+      await client.query(
+        `update navigator_signed_enrollment_grants set used_at=clock_timestamp()
+         where tenant_id=$1 and app_user_id=$2 and used_at is null`,
+        [user.tenant_id, user.id])
+      const reference = randomBytes(32).toString("base64url")
+      const grant = randomBytes(32).toString("base64url")
+      const { rows: [issued] } = await client.query(
+        `insert into navigator_signed_enrollment_grants
+         (reference,grant_hash,tenant_id,app_user_id,policy_epoch,expires_at)
+         values ($1,$2,$3,$4,$5,clock_timestamp()+interval '5 minutes')
+         returning expires_at`,
+        [reference, createHash("sha256").update(grant).digest("hex"),
+         user.tenant_id, user.id, eligible.navigator_mfa_epoch])
+      await client.query("commit")
+      return { ok: true, enrollmentLink: config.phone + "/#navigator-register=" + reference,
+        oneTimeGrant: grant, expiresAt: issued.expires_at }
+    } catch (err) {
+      await client.query("rollback").catch(() => undefined)
+      request.log.error(err)
+      return reply.code(503).send({ ok: false, error: "Enrollment unavailable" })
+    } finally { client.release() }
+  })
   // Registration status is scoped to the bearer-session identity, never a client-supplied user ID.
   app.get("/auth/me/mfa/signed/device-status", async (request: any, reply) => {
     reply.header("Cache-Control", "no-store, private")
