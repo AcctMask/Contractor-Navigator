@@ -67,6 +67,7 @@ before(async () => {
       email text not null, full_name text not null, password_hash text,
       mobile_phone text, role text not null, is_active boolean not null default true,
       preferred_language text, financials_authorized boolean not null default false,
+      created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
       unique (tenant_id,email)
     )`,
     `create table customers (
