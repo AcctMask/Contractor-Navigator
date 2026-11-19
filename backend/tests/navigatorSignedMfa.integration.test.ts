@@ -179,13 +179,24 @@ test("approved device binding, signed approval and one-time Navigator session", 
   const staleChange = await app.inject({method: "POST", url: "/auth/change-password",
     headers: { authorization: "Bearer " + preMfaToken }, payload: { currentPassword: password, newPassword: password + "-changed" } })
   assert.equal(staleChange.statusCode, 401)
-  assert.deepEqual((await login(signed)).json(), { ok:true, mfa_required:true, enrollment_required:true })
+  const firstLogin = (await login(signed)).json()
+  assert.equal(firstLogin.ok, true)
+  assert.equal(firstLogin.mfa_required, true)
+  assert.equal(firstLogin.enrollment_required, true)
+  assert.equal(firstLogin.token, undefined)
+  assert.equal(typeof firstLogin.enrollmentToken, "string")
+  assert.equal((await get("/auth/me", firstLogin.enrollmentToken)).statusCode, 401)
+  assert.equal((await get("/admin/jobs/" + slug, firstLogin.enrollmentToken)).statusCode, 401)
+  assert.equal((await post("/auth/mfa/signed/restricted-enrollment",
+    { enrollmentToken: firstLogin.enrollmentToken }, phone)).statusCode, 403)
+  const restricted = await post("/auth/mfa/signed/restricted-enrollment",
+    { enrollmentToken: firstLogin.enrollmentToken })
+  assert.equal(restricted.statusCode, 200)
+  assert.equal(typeof restricted.json().oneTimeGrant, "string")
   assert.equal((await login(signed, phone)).json().token, undefined)
 
-  const reference = opaque(), grant = opaque()
-  await pool.query(`insert into navigator_signed_enrollment_grants
-    (reference,grant_hash,tenant_id,app_user_id,policy_epoch,expires_at)
-    values($1,$2,$3,$4,1,clock_timestamp()+interval '5 minutes')`, [reference,hash(grant),tenant,userId])
+  const grant = restricted.json().oneTimeGrant
+  const reference = new URL(restricted.json().enrollmentLink).hash.slice("#navigator-register=".length)
   const infoResponse = await post(api + "registration-info", { reference }, phone)
   assert.equal(infoResponse.statusCode, 200)
   const info = infoResponse.json()
