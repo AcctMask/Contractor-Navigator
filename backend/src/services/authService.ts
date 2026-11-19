@@ -17,6 +17,7 @@ type AppUser = {
 const JWT_SECRET = process.env.JWT_SECRET || "contractor-autopilot-local-secret"
 
 async function ensureAuthTables() {
+  await pool.query(`alter table tenants add column if not exists navigator_mfa_mandatory boolean not null default false`)
   await pool.query(`
     create table if not exists app_users (
       id bigserial primary key,
@@ -163,7 +164,8 @@ export async function getRestrictedEnrollmentIdentity(token: string) {
   if (decoded.purpose !== "pashloc_enrollment_only" || !decoded.password_fingerprint) return null
   const { rows: [row] } = await pool.query(
     `select id, tenant_id, navigator_mfa_epoch, password_hash from app_users
-     where id=$1 and tenant_id=$2 and is_active and navigator_mfa_required
+     where id=$1 and tenant_id=$2 and is_active and
+       (navigator_mfa_required or exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory))
        and navigator_mfa_epoch=$3`,
     [decoded.sub, decoded.tenant_id, decoded.mfa_epoch])
   if (!row || requirePasswordFingerprint(row.password_hash) !== decoded.password_fingerprint) return null
@@ -825,7 +827,8 @@ export async function loginUserByTenantSlug(
 
   const result = await pool.query(
     `
-    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash, navigator_mfa_required, navigator_mfa_epoch
+    select id, tenant_id, email, full_name, mobile_phone, role, is_active, password_hash, navigator_mfa_required, navigator_mfa_epoch,
+      (select navigator_mfa_mandatory from tenants where id=app_users.tenant_id) as tenant_mfa_mandatory
     from app_users
     where tenant_id = $1
       and lower(email) = $2
@@ -859,7 +862,7 @@ export async function loginUserByTenantSlug(
     is_active: row.is_active,
   }
 
-  if (row.navigator_mfa_required) {
+  if (row.navigator_mfa_required || row.tenant_mfa_mandatory) {
     const { rows: [binding] } = await pool.query(
       `select exists(select 1 from navigator_signed_devices
         where tenant_id=$1 and app_user_id=$2 and revoked_at is null
@@ -875,7 +878,7 @@ export async function loginUserByTenantSlug(
       await client.query("begin")
       const locked = await client.query(
         `select id from app_users where id=$1 and tenant_id=$2 and is_active
-         and navigator_mfa_required and navigator_mfa_epoch=$3 and password_hash=$4 for update`,
+         and (navigator_mfa_required or exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory)) and navigator_mfa_epoch=$3 and password_hash=$4 for update`,
         [user.id, user.tenant_id, row.navigator_mfa_epoch, row.password_hash])
       const result = locked.rowCount === 1
         ? await startSignedMfa(client, { id: user.id, tenant_id: user.tenant_id,
@@ -958,6 +961,7 @@ export async function getCurrentUserFromToken(token: string) {
       and is_active = true
       and navigator_mfa_epoch = $3
       and (not navigator_mfa_required or $4)
+      and (not exists(select 1 from tenants t where t.id=app_users.tenant_id and t.navigator_mfa_mandatory) or $4)
     limit 1
     `,
     [decoded.sub, decoded.tenant_id, decoded.mfa_epoch ?? "0", decoded.mfa_signed === true]
