@@ -1,0 +1,84 @@
+-- Navigator 5.2: ONE-TIME, operator-run Chairman MFA activation.
+-- Never mount as an HTTP endpoint, migration, startup task, or automated deploy hook.
+-- Run only from an authenticated, authorized production database administration session.
+-- Prerequisites: independently verify the operator can execute the existing
+-- navigator_signed_mfa_admin_recovery.psql and the signed challenge flow.
+-- Fixed target: Good2Go tenant 1 / user 3. No browser-controlled identifiers.
+-- Usage: psql -X -v ON_ERROR_STOP=1 -v approval_reference='CHM-20261119-NAVI52' -f backend/sql/navigator_signed_mfa_activate_chairman.psql
+-- Do not supply or log connection secrets on the command line.
+\set ON_ERROR_STOP on
+\if :{?approval_reference}
+\else
+  \echo 'Missing approval_reference; activation refused'
+  \quit 3
+\endif
+BEGIN;
+-- This audit is created atomically with activation; no audit entry means no change.
+CREATE TABLE IF NOT EXISTS navigator_signed_mfa_activation_audit (
+ id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ tenant_id bigint NOT NULL,
+ app_user_id bigint NOT NULL,
+ old_epoch bigint NOT NULL,
+ new_epoch bigint NOT NULL,
+ approval_reference text NOT NULL CHECK (length(trim(approval_reference)) >= 8),
+ activated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE (tenant_id, app_user_id, new_epoch)
+);
+CREATE TEMP TABLE navigator_mfa_activation_target ON COMMIT DROP AS
+ SELECT u.id, u.tenant_id, u.navigator_mfa_epoch AS old_epoch
+ FROM app_users u
+ WHERE u.tenant_id = 1 AND u.id = 3
+   AND u.is_active = true AND u.navigator_mfa_required = false
+   AND EXISTS (
+      SELECT 1 FROM navigator_signed_devices d
+      WHERE d.tenant_id = u.tenant_id AND d.app_user_id = u.id
+        AND d.revoked_at IS NULL AND d.proof_verified_at IS NOT NULL
+   );
+DO $verify$ BEGIN
+ IF (SELECT count(*) FROM navigator_mfa_activation_target) <> 1 THEN
+   RAISE EXCEPTION 'Activation refused: target is not exactly one active, MFA-disabled, proof-verified account';
+ END IF;
+END $verify$;
+-- Lock the account and re-check eligibility under the lock, as password login does.
+SELECT u.id FROM app_users u
+ JOIN navigator_mfa_activation_target t ON t.id=u.id AND t.tenant_id=u.tenant_id
+ FOR UPDATE OF u;
+DO $recheck$ BEGIN
+ IF NOT EXISTS (
+   SELECT 1 FROM app_users u JOIN navigator_mfa_activation_target t
+     ON u.id=t.id AND u.tenant_id=t.tenant_id
+   WHERE u.is_active AND NOT u.navigator_mfa_required
+     AND u.navigator_mfa_epoch=t.old_epoch
+     AND EXISTS (SELECT 1 FROM navigator_signed_devices d
+       WHERE d.tenant_id=u.tenant_id AND d.app_user_id=u.id
+       AND d.revoked_at IS NULL AND d.proof_verified_at IS NOT NULL)
+ ) THEN RAISE EXCEPTION 'Activation eligibility changed while locking target'; END IF;
+END $recheck$;
+-- Epoch increment invalidates older account sessions under existing auth conventions.
+WITH updated AS (
+ UPDATE app_users u SET navigator_mfa_required=true,
+   navigator_mfa_epoch=u.navigator_mfa_epoch+1
+ FROM navigator_mfa_activation_target t
+ WHERE u.id=t.id AND u.tenant_id=t.tenant_id
+   AND u.is_active AND NOT u.navigator_mfa_required
+   AND u.navigator_mfa_epoch=t.old_epoch
+ RETURNING u.id,u.tenant_id,u.navigator_mfa_epoch
+)
+INSERT INTO navigator_signed_mfa_activation_audit
+ (tenant_id,app_user_id,old_epoch,new_epoch,approval_reference)
+SELECT x.tenant_id,x.id,t.old_epoch,x.navigator_mfa_epoch,:'approval_reference'
+FROM updated x JOIN navigator_mfa_activation_target t
+ ON t.id=x.id AND t.tenant_id=x.tenant_id;
+DO $post$ BEGIN
+ IF (SELECT count(*) FROM navigator_signed_mfa_activation_audit a
+     JOIN navigator_mfa_activation_target t
+     ON a.app_user_id=t.id AND a.tenant_id=t.tenant_id
+     WHERE a.old_epoch=t.old_epoch AND a.new_epoch=t.old_epoch+1) <> 1
+ OR NOT EXISTS (SELECT 1 FROM app_users u
+     WHERE u.id=3 AND u.tenant_id=1 AND u.navigator_mfa_required=true)
+ THEN RAISE EXCEPTION 'Activation audit/policy verification failed'; END IF;
+END $post$;
+COMMIT;
+-- Policy-only verification; no secrets or device key material.
+SELECT id,tenant_id,navigator_mfa_required,navigator_mfa_epoch
+FROM app_users WHERE id=3 AND tenant_id=1;
