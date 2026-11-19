@@ -126,7 +126,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
   })
   registerNavigatorSignedMfa(app)
   // Enrollment-only authorization never passes getCurrentUserFromToken or operational guards.
-  app.post("/auth/mfa/signed/restricted-enrollment", async (request: any, reply) => {
+  app.post("/auth/restricted-enrollment/signed", async (request: any, reply) => {
     reply.header("Cache-Control", "no-store, private")
     const config = signedMfaConfig()
     if (!config || request.headers.origin !== config.browser)
