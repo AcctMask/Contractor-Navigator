@@ -134,6 +134,32 @@ export async function getTenantIdBySlug(slug: string): Promise<number> {
   return Number(result.rows[0].id)
 }
 
+// Restricted enrollment JWT: deliberately incompatible with operational-session validation.
+export function signEnrollmentToken(user: AppUser, epoch: string, passwordHash: string) {
+  return jwt.sign({
+    sub: user.id, tenant_id: user.tenant_id, purpose: "pashloc_enrollment_only",
+    mfa_epoch: epoch, password_fingerprint: requirePasswordFingerprint(passwordHash),
+  }, JWT_SECRET, { expiresIn: "5m" })
+}
+
+function requirePasswordFingerprint(passwordHash: string) {
+  return require("node:crypto").createHash("sha256").update(passwordHash).digest("hex")
+}
+
+export async function getRestrictedEnrollmentIdentity(token: string) {
+  let decoded: ReturnType<typeof verifyToken> & { purpose?: string; password_fingerprint?: string }
+  try { decoded = jwt.verify(token, JWT_SECRET) as typeof decoded }
+  catch { return null }
+  if (decoded.purpose !== "pashloc_enrollment_only" || !decoded.password_fingerprint) return null
+  const { rows: [row] } = await pool.query(
+    `select id, tenant_id, navigator_mfa_epoch, password_hash from app_users
+     where id=$1 and tenant_id=$2 and is_active and navigator_mfa_required
+       and navigator_mfa_epoch=$3`,
+    [decoded.sub, decoded.tenant_id, decoded.mfa_epoch])
+  if (!row || requirePasswordFingerprint(row.password_hash) !== decoded.password_fingerprint) return null
+  return { id: Number(row.id), tenant_id: Number(row.tenant_id) }
+}
+
 export function signToken(user: AppUser, assurance: false | { epoch: string; signedMfa: boolean } = false) {
   return jwt.sign(
     {
@@ -824,6 +850,15 @@ export async function loginUserByTenantSlug(
   }
 
   if (row.navigator_mfa_required) {
+    const { rows: [binding] } = await pool.query(
+      `select exists(select 1 from navigator_signed_devices
+        where tenant_id=$1 and app_user_id=$2 and revoked_at is null
+          and proof_verified_at is not null) as verified`,
+      [user.tenant_id, user.id])
+    if (!binding?.verified) {
+      return { mfa_required: true as const, enrollment_required: true as const,
+        enrollmentToken: signEnrollmentToken(user, String(row.navigator_mfa_epoch), row.password_hash) }
+    }
     const { startSignedMfa } = await import("./navigatorSignedMfa")
     const client = await pool.connect()
     try {
