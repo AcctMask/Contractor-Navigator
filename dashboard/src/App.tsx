@@ -1,4 +1,4 @@
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom"
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import {
   useEffect,
   useState,
@@ -524,21 +524,10 @@ function FieldProtectedPage({ children }: { children: ReactNode }) {
   )
 }
 
-function PublicCommercialUnsubscribe() {
-  const { id } = useParams()
-  useEffect(() => {
-    if (!id) return
-    const origin = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
-    window.location.replace(origin.replace(/\/$/, "") + "/commercial/unsubscribe/" + encodeURIComponent(id))
-  }, [id])
-  return null
-}
-
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<ProtectedPage><DashboardPage /></ProtectedPage>} />
-      <Route path="/commercial/unsubscribe/:id" element={<PublicCommercialUnsubscribe />} />
       <Route path="/commercial" element={<ProtectedPage><CommercialPipelinePage /></ProtectedPage>} />
       <Route path="/users" element={<ProtectedPage><UsersPage /></ProtectedPage>} />
       <Route path="/reports" element={<ProtectedPage><BusinessPerformanceV2 /></ProtectedPage>} />
