@@ -68,6 +68,27 @@ export default function UsersPage() {
   const [status, setStatus] = useState("Loading users and invitations...")
   const [error, setError] = useState("")
   const [copied, setCopied] = useState(false)
+  const [mfaEnrollment, setMfaEnrollment] = useState<{ enrollmentLink: string; oneTimeGrant: string; expiresAt: string } | null>(null)
+  const [mfaEnrollmentError, setMfaEnrollmentError] = useState("")
+  const [mfaEnrollmentLoading, setMfaEnrollmentLoading] = useState(false)
+  async function startPashLocEnrollment() {
+    setMfaEnrollmentLoading(true)
+    setMfaEnrollmentError("")
+    setMfaEnrollment(null)
+    try {
+      const res = await fetch(`${API_BASE}/auth/me/mfa/signed/enrollment`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const json = await res.json()
+      if (!res.ok || json.ok !== true || typeof json.enrollmentLink !== "string" ||
+          typeof json.oneTimeGrant !== "string") throw new Error(json.error || "Enrollment unavailable")
+      setMfaEnrollment(json)
+    } catch (err) {
+      setMfaEnrollmentError(err instanceof Error ? err.message : "Enrollment unavailable")
+    } finally { setMfaEnrollmentLoading(false) }
+  }
+
 
   const [currentUserId, setCurrentUserId] =
     useState<number | null>(null)
@@ -1013,6 +1034,24 @@ export default function UsersPage() {
           gap: "24px",
         }}
       >
+        <section style={{ ...cardStyle, minHeight: 0 }}>
+          <h2>Set up PashLoc IV</h2>
+          <p>Register your iPhone for secure Navigator sign-in. Your existing login stays active until registration is verified.</p>
+          <button type="button" style={secondaryButtonStyle} disabled={mfaEnrollmentLoading}
+            onClick={startPashLocEnrollment}>{mfaEnrollmentLoading ? "Preparing..." : "Set up PashLoc IV"}</button>
+          {mfaEnrollmentError && <p role="alert">{mfaEnrollmentError}</p>}
+          {mfaEnrollment && <div style={{ overflowWrap: "anywhere" }}>
+            <p>Open this link on your iPhone and enter the one-time grant when prompted. Expires {formatDate(mfaEnrollment.expiresAt)}.</p>
+            <p><a href={mfaEnrollment.enrollmentLink} target="_blank" rel="noreferrer">Open PashLoc IV registration</a></p>
+            <p>One-time registration grant:</p>
+            <code>{mfaEnrollment.oneTimeGrant}</code>
+            <div><button type="button" style={secondaryButtonStyle}
+              onClick={() => navigator.clipboard.writeText(mfaEnrollment.oneTimeGrant)}>
+              Copy registration grant</button></div>
+            <p>Keep the grant private. Enrollment does not activate MFA until device possession is verified.</p>
+          </div>}
+        </section>
+
         <div
           style={{
             background: "rgba(8, 22, 59, 0.9)",
