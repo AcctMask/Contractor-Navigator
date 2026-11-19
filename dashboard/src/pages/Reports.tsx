@@ -1,4 +1,3 @@
-import { getToken } from "../lib/auth"
 import { useEffect, useMemo, useState } from "react"
 import { getTenantSlug } from "../lib/tenant"
 
@@ -184,7 +183,7 @@ export default function ReportsPage() {
           `?tenant=${encodeURIComponent(getTenantSlug())}` +
           `&range=${encodeURIComponent(range)}`
 
-        const response = await fetch(url, { headers: { Authorization: `Bearer ${getToken()}` } })
+        const response = await fetch(url)
         const json =
           (await response.json()) as SalesPerformanceResponse
 
