@@ -1,20 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import type { CSSProperties } from "react"
 
-import { useLanguage } from "../context/LanguageContext"
-import { getToken } from "../lib/auth"
-
 const API = import.meta.env.VITE_API_BASE || "https://contractor-navigator.onrender.com"
 
-function commercialFetch(url: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers)
-  headers.set("Authorization", `Bearer ${getToken()}`)
-  return fetch(url, { ...init, headers })
-}
-
 export default function CommercialPipelinePage() {
-  const { t } = useLanguage()
-  const [loadFailed, setLoadFailed] = useState(false)
   const [targets, setTargets] = useState<any[]>([])
   const [totalDatabaseCount, setTotalDatabaseCount] = useState(0)
   const [selected, setSelected] = useState<any | null>(null)
@@ -46,45 +35,36 @@ export default function CommercialPipelinePage() {
   }, [])
 
   async function loadAll() {
-    try {
-      await Promise.all([loadTargets(), loadBatches(), loadPendingQueue(), loadSentQueue()])
-      setLoadFailed(false)
-    } catch {
-      setLoadFailed(true)
-    }
+    await Promise.all([loadTargets(), loadBatches(), loadPendingQueue(), loadSentQueue()])
   }
 
   async function loadTargets() {
-    const res = await commercialFetch(`${API}/commercial/targets`)
-    if (!res.ok) throw new Error("Commercial request failed")
+    const res = await fetch(`${API}/commercial/targets`)
     const data = await res.json()
     setTargets(data.rows || [])
     setTotalDatabaseCount(data.total_count || data.rows?.length || 0)
   }
 
   async function loadBatches() {
-    const res = await commercialFetch(`${API}/commercial/campaigns/batches`)
-    if (!res.ok) throw new Error("Commercial request failed")
+    const res = await fetch(`${API}/commercial/campaigns/batches`)
     const data = await res.json()
     setBatches(data.rows || [])
   }
 
   async function loadPendingQueue() {
-    const res = await commercialFetch(`${API}/commercial/email-queue/pending`)
-    if (!res.ok) throw new Error("Commercial request failed")
+    const res = await fetch(`${API}/commercial/email-queue/pending`)
     const data = await res.json()
     setPendingQueue(data.rows || [])
   }
 
   async function loadSentQueue() {
-    const res = await commercialFetch(`${API}/commercial/email-queue/sent`)
-    if (!res.ok) throw new Error("Commercial request failed")
+    const res = await fetch(`${API}/commercial/email-queue/sent`)
     const data = await res.json()
     setSentQueue(data.rows || [])
   }
 
   async function loadDetail(id: string) {
-    const res = await commercialFetch(`${API}/commercial/targets/${id}`)
+    const res = await fetch(`${API}/commercial/targets/${id}`)
     const data = await res.json()
     setDetail(data)
   }
@@ -100,7 +80,7 @@ export default function CommercialPipelinePage() {
     setNotice("")
     setError("")
 
-    const res = await commercialFetch(`${API}/commercial/targets/${selected.id}/queue-email`, { method: "POST" })
+    const res = await fetch(`${API}/commercial/targets/${selected.id}/queue-email`, { method: "POST" })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -116,7 +96,7 @@ export default function CommercialPipelinePage() {
     setNotice("")
     setError("")
 
-    const res = await commercialFetch(`${API}/commercial/email-queue/${queueId}/send`, { method: "POST" })
+    const res = await fetch(`${API}/commercial/email-queue/${queueId}/send`, { method: "POST" })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -137,7 +117,7 @@ export default function CommercialPipelinePage() {
     setNotice("")
     setError("")
 
-    const res = await commercialFetch(`${API}/commercial/targets/${selected.id}`, {
+    const res = await fetch(`${API}/commercial/targets/${selected.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pipeline_status: nextStatus }),
@@ -160,7 +140,7 @@ export default function CommercialPipelinePage() {
     setNotice("")
     setError("")
 
-    const res = await commercialFetch(`${API}/commercial/targets/${selected.id}/dnc`, { method: "POST" })
+    const res = await fetch(`${API}/commercial/targets/${selected.id}/dnc`, { method: "POST" })
     const data = await res.json()
 
     if (!res.ok || !data.ok) {
@@ -190,7 +170,7 @@ export default function CommercialPipelinePage() {
       payload.priority_level = campaignPriority
     }
 
-    const res = await commercialFetch(`${API}/commercial/campaigns/launch`, {
+    const res = await fetch(`${API}/commercial/campaigns/launch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -236,8 +216,6 @@ export default function CommercialPipelinePage() {
   const failedTotal = Number(manualBatch.failed_count || 0)
   const remainingToContact = Math.max(counts.totalDatabase - sentTotal, 0)
   const estimatedDaysRemaining = Math.ceil(remainingToContact / dailyGoal)
-
-  if (loadFailed) return <p role="alert">{t("commercialLoadFailed")}</p>
 
   return (
     <div style={wrap}>
