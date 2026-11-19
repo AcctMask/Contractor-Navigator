@@ -125,6 +125,21 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(401).send({ ok: false, error: "Operational session required" })
   })
   registerNavigatorSignedMfa(app)
+  // Tenant administrator explicitly enables mandatory MFA. No client-selected tenant ID.
+  app.post("/auth/tenant/mfa/require", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const token = getBearerToken(request)
+    if (!token) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    let actor: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { actor = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
+    if (!["tenant_admin", "admin", "platform_owner"].includes(String(actor.role)))
+      return reply.code(403).send({ ok: false, error: "Forbidden" })
+    const { rows: [tenant] } = await pool.query(
+      `update tenants set navigator_mfa_mandatory=true where id=$1 returning id`, [actor.tenant_id])
+    if (!tenant) return reply.code(404).send({ ok: false, error: "Tenant unavailable" })
+    return { ok: true, mandatory: true, tenantId: Number(tenant.id) }
+  })
   // Enrollment-only authorization never passes getCurrentUserFromToken or operational guards.
   app.post("/auth/restricted-enrollment/signed", async (request: any, reply) => {
     reply.header("Cache-Control", "no-store, private")
