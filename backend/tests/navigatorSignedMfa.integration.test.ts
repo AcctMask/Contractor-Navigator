@@ -20,8 +20,6 @@ const { acceptInvitation } = await import("../src/services/authService")
 const { registerAuthRoutes } = await import("../src/routes/auth")
 const { registerAdminRoutes } = await import("../src/routes/admin")
 const { registerCustomerRoutes } = await import("../src/routes/customers")
-const { commercialRoutes } = await import("../src/modules/commercial/routes")
-const { commercialPool } = await import("../src/modules/commercial/db")
 const { registerCalendarRoutes } = await import("../src/routes/calendar")
 const inspectClaims = (token: string) => jwt.decode(token) as { sub: number; mfa_signed?: boolean }
 const app = Fastify({ logger: false })
