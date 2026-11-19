@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify"
-import { createHmac, randomUUID } from "node:crypto"
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto"
 import { pool } from "../db/db"
 import { registerNavigatorSignedMfa } from "./navigatorSignedMfa"
 import {
@@ -114,6 +114,59 @@ async function requireTenantUserManager(
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   registerNavigatorSignedMfa(app)
+  // Self-service MFA enrollment: the bearer session identifies the ONLY eligible account.
+  // A short-lived one-use grant is issued only while MFA is disabled and no device is bound.
+  app.post("/auth/me/mfa/signed/enrollment", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const token = getBearerToken(request)
+    if (!token) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    let user: Awaited<ReturnType<typeof getCurrentUserFromToken>>
+    try { user = await getCurrentUserFromToken(token) }
+    catch { return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
+    if (!user?.is_active) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const reference = randomBytes(32).toString("base64url")
+    const grant = randomBytes(32).toString("base64url")
+    const client = await pool.connect()
+    try {
+      await client.query("begin")
+      // Lock the authenticated user so concurrent requests cannot create competing grants.
+      const { rows: [eligible] } = await client.query(
+        `select id, tenant_id, navigator_mfa_epoch from app_users
+         where id=$1 and tenant_id=$2 and is_active=true and navigator_mfa_required=false
+         for update`, [user.id, user.tenant_id])
+      if (!eligible) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Enrollment unavailable" })
+      }
+      const { rows: [existing] } = await client.query(
+        `select device_id from navigator_signed_devices
+         where tenant_id=$1 and app_user_id=$2 and revoked_at is null limit 1`,
+        [user.tenant_id, user.id])
+      if (existing) {
+        await client.query("rollback")
+        return reply.code(409).send({ ok: false, error: "Device already registered" })
+      }
+      // Invalidate older unconsumed grants for this same account.
+      await client.query(
+        `update navigator_signed_enrollment_grants set used_at=clock_timestamp()
+         where tenant_id=$1 and app_user_id=$2 and used_at is null`,
+        [user.tenant_id, user.id])
+      const { rows: [issued] } = await client.query(
+        `insert into navigator_signed_enrollment_grants
+         (reference,grant_hash,tenant_id,app_user_id,policy_epoch,expires_at)
+         values ($1,$2,$3,$4,$5,clock_timestamp()+interval '10 minutes')
+         returning expires_at`,
+        [reference,createHash("sha256").update(grant).digest("hex"),
+         user.tenant_id,user.id,eligible.navigator_mfa_epoch])
+      await client.query("commit")
+      return { ok: true, enrollmentLink: "https://pashloc-iv.vercel.app/#navigator-register=" + reference,
+        oneTimeGrant: grant, expiresAt: issued.expires_at, tenantId: user.tenant_id, userId: user.id }
+    } catch (err) {
+      await client.query("rollback").catch(() => undefined)
+      request.log.error(err)
+      return reply.code(503).send({ ok: false, error: "Enrollment unavailable" })
+    } finally { client.release() }
+  })
   app.post("/auth/storm-launch", async (request: any, reply) => {
     try {
       const token = getBearerToken(request)
