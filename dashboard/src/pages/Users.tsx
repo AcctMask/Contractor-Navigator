@@ -71,6 +71,26 @@ export default function UsersPage() {
   const [mfaEnrollment, setMfaEnrollment] = useState<{ enrollmentLink: string; oneTimeGrant: string; expiresAt: string } | null>(null)
   const [mfaEnrollmentError, setMfaEnrollmentError] = useState("")
   const [mfaEnrollmentLoading, setMfaEnrollmentLoading] = useState(false)
+  const [mfaRegistered, setMfaRegistered] = useState(false)
+  const [mfaStatusChecking, setMfaStatusChecking] = useState(false)
+  async function checkPashLocRegistration() {
+    setMfaStatusChecking(true)
+    setMfaEnrollmentError("")
+    try {
+      const res = await fetch(`${API_BASE}/auth/me/mfa/signed/device-status`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+        cache: "no-store",
+      })
+      const json = await res.json()
+      if (!res.ok || json.ok !== true || typeof json.registered !== "boolean")
+        throw new Error(json.error || "Unable to verify device registration")
+      setMfaRegistered(json.registered)
+      if (!json.registered) setMfaEnrollmentError("Registration is not confirmed yet. Complete registration on your iPhone, then check again.")
+    } catch (err) {
+      setMfaEnrollmentError(err instanceof Error ? err.message : "Verification unavailable")
+    } finally { setMfaStatusChecking(false) }
+  }
+
   async function startPashLocEnrollment() {
     setMfaEnrollmentLoading(true)
     setMfaEnrollmentError("")
@@ -1039,6 +1059,11 @@ export default function UsersPage() {
           <p>Register your iPhone for secure Navigator sign-in. Your existing login stays active until registration is verified.</p>
           <button type="button" style={secondaryButtonStyle} disabled={mfaEnrollmentLoading}
             onClick={startPashLocEnrollment}>{mfaEnrollmentLoading ? "Preparing..." : "Set up PashLoc IV"}</button>
+          <div><button type="button" style={secondaryButtonStyle}
+            disabled={mfaStatusChecking} onClick={checkPashLocRegistration}>
+            {mfaStatusChecking ? "Checking..." : "Check iPhone registration"}
+          </button></div>
+          {mfaRegistered && <p role="status">iPhone registered successfully. Navigator has verified the device's signed registration proof.</p>}
           {mfaEnrollmentError && <p role="alert">{mfaEnrollmentError}</p>}
           {mfaEnrollment && <div style={{ overflowWrap: "anywhere" }}>
             <p>Open this link on your iPhone and enter the one-time grant when prompted. Expires {formatDate(mfaEnrollment.expiresAt)}.</p>
