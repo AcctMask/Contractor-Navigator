@@ -140,6 +140,37 @@ test("optional MFA preserves existing password login and scoped CRM", async () =
   // Existing operational job reads are not an MFA authorization boundary.
 })
 
+test("self-service enrollment only issues grants for the configured Navigator app", async () => {
+  const token = (await login(staff)).json().token
+  const issue = (origin: string) => app.inject({
+    method: "POST", url: "/auth/me/mfa/signed/enrollment",
+    headers: { origin, authorization: "Bearer " + token },
+    // The caller may not select the account or tenant that receives the grant.
+    payload: { userId, tenantId: tenant + 1 },
+  })
+  process.env.NAVIGATOR_MFA_SIGNED_ENABLED = "false"
+  try {
+    const unavailable = await issue(desktop)
+    assert.equal(unavailable.statusCode, 503)
+    assert.equal(unavailable.json().oneTimeGrant, undefined)
+  } finally {
+    process.env.NAVIGATOR_MFA_SIGNED_ENABLED = "true"
+  }
+  assert.equal((await issue(phone)).statusCode, 403)
+  const issued = await issue(desktop)
+  assert.equal(issued.statusCode, 200)
+  const { enrollmentLink, oneTimeGrant } = issued.json()
+  const link = new URL(enrollmentLink)
+  assert.equal(link.origin, phone)
+  assert.match(link.hash, /^#navigator-register=[A-Za-z0-9_-]{43}$/)
+  assert.ok(!enrollmentLink.includes(oneTimeGrant))
+  const reference = link.hash.slice("#navigator-register=".length)
+  const info = await post(api + "registration-info", { reference }, phone)
+  assert.equal(info.statusCode, 200)
+  assert.equal(info.json().userId, staffId)
+  assert.equal(info.json().tenantId, tenant)
+})
+
 test("approved device binding, signed approval and one-time Navigator session", async () => {
   preMfaToken = (await login(signed)).json().token
   await pool.query("update app_users set navigator_mfa_required=true,navigator_mfa_epoch=1 where id=$1", [userId])
