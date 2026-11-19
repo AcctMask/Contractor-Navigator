@@ -146,6 +146,16 @@ function requirePasswordFingerprint(passwordHash: string) {
   return createHash("sha256").update(passwordHash).digest("hex")
 }
 
+export function isRestrictedEnrollmentToken(token: string): boolean {
+  try {
+    const claims = jwt.verify(token, JWT_SECRET) as { purpose?: string }
+    return claims.purpose === "pashloc_enrollment_only"
+  } catch {
+    // Invalid tokens remain subject to existing operational authorization checks.
+    return false
+  }
+}
+
 export async function getRestrictedEnrollmentIdentity(token: string) {
   let decoded: ReturnType<typeof verifyToken> & { purpose?: string; password_fingerprint?: string }
   try { decoded = jwt.verify(token, JWT_SECRET) as typeof decoded }
