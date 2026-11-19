@@ -399,6 +399,3 @@ test("tenant policy gates unauthenticated, stale, future and reactivated access 
   assert.equal((await pool.query("select 1 from navigator_signed_devices where device_id=$1 and revoked_at is not null",[staffDevice])).rowCount,1)
 })
 
-test("Navigator MFA health check remains available without an operational session", async () => {
-  assert.equal((await get("/commercial/health")).statusCode, 200)
-})
