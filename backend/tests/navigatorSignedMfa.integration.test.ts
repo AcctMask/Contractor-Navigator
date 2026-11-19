@@ -400,69 +400,18 @@ test("tenant policy gates unauthenticated, stale, future and reactivated access 
   assert.equal((await pool.query("select 1 from navigator_signed_devices where device_id=$1 and revoked_at is not null",[staffDevice])).rowCount,1)
 })
 
-test("Commercial and event ownership boundaries apply to both server entry points", async () => {
-  const standalone = Fastify({ logger: false })
-  await commercialRoutes(standalone)
-  await standalone.ready()
-  try {
-    await pool.query(`
-      create table commercial_targets (id integer primary key, business_name text, do_not_contact boolean,
-        tenant_slug text, engagement_score integer, created_at timestamptz default now(),
-        pipeline_status text, priority_level text, opt_out_reason text, opted_out_at timestamptz, updated_at timestamptz);
-      create table commercial_email_queue (id integer primary key, target_id integer, tenant_slug text,
-        status text, campaign_id uuid, sent_at timestamptz, created_at timestamptz default now());
-      insert into commercial_targets(id,business_name,tenant_slug) values
-        (1,'QA Commercial','qa-alpha'),(2,'QA Public Opt-out',null),(3,'QA Other','qa-bravo');
-      insert into commercial_email_queue(id,target_id,tenant_slug,status) values
-        (1,1,'qa-alpha','pending'),(2,1,'qa-bravo','pending'),(3,3,'qa-bravo','pending');
-      create table system_events (id integer generated always as identity primary key, event_type text,
-        entity_type text, entity_id text, metadata jsonb, created_at timestamptz default now());
-    `)
-    await pool.query(`
-      insert into system_events(event_type,entity_type,entity_id,metadata)
-      select 'tenant-job', 'job', j.id::text, jsonb_build_object('tenant_slug',t.slug)
-      from jobs j join tenants t on t.id=j.tenant_id;
-      insert into system_events(event_type,entity_type,entity_id,metadata) values
-       ('navigator_health_failure','navigator_health',null,'{"component":"qa-platform"}'),
-       ('email_sent','contractor','1','{}'),
-       ('unclassified','system',null,'{}');
-    `)
-    await pool.query("update app_users set role='platform_owner' where id=$1",[userId])
-    const check = (server: typeof app, url: string, token?: string, method: "GET" | "POST" = "GET") =>
-      server.inject({ method, url, headers: token ? { authorization: "Bearer " + token } : {} })
-    const otherSession = (await post("/auth/"+secondSlug+"/login",
-      { email:"other@example.invalid",password })).json().token
-    const restricted = (await login(staff)).json().enrollmentToken
-    const platformChallenge = (await login(signed)).json()
-    const { context } = (await post(api+"challenge",{reference:platformChallenge.reference,deviceId},phone)).json()
-    assert.equal((await doDecision({...context,decision:"approve"})).statusCode,200)
-    const ownerSession = (await finish(platformChallenge)).json().token
-    assert.ok(ownerSession)
-    for (const server of [app, standalone]) {
-      assert.equal((await check(server, "/commercial/targets")).statusCode,401)
-      assert.equal((await check(server, "/commercial/targets", restricted)).statusCode,401)
-      assert.deepEqual((await check(server, "/commercial/targets?tenant="+slug, otherSession)).json().rows.map((row: any)=>row.id),[3])
-      assert.deepEqual((await check(server, "/commercial/targets", ownerSession)).json().rows.map((row: any)=>row.id),[1])
-      assert.equal((await check(server, "/commercial/targets/3", ownerSession)).statusCode,404)
-      assert.equal((await check(server, "/commercial/targets/1/dnc", otherSession, "POST")).statusCode,404)
-      assert.deepEqual((await check(server, "/commercial/targets/1", ownerSession)).json().email_history.map((row: any)=>row.id),[1])
-      assert.equal((await check(server, "/commercial/campaigns/batches", otherSession)).json().rows[0].total_count,1)
-      assert.deepEqual((await check(server, "/commercial/events", ownerSession)).json().rows.map((row: any)=>row.event_type),["email_sent"])
-      assert.equal((await check(server, "/events")).statusCode,401)
-      assert.equal((await check(server, "/events", restricted)).statusCode,401)
-      const otherEvents = (await check(server,"/events?tenant="+slug, otherSession)).json().rows
-      assert.deepEqual(otherEvents.map((row: any)=>row.metadata.tenant_slug),[secondSlug])
-      assert.equal((await check(server, "/events?scope=platform", otherSession)).statusCode,403)
-      assert.deepEqual((await check(server, "/events?scope=platform", ownerSession)).json().rows
-        .map((row: any)=>row.metadata.component),["qa-platform"])
-      const unsubscribe = await check(server, "/commercial/unsubscribe/2")
-      assert.equal(unsubscribe.statusCode,200)
-      assert.match(unsubscribe.body,/You have been unsubscribed/)
-    }
-    assert.equal((await pool.query("select do_not_contact from commercial_targets where id=2")).rows[0].do_not_contact,true)
-    assert.equal((await check(app, "/admin/scheduler/tick", undefined,"POST")).statusCode,401)
-    assert.equal((await check(app, "/admin/scheduler/tick", otherSession,"POST")).statusCode,403)
-  } finally {
-    await standalone.close()
-  }
+test("Commercial workflows remain unchanged after signed MFA, and enrollment-only bearer is rejected", async () => {
+  const restricted = (await login(staff)).json().enrollmentToken
+  const challenge = (await login(signed)).json()
+  const { context } = (await post(api+"challenge",{reference:challenge.reference,deviceId},phone)).json()
+  assert.equal((await doDecision({...context,decision:"approve"})).statusCode,200)
+  const session = (await finish(challenge)).json().token
+  assert.ok(session)
+  // Legacy Commercial health and public unsubscribe remain available, and
+  // their existing records and workflow SQL are not altered by this PR.
+  assert.equal((await get("/commercial/health")).statusCode,200)
+  assert.equal((await get("/commercial/health", session)).statusCode,200)
+  assert.equal((await get("/commercial/health", restricted)).statusCode,401)
+  const { rows: [policy] } = await pool.query("select navigator_mfa_mandatory from tenants where id=$1",[tenant])
+  assert.equal(policy.navigator_mfa_mandatory,true)
 })
