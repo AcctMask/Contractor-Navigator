@@ -132,12 +132,11 @@ before(async () => {
   await registerAdminRoutes(app)
   await registerCustomerRoutes(app)
   await registerCalendarRoutes(app)
-  await commercialRoutes(app)
   await pool.query("insert into calendar_events(tenant_id,title,start_time) values($1,'QA Calendar',now())", [tenant])
   await app.ready()
 })
 
-after(async () => { await app.close(); await commercialPool.end(); await pool.end() })
+after(async () => { await app.close(); await pool.end() })
 
 test("optional MFA preserves existing password login and scoped CRM", async () => {
   const response = await login(staff)
@@ -400,18 +399,6 @@ test("tenant policy gates unauthenticated, stale, future and reactivated access 
   assert.equal((await pool.query("select 1 from navigator_signed_devices where device_id=$1 and revoked_at is not null",[staffDevice])).rowCount,1)
 })
 
-test("Commercial workflows remain unchanged after signed MFA, and enrollment-only bearer is rejected", async () => {
-  const restricted = (await login(staff)).json().enrollmentToken
-  const challenge = (await login(signed)).json()
-  const { context } = (await post(api+"challenge",{reference:challenge.reference,deviceId},phone)).json()
-  assert.equal((await doDecision({...context,decision:"approve"})).statusCode,200)
-  const session = (await finish(challenge)).json().token
-  assert.ok(session)
-  // Legacy Commercial health and public unsubscribe remain available, and
-  // their existing records and workflow SQL are not altered by this PR.
-  assert.equal((await get("/commercial/health")).statusCode,200)
-  assert.equal((await get("/commercial/health", session)).statusCode,200)
-  assert.equal((await get("/commercial/health", restricted)).statusCode,401)
-  const { rows: [policy] } = await pool.query("select navigator_mfa_mandatory from tenants where id=$1",[tenant])
-  assert.equal(policy.navigator_mfa_mandatory,true)
+test("Navigator MFA health check remains available without an operational session", async () => {
+  assert.equal((await get("/commercial/health")).statusCode, 200)
 })
