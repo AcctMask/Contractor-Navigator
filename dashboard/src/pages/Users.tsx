@@ -110,6 +110,23 @@ export default function UsersPage() {
   }
 
 
+  async function replacePashLocSigningDevice() {
+    setMfaEnrollmentLoading(true)
+    setMfaEnrollmentError("")
+    setMfaEnrollment(null)
+    try {
+      const res = await fetch(`${API_BASE}/auth/me/mfa/signed/replace-device`, {
+        method: "POST", headers: { Authorization: `Bearer ${getToken()}` },
+      })
+      const json = await res.json()
+      if (!res.ok || json.ok !== true || typeof json.enrollmentLink !== "string" ||
+          typeof json.oneTimeGrant !== "string") throw new Error(json.error || "Replacement unavailable")
+      setMfaEnrollment(json)
+    } catch (err) {
+      setMfaEnrollmentError(err instanceof Error ? err.message : "Replacement unavailable")
+    } finally { setMfaEnrollmentLoading(false) }
+  }
+
   const [currentUserId, setCurrentUserId] =
     useState<number | null>(null)
 
@@ -1065,6 +1082,11 @@ export default function UsersPage() {
             {mfaStatusChecking ? "Checking..." : "Check signing-device registration"}
           </button></div>
           {mfaRegistered && <p role="status">A signing device is registered. Navigator verified its signed registration proof but cannot determine whether it is a phone or computer. Use the registered device to approve logins from other computers.</p>}
+          {mfaRegistered && <div>
+            <p>To move your signing key from a computer to your phone, use a signed Navigator session on the registered computer. The original key remains active until the phone completes verified registration. Completing replacement will require signing in again.</p>
+            <button type="button" style={secondaryButtonStyle} disabled={mfaEnrollmentLoading}
+              onClick={replacePashLocSigningDevice}>Move signing device to phone</button>
+          </div>}
           {mfaEnrollmentError && <p role="alert">{mfaEnrollmentError}</p>}
           {mfaEnrollment && <div style={{ overflowWrap: "anywhere" }}>
             <p>Open this link on the phone you want to use for approvals, not on this computer. Enter the one-time grant there. Expires {formatDate(mfaEnrollment.expiresAt)}.</p>
