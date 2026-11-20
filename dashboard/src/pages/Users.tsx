@@ -85,7 +85,7 @@ export default function UsersPage() {
       if (!res.ok || json.ok !== true || typeof json.registered !== "boolean")
         throw new Error(json.error || "Unable to verify device registration")
       setMfaRegistered(json.registered)
-      if (!json.registered) setMfaEnrollmentError("Registration is not confirmed yet. Complete registration on your iPhone, then check again.")
+      if (!json.registered) setMfaEnrollmentError("Registration is not confirmed yet. Open the registration link on the device you intend to use for approvals, then check again.")
     } catch (err) {
       setMfaEnrollmentError(err instanceof Error ? err.message : "Verification unavailable")
     } finally { setMfaStatusChecking(false) }
@@ -1056,18 +1056,21 @@ export default function UsersPage() {
       >
         <section style={{ ...cardStyle, minHeight: 0 }}>
           <h2>Set up PashLoc IV</h2>
-          <p>Register your iPhone for secure Navigator sign-in. Your existing login stays active until registration is verified.</p>
+          <p>Register a PashLoc IV signing device once, then use it to approve Navigator sign-ins from other computers.</p>
+          <p><strong>Important:</strong> Open the registration link on the phone you want to use for approvals, not on this computer. The signing key stays on whichever device opens the link.</p>
           <button type="button" style={secondaryButtonStyle} disabled={mfaEnrollmentLoading}
             onClick={startPashLocEnrollment}>{mfaEnrollmentLoading ? "Preparing..." : "Set up PashLoc IV"}</button>
           <div><button type="button" style={secondaryButtonStyle}
             disabled={mfaStatusChecking} onClick={checkPashLocRegistration}>
-            {mfaStatusChecking ? "Checking..." : "Check iPhone registration"}
+            {mfaStatusChecking ? "Checking..." : "Check signing-device registration"}
           </button></div>
-          {mfaRegistered && <p role="status">iPhone registered successfully. Navigator has verified the device's signed registration proof.</p>}
+          {mfaRegistered && <p role="status">A signing device is registered. Navigator verified its signed registration proof but cannot determine whether it is a phone or computer. Use the registered device to approve logins from other computers.</p>}
           {mfaEnrollmentError && <p role="alert">{mfaEnrollmentError}</p>}
           {mfaEnrollment && <div style={{ overflowWrap: "anywhere" }}>
-            <p>Open this link on your iPhone and enter the one-time grant when prompted. Expires {formatDate(mfaEnrollment.expiresAt)}.</p>
-            <p><a href={mfaEnrollment.enrollmentLink} target="_blank" rel="noreferrer">Open PashLoc IV registration</a></p>
+            <p>Open this link on the phone you want to use for approvals, not on this computer. Enter the one-time grant there. Expires {formatDate(mfaEnrollment.expiresAt)}.</p>
+            <p>Copy the registration link and open it on your phone:</p>
+            <code>{mfaEnrollment.enrollmentLink}</code>
+            <div><button type="button" style={secondaryButtonStyle} onClick={() => navigator.clipboard.writeText(mfaEnrollment.enrollmentLink)}>Copy registration link</button></div>
             <p>One-time registration grant:</p>
             <code>{mfaEnrollment.oneTimeGrant}</code>
             <div><button type="button" style={secondaryButtonStyle}
