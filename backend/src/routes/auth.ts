@@ -249,6 +249,46 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(503).send({ ok: false, error: "Enrollment unavailable" })
     } finally { client.release() }
   })
+  // Device replacement requires an existing signed operational session. The old
+  // signing device remains usable until the new device proves possession.
+  app.post("/auth/me/mfa/signed/replace-device", async (request: any, reply) => {
+    reply.header("Cache-Control", "no-store, private")
+    const token = getBearerToken(request)
+    if (!token || !isSignedOperationalToken(token))
+      return reply.code(401).send({ ok: false, error: "Signed Navigator session required" })
+    const user = await getCurrentUserFromToken(token).catch(() => null)
+    if (!user?.is_active) return reply.code(401).send({ ok: false, error: "Unauthorized" })
+    const config = signedMfaConfig()
+    if (!config || request.headers.origin !== config.browser)
+      return reply.code(403).send({ ok: false, error: "Unavailable" })
+    const client = await pool.connect()
+    try {
+      await client.query("begin")
+      const { rows: [account] } = await client.query(
+        `select id, tenant_id, navigator_mfa_epoch from app_users
+         where id=$1 and tenant_id=$2 and is_active=true for update`, [user.id, user.tenant_id])
+      if (!account) { await client.query("rollback"); return reply.code(401).send({ ok: false, error: "Unauthorized" }) }
+      const { rows: [device] } = await client.query(
+        `select device_id from navigator_signed_devices where tenant_id=$1 and app_user_id=$2
+         and revoked_at is null and proof_verified_at is not null limit 1`, [user.tenant_id, user.id])
+      if (!device) { await client.query("rollback"); return reply.code(409).send({ ok: false, error: "No registered signing device" }) }
+      const reference = randomBytes(32).toString("base64url"), grant = randomBytes(32).toString("base64url")
+      await client.query(`update navigator_signed_enrollment_grants set used_at=clock_timestamp()
+        where tenant_id=$1 and app_user_id=$2 and used_at is null`, [user.tenant_id, user.id])
+      const { rows: [issued] } = await client.query(`insert into navigator_signed_enrollment_grants
+        (reference,grant_hash,tenant_id,app_user_id,policy_epoch,authorization_id,expires_at)
+        values ($1,$2,$3,$4,$5,$6,clock_timestamp()+interval '10 minutes') returning expires_at`,
+        [reference,createHash("sha256").update(grant).digest("hex"),user.tenant_id,user.id,
+         account.navigator_mfa_epoch,randomUUID()])
+      await client.query("commit")
+      return { ok: true, enrollmentLink: config.phone + "/#navigator-register=" + reference,
+        oneTimeGrant: grant, expiresAt: issued.expires_at }
+    } catch (err) {
+      await client.query("rollback").catch(() => undefined)
+      request.log.error(err)
+      return reply.code(503).send({ ok: false, error: "Replacement unavailable" })
+    } finally { client.release() }
+  })
   // Registration status is scoped to the bearer-session identity, never a client-supplied user ID.
   app.get("/auth/me/mfa/signed/device-status", async (request: any, reply) => {
     reply.header("Cache-Control", "no-store, private")

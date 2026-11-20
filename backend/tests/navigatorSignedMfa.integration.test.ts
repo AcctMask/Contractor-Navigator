@@ -263,6 +263,22 @@ test("approved device binding, signed approval and one-time Navigator session", 
   assert.deepEqual(events.map((event: any) => event.title), ["QA Calendar"])
 })
 
+test("device transfer requires signed authentication and preserves existing signing device while pending", async () => {
+  const issue = (token: string, origin = desktop) => app.inject({
+    method: "POST", url: "/auth/me/mfa/signed/replace-device",
+    headers: { authorization: "Bearer " + token, origin },
+  })
+  assert.equal((await issue(preMfaToken)).statusCode, 401)
+  assert.equal((await issue(approvedToken, phone)).statusCode, 403)
+  const issued = await issue(approvedToken)
+  assert.equal(issued.statusCode, 200)
+  const reference = new URL(issued.json().enrollmentLink).hash.slice("#navigator-register=".length)
+  assert.equal((await post(api + "registration-info", { reference }, phone)).statusCode, 200)
+  const existing = await pool.query("select revoked_at from navigator_signed_devices where device_id=$1", [deviceId])
+  assert.equal(existing.rows[0].revoked_at, null)
+  assert.equal((await get("/auth/me", approvedToken)).statusCode, 200)
+})
+
 test("denied, expired and unavailable challenges fail closed", async () => {
   const deny = (await login(signed)).json()
   const { context } = (await post(api + "challenge", { reference: deny.reference, deviceId }, phone)).json()
