@@ -7,8 +7,8 @@ const grantQuery = `select g.*, u.email from navigator_signed_enrollment_grants 
   join app_users u on u.id=g.app_user_id and u.tenant_id=g.tenant_id
   where g.reference=$1 and u.is_active and g.policy_epoch=u.navigator_mfa_epoch and g.used_at is null
     and g.expires_at>clock_timestamp() and g.expires_at<=clock_timestamp()+interval '10 minutes'
-    and not exists (select 1 from navigator_signed_devices d
-      where d.tenant_id=g.tenant_id and d.app_user_id=g.app_user_id and d.revoked_at is null)`
+    and (g.authorization_id is not null or not exists (select 1 from navigator_signed_devices d
+      where d.tenant_id=g.tenant_id and d.app_user_id=g.app_user_id and d.revoked_at is null))`
 
 export async function signedRegistrationInfo(reference: string) {
   const { rows: [row] } = await pool.query(grantQuery, [reference])
@@ -65,6 +65,10 @@ export async function registerSignedDevice(input: Record<string, unknown>) {
       return null
     }
     if (row.authorization_id) {
+      // Revoke previous signing keys only after the replacement key is proven and bound.
+      await client.query(`update navigator_signed_devices set revoked_at=clock_timestamp()
+        where tenant_id=$1 and app_user_id=$2 and device_id<>$3 and revoked_at is null`,
+        [row.tenant_id, row.app_user_id, deviceId])
       await client.query(`update app_users u set navigator_mfa_epoch=navigator_mfa_epoch+1
         where id=$1 and tenant_id=$2 and exists (
           select 1 from tenants t where t.id=u.tenant_id and t.navigator_mfa_mandatory)`,
