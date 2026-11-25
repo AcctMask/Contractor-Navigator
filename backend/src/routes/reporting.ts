@@ -384,7 +384,6 @@ return reply.send({
           "crm reporting failed"
       })
     }
-  }
 }
 
 export async function registerReportingRoutes(app: FastifyInstance) {
