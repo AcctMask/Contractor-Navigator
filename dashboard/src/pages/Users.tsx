@@ -163,6 +163,7 @@ export default function UsersPage() {
       const body = await response.json()
       if (!response.ok || body.ok !== true) throw new Error(body.error || "OIM permission update failed")
       setOimAuthorized(authorized)
+      window.dispatchEvent(new Event("navigator-oim-access-updated"))
       setManageStatus(authorized ? "Operational Intelligence authorized" : "Operational Intelligence revoked")
     } catch (error) {
       setManageError(error instanceof Error ? error.message : "OIM permission update failed")
