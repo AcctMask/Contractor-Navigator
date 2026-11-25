@@ -50,7 +50,7 @@ import {
   composeNavigatorCandidate,
   submitNavigatorObservation,
 } from "./headquartersService"
-import { isPhoneDnc } from "./dncService"
+import { isPhoneDnc, markPhoneAsDnc } from "./dncService"
 import { getSmsFailureStreak } from "./smsDeliveryStats"
 import { getTwilioErrorCode, isPermanentTwilioDeliveryFailure, isSmsRetryExhausted, getSmsRetryCooldownMs, SMS_RETRY_POLICY_VERSION } from "./smsDeliveryPolicy"
 
@@ -2119,6 +2119,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       jobId,
       reason
     )
+    await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
 
     await addTimelineEvent(
       tenantId,
@@ -2452,6 +2453,15 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       isPermanentTwilioDeliveryFailure(err)
 
     if (permanent) {
+      // Twilio 21610 is a consent revocation: persist suppression for this
+      // tenant+phone, including any later jobs using the same recipient.
+      if (twilioErrorCode === 21610) {
+        await markPhoneAsDnc(tenantId, callbackNumber, {
+          customerId: job.customer_id,
+          source: "twilio_21610",
+          note: "Recipient opted out via Twilio",
+        })
+      }
       const reason =
         `AI follow-up paused after permanent Twilio error ` +
         `${twilioErrorCode}: ${errorMessage}`
