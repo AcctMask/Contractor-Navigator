@@ -30,6 +30,7 @@ import { registerBusinessPerformanceV2Routes } from "./routes/businessPerformanc
 import { registerPlatformProvisioningRoutes } from "./routes/platformProvisioning"
 import { registerFinancialOperationsBridgeRoutes } from "./routes/financialOperationsBridge"
 import { registerOpsIntelBridgeRoutes } from "./routes/opsIntelBridge"
+import { registerOperationalIntelligenceHandoffRoutes } from "./routes/operationalIntelligenceHandoff"
 import { registerFinancialOperationsHandoffRoutes } from "./routes/financialOperationsHandoff"
 import { startFollowupScheduler } from "./services/followupScheduler"
 import { ensureFollowupLifecycleAuthority } from "./services/followupLifecycleService"
@@ -90,6 +91,7 @@ await registerBusinessPerformanceV2Routes(app)
 await registerPlatformProvisioningRoutes(app)
 await registerFinancialOperationsBridgeRoutes(app)
 await registerOpsIntelBridgeRoutes(app)
+await registerOperationalIntelligenceHandoffRoutes(app)
 await registerFinancialOperationsHandoffRoutes(app)
 await registerClaimsEmailIntakeRoutes(app)
 await registerSalesEmailIntakeRoutes(app)
