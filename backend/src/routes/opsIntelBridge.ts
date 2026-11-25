@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify"
 import { timingSafeEqual } from "crypto"
 import { pool } from "../db/db"
+import { crmMetricsHandler } from "./reporting"
 
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
@@ -59,6 +60,33 @@ async function getTenantBySlug(
 export async function registerOpsIntelBridgeRoutes(
   app: FastifyInstance
 ) {
+  // Reuse the existing aggregate CRM calculations with the established
+  // service credential; never allow unscoped/global reporting.
+  app.get(
+    "/integrations/ops-intel/:tenantSlug/crm-metrics.json",
+    async (request: any, reply) => {
+      if (!requireOpsIntelService(request)) {
+        return reply.code(401).send({
+          ok: false,
+          error: "Authentication required",
+        })
+      }
+
+      const tenantSlug = String(
+        request.params?.tenantSlug || ""
+      ).trim()
+
+      if (!tenantSlug) {
+        return reply.code(400).send({
+          ok: false,
+          error: "tenantSlug is required",
+        })
+      }
+
+      return crmMetricsHandler(request, reply, tenantSlug)
+    }
+  )
+
   app.get(
     "/integrations/ops-intel/:tenantSlug/jobs",
     async (request: any, reply) => {
