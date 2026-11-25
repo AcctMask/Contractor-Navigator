@@ -1,14 +1,17 @@
-import { FastifyInstance } from "fastify"
+import { FastifyInstance, FastifyReply, FastifyRequest } from "fastify"
 import { pool } from "../db/db"
 
-export async function registerReportingRoutes(app: FastifyInstance) {
-  app.get("/reporting/crm-metrics.json", async (req, reply) => {
+export async function crmMetricsHandler(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  serviceTenantSlug?: string
+) {
     try {
       const query = req.query as {
         tenant?: string
       }
 
-      const tenantSlug = String(query.tenant || "").trim()
+      const tenantSlug = serviceTenantSlug ?? String(query.tenant || "").trim()
 
       let tenant:
         | {
@@ -305,7 +308,7 @@ export async function registerReportingRoutes(app: FastifyInstance) {
         params
       )
 
-        const navigatorHealthResult = await pool.query(
+        const navigatorHealthResult = serviceTenantSlug === undefined ? await pool.query(
     `
     select
       id,
@@ -322,16 +325,16 @@ export async function registerReportingRoutes(app: FastifyInstance) {
     order by created_at desc, id desc
     limit 100
     `
-  )
+  ) : null
 
-  const navigatorHealthEvents = navigatorHealthResult.rows
+  const navigatorHealthEvents = navigatorHealthResult?.rows
 
 return reply.send({
         ok: true,
         source: "contractor-navigator",
-      navigator_health: {
-        events: navigatorHealthEvents,
-      },
+      ...(serviceTenantSlug === undefined
+        ? { navigator_health: { events: navigatorHealthEvents } }
+        : {}),
         scope: tenant
           ? "tenant"
           : "global",
@@ -381,5 +384,9 @@ return reply.send({
           "crm reporting failed"
       })
     }
-  })
+  }
+}
+
+export async function registerReportingRoutes(app: FastifyInstance) {
+  app.get("/reporting/crm-metrics.json", (req, reply) => crmMetricsHandler(req, reply))
 }
