@@ -132,6 +132,42 @@ export default function UsersPage() {
 
   const [selectedUser, setSelectedUser] =
     useState<UserRow | null>(null)
+  const [oimAuthorized, setOimAuthorized] = useState(false)
+  const [oimAccessLoading, setOimAccessLoading] = useState(false)
+  useEffect(() => {
+    if (!selectedUser?.id) { setOimAuthorized(false); return }
+    let cancelled = false
+    setOimAccessLoading(true)
+    fetch(API_BASE + "/operational-intelligence/access/" + getTenantSlug() + "/" + selectedUser.id, {
+      headers: { Authorization: "Bearer " + getToken() },
+      cache: "no-store",
+    }).then(async response => {
+      const body = await response.json()
+      if (!response.ok || !body.ok) throw new Error("OIM permission could not be loaded")
+      if (!cancelled) setOimAuthorized(body.authorized === true)
+    }).catch(() => { if (!cancelled) setOimAuthorized(false) })
+      .finally(() => { if (!cancelled) setOimAccessLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedUser?.id])
+
+  async function setManagedOimAuthorized(user: UserRow, authorized: boolean) {
+    if (!user.id) return
+    setManaging(true)
+    setManageError("")
+    try {
+      const response = await fetch(API_BASE + "/operational-intelligence/access/" + getTenantSlug() + "/" + user.id, {
+        method: "PATCH",
+        headers: { Authorization: "Bearer " + getToken(), "Content-Type": "application/json" },
+        body: JSON.stringify({ authorized }),
+      })
+      const body = await response.json()
+      if (!response.ok || body.ok !== true) throw new Error(body.error || "OIM permission update failed")
+      setOimAuthorized(authorized)
+      setManageStatus(authorized ? "Operational Intelligence authorized" : "Operational Intelligence revoked")
+    } catch (error) {
+      setManageError(error instanceof Error ? error.message : "OIM permission update failed")
+    } finally { setManaging(false) }
+  }
 
   const managePanelRef =
     useRef<HTMLElement | null>(null)
@@ -1586,6 +1622,13 @@ export default function UsersPage() {
                 }}
               >
                 Platform owner is protected.
+                <div style={{ marginTop: 12 }}>
+                  <button type="button" style={secondaryButtonStyle}
+                    disabled={managing || oimAccessLoading}
+                    onClick={() => selectedUser && setManagedOimAuthorized(selectedUser, !oimAuthorized)}>
+                    Operational Intelligence Authorized: {oimAccessLoading ? "CHECKING" : oimAuthorized ? "ON" : "OFF"}
+                  </button>
+                </div>
 
                 <div
                   style={{
@@ -1761,6 +1804,18 @@ export default function UsersPage() {
                       key={String(selectedUser.id)}
                       companyId={selectedUser.subcontractor_company_id}
                     />
+                  ) : null}
+
+                  {["platform_owner", "tenant_admin", "admin"].includes(selectedUser.role) ? (
+                    <div style={{ marginBottom: 16, padding: 14, border: "1px solid rgba(255,255,255,0.10)", borderRadius: 14 }}>
+                      <strong>Operational Intelligence</strong>
+                      <p>Explicit Navigator administrator access; separate from Financial Operations.</p>
+                      <button type="button" style={secondaryButtonStyle}
+                        disabled={managing || oimAccessLoading}
+                        onClick={() => setManagedOimAuthorized(selectedUser, !oimAuthorized)}>
+                        Operational Intelligence Authorized: {oimAccessLoading ? "CHECKING" : oimAuthorized ? "ON" : "OFF"}
+                      </button>
+                    </div>
                   ) : null}
 
                   {selectedUser.role === "subcontractor" ? (
