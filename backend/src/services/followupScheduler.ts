@@ -5,6 +5,8 @@ import {
   getStageFollowupConfig,
 } from "./devSettingsService"
 import { AI_FOLLOWUP_PROGRESS_KIND } from "./followupProgress"
+import { getSmsFailureStreak } from "./smsDeliveryStats"
+import { getSmsRetryCooldownMs, isSmsRetryExhausted } from "./smsDeliveryPolicy"
 import { sendAlertEmail } from "./emailService"
 import {
   reportNavigatorFailure,
@@ -32,6 +34,7 @@ type StageStats = {
 }
 
 let schedulerStarted = false
+let schedulerPassInProgress = false
 
 const POLL_MS = 60 * 1000
 
@@ -138,6 +141,7 @@ async function getAutomatedJobs(): Promise<SchedJob[]> {
         j.active_followup_workflow is not null
         or j.crm_flow_key <> 'ems_tarp_email_intake'
       )
+      and j.bot_paused is not true
     order by coalesce(j.followup_workflow_started_at, j.created_at) desc
     limit 500
     `
@@ -358,6 +362,21 @@ async function processJob(job: SchedJob) {
     job.followup_workflow_started_at
   )
 
+  // Persisted, step-scoped Twilio failure streak; never consume a healthy
+  // Developer Settings sequence step until the SMS is accepted by Twilio.
+  const smsFailureStreak = await getSmsFailureStreak(
+    job.tenant_id,
+    job.id,
+    automationKey,
+    job.followup_workflow_started_at
+  )
+  if (isSmsRetryExhausted(smsFailureStreak.count)) return
+  if (smsFailureStreak.count > 0 && smsFailureStreak.last_failure_at) {
+    const lastFailureMs = new Date(smsFailureStreak.last_failure_at).getTime()
+    const cooldownMs = getSmsRetryCooldownMs(smsFailureStreak.count)
+    if (!Number.isFinite(lastFailureMs) || Date.now() - lastFailureMs < cooldownMs) return
+  }
+
   const continuousOperationalWorkflow =
     automationKey === "wa_sent" ||
     automationKey === "tarp_active"
@@ -432,9 +451,13 @@ async function processJob(job: SchedJob) {
 }
 
 async function runSchedulerPass() {
-  const jobs = await getAutomatedJobs()
+  // Prevent overlapping setInterval passes within this application process.
+  if (schedulerPassInProgress) return
+  schedulerPassInProgress = true
+  try {
+    const jobs = await getAutomatedJobs()
 
-  for (const job of jobs) {
+    for (const job of jobs) {
     try {
       await processJob(job)
 
@@ -455,6 +478,9 @@ async function runSchedulerPass() {
         jobId: job.id,
       })
     }
+    }
+  } finally {
+    schedulerPassInProgress = false
   }
 }
 

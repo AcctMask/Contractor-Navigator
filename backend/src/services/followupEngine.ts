@@ -50,29 +50,9 @@ import {
   composeNavigatorCandidate,
   submitNavigatorObservation,
 } from "./headquartersService"
-import { isPhoneDnc } from "./dncService"
-
-const PERMANENT_TWILIO_ERROR_CODES = new Set([
-  21211,
-  21265,
-  21266,
-  21268,
-])
-
-function getTwilioErrorCode(error: any): number | null {
-  const code = Number(error?.code)
-
-  return Number.isFinite(code)
-    ? code
-    : null
-}
-
-function isPermanentTwilioDeliveryFailure(error: any) {
-  const code = getTwilioErrorCode(error)
-
-  return code !== null &&
-    PERMANENT_TWILIO_ERROR_CODES.has(code)
-}
+import { isPhoneDnc, markPhoneAsDnc } from "./dncService"
+import { getSmsFailureStreak } from "./smsDeliveryStats"
+import { getTwilioErrorCode, isPermanentTwilioDeliveryFailure, isSmsRetryExhausted, getSmsRetryCooldownMs, SMS_RETRY_POLICY_VERSION } from "./smsDeliveryPolicy"
 
 async function pauseAiFollowupForDeliveryFailure(
   tenantId: number,
@@ -92,7 +72,19 @@ async function pauseAiFollowupForDeliveryFailure(
   )
 }
 
-
+/** Staff alert is advisory; failed email must not reopen sending. */
+async function notifySmsDeliveryHalt(tenantId: number, jobId: number, targets: AlertTargets, reason: string) {
+  if (!targets.alert_email_to) return
+  try {
+    await sendAlertEmail(
+      targets.alert_email_to,
+      `Navigator AI follow-up paused — Job #${jobId}`,
+      `Automated customer SMS follow-up was safely paused.\n\nTenant ID: ${tenantId}\nJob ID: ${jobId}\nReason: ${reason}\n\nReview in Navigator before manually re-enabling automation.`
+    )
+  } catch (error) {
+    console.error("SMS safety staff notification failed", { tenantId, jobId, error })
+  }
+}
 
 async function reportAaCustomerActivity(payload: {
   tenant_slug: string;
@@ -2048,6 +2040,18 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     )
   }
 
+  // Suppress DNC before message generation; pause to prevent repeat churn.
+  if (customerIsDnc) {
+    const reason = "AI follow-up paused because customer phone is marked DNC"
+    await pauseAiFollowupForDeliveryFailure(tenantId, jobId, reason)
+    await addTimelineEvent(tenantId, jobId, "ai_message_delivery_halted", reason, {
+      stage: job.active_followup_workflow || job.stage,
+      channel: "sms", permanent: true, reason: "dnc",
+    })
+    await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
+    return { ok: true, skipped: true, reason: "dnc", tenant_id: tenantId, job_id: jobId }
+  }
+
   const timeline = await getTimeline(tenantId, jobId)
   const aiMessage = buildAiMessage(job, timeline, settings)
 
@@ -2061,6 +2065,28 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
     )
 
     return { ok: true, skipped: true, reason: "stage_not_supported" }
+  }
+
+  // Direct callers obey retry cap and cooldown too.
+  const failureStreak = await getSmsFailureStreak(
+    tenantId, jobId, aiMessage.stage, job.followup_workflow_started_at || null
+  )
+  if (isSmsRetryExhausted(failureStreak.count)) {
+    const reason = "AI follow-up paused after three consecutive Twilio send failures"
+    await pauseAiFollowupForDeliveryFailure(tenantId, jobId, reason)
+    await addTimelineEvent(tenantId, jobId, "ai_message_delivery_halted", reason, {
+      stage: aiMessage.stage, order: aiMessage.order,
+      channel: "sms", permanent: false, reason: "retry_exhausted",
+    })
+    await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
+    return { ok: true, skipped: true, reason: "retry_exhausted", tenant_id: tenantId, job_id: jobId }
+  }
+  if (failureStreak.count > 0 && failureStreak.last_failure_at) {
+    const lastFailureMs = new Date(failureStreak.last_failure_at).getTime()
+    if (!Number.isFinite(lastFailureMs) ||
+        Date.now() - lastFailureMs < getSmsRetryCooldownMs(failureStreak.count)) {
+      return { ok: true, skipped: true, reason: "retry_cooldown", tenant_id: tenantId, job_id: jobId }
+    }
   }
 
   const tenantDisplayName =
@@ -2093,6 +2119,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       jobId,
       reason
     )
+    await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
 
     await addTimelineEvent(
       tenantId,
@@ -2119,29 +2146,6 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       sent: false,
       reason: "missing_phone",
       permanent: true,
-    }
-  }
-
-  if (customerIsDnc) {
-    await addTimelineEvent(
-      tenantId,
-      jobId,
-      "ai_message_skipped",
-      "AI message skipped because phone is marked DNC",
-      {
-        stage: aiMessage.stage,
-        order: aiMessage.order,
-        to: callbackNumber,
-      }
-    )
-
-    return {
-      ok: true,
-      skipped: true,
-      reason: "dnc",
-      tenant_id: tenantId,
-      job_id: jobId,
-      to: callbackNumber,
     }
   }
 
@@ -2453,11 +2457,29 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
         `AI follow-up paused after permanent Twilio error ` +
         `${twilioErrorCode}: ${errorMessage}`
 
+      // Fail closed on this job before any secondary DNC persistence work.
       await pauseAiFollowupForDeliveryFailure(
         tenantId,
         jobId,
         reason
       )
+
+      // Twilio 21610 signifies consent revocation. Persist tenant+phone
+      // suppression so another job cannot resume contacting that number.
+      if (twilioErrorCode === 21610) {
+        try {
+          await markPhoneAsDnc(tenantId, callbackNumber, {
+            customerId: job.customer_id,
+            source: "twilio_21610",
+            note: "Recipient opted out via Twilio",
+          })
+        } catch (dncError) {
+          console.error("SMS safety: DNC persistence failed after job pause", {
+            tenantId, jobId, dncError,
+          })
+          // The job remains paused; staff notice below is still issued.
+        }
+      }
 
       await addTimelineEvent(
         tenantId,
@@ -2473,6 +2495,7 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
           twilio_error_code: twilioErrorCode,
         }
       )
+      await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
 
       return {
         ok: true,
@@ -2502,8 +2525,21 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
         to: callbackNumber,
         permanent: false,
         twilio_error_code: twilioErrorCode,
+        sms_retry_policy: SMS_RETRY_POLICY_VERSION,
       }
     )
+
+    const failureCount = failureStreak.count + 1
+    if (isSmsRetryExhausted(failureCount)) {
+      const reason = "AI follow-up paused after three consecutive Twilio send failures"
+      await pauseAiFollowupForDeliveryFailure(tenantId, jobId, reason)
+      await addTimelineEvent(tenantId, jobId, "ai_message_delivery_halted", reason, {
+        stage: aiMessage.stage, order: aiMessage.order,
+        channel: "sms", permanent: false, reason: "retry_exhausted",
+        consecutive_failures: failureCount,
+      })
+      await notifySmsDeliveryHalt(tenantId, jobId, alertTargets, reason)
+    }
 
     return {
       ok: true,
