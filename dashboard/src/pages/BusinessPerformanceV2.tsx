@@ -115,6 +115,8 @@ type ReportData = {
     invoiced: number;
     paid: number;
     tarp_roof_conversions: number;
+    tarp_roof_qualifying_tarps: number;
+    tarp_roof_conversion_rate: number | null;
     tarp_roof_conversion_job_ids?: number[];
   };
 
@@ -995,6 +997,9 @@ export default function BusinessPerformanceV2() {
             {
               label: "Tarp → Roof Conversions",
               value: data.funnel.tarp_roof_conversions,
+              detail: data.funnel.tarp_roof_conversion_rate === null
+                ? "—"
+                : percent(data.funnel.tarp_roof_conversion_rate),
               onClick: () =>
                 selectJobs(
                   data.funnel.tarp_roof_conversion_job_ids || []
