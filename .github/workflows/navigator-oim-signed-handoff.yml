@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'backend/src/routes/operationalIntelligenceHandoff.ts'
+      - 'backend/src/routes/opsIntelBridge.ts'
+      - 'backend/src/routes/businessPerformanceV2.ts'
+      - 'backend/tests/oimBusinessPerformance.smoke.ts'
       - 'backend/tests/operationalIntelligenceHandoff.smoke.ts'
       - 'dashboard/src/lib/operationalIntelligence.ts'
       - 'dashboard/src/App.tsx'
@@ -31,6 +34,7 @@ jobs:
         run: |
           npm ci --ignore-scripts
           DATABASE_URL="postgresql://test:test@127.0.0.1:1/test" npx tsx tests/operationalIntelligenceHandoff.smoke.ts
+          DATABASE_URL="postgresql://test:test@127.0.0.1:1/test" npx tsx tests/oimBusinessPerformance.smoke.ts
       - name: Build Navigator frontend
         working-directory: dashboard
         run: |
