@@ -99,6 +99,8 @@ export async function registerBusinessPerformanceV2Routes(
         // Tarp -> Roof: documented tarp stage followed by a signed
         // non-EMS contract. Never infer conversion from invoicing,
         // payment, or a roof stage alone.
+        // Rate denominator: distinct jobs ever documented in a tarp stage.
+        // The selected date range filters conversions, not tarp history.
         const tarpRoofConversionResult = await pool.query(
           `
             with tarp_entries as (
@@ -161,6 +163,7 @@ export async function registerBusinessPerformanceV2Routes(
             )
             select
               count(*)::int as tarp_roof_conversions,
+              (select count(*)::int from tarp_entries) as qualifying_tarp_jobs,
               coalesce(
                 array_agg(id order by id),
                 '{}'::int[]
@@ -1054,6 +1057,17 @@ export async function registerBusinessPerformanceV2Routes(
               Number(
                 tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0
               ),
+            tarp_roof_qualifying_tarps:
+              Number(
+                tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0
+              ),
+            tarp_roof_conversion_rate:
+              Number(tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0) > 0
+                ? percent(
+                    Number(tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0),
+                    Number(tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0)
+                  )
+                : null,
             tarp_roof_conversion_job_ids:
               (
                 tarpRoofConversionResult.rows[0]
