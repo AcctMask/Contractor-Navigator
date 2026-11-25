@@ -2453,24 +2453,33 @@ export async function queueAiFollowupByTenantSlug(tenantSlug: string, jobId: num
       isPermanentTwilioDeliveryFailure(err)
 
     if (permanent) {
-      // Twilio 21610 is a consent revocation: persist suppression for this
-      // tenant+phone, including any later jobs using the same recipient.
-      if (twilioErrorCode === 21610) {
-        await markPhoneAsDnc(tenantId, callbackNumber, {
-          customerId: job.customer_id,
-          source: "twilio_21610",
-          note: "Recipient opted out via Twilio",
-        })
-      }
       const reason =
         `AI follow-up paused after permanent Twilio error ` +
         `${twilioErrorCode}: ${errorMessage}`
 
+      // Fail closed on this job before any secondary DNC persistence work.
       await pauseAiFollowupForDeliveryFailure(
         tenantId,
         jobId,
         reason
       )
+
+      // Twilio 21610 signifies consent revocation. Persist tenant+phone
+      // suppression so another job cannot resume contacting that number.
+      if (twilioErrorCode === 21610) {
+        try {
+          await markPhoneAsDnc(tenantId, callbackNumber, {
+            customerId: job.customer_id,
+            source: "twilio_21610",
+            note: "Recipient opted out via Twilio",
+          })
+        } catch (dncError) {
+          console.error("SMS safety: DNC persistence failed after job pause", {
+            tenantId, jobId, dncError,
+          })
+          // The job remains paused; staff notice below is still issued.
+        }
+      }
 
       await addTimelineEvent(
         tenantId,
