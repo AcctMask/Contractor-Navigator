@@ -1,0 +1,38 @@
+name: Navigator OIM signed handoff security
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/routes/operationalIntelligenceHandoff.ts'
+      - 'backend/tests/operationalIntelligenceHandoff.smoke.ts'
+      - 'dashboard/src/lib/operationalIntelligence.ts'
+      - 'dashboard/src/App.tsx'
+      - 'dashboard/src/pages/Users.tsx'
+      - '.github/workflows/navigator-oim-signed-handoff.yml'
+  push:
+    branches:
+      - feature/oim-authorized-navigator-handoff-20261125
+
+permissions:
+  contents: read
+
+jobs:
+  security-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Verify isolated Navigator service handoff
+        working-directory: backend
+        run: |
+          npm ci --ignore-scripts
+          DATABASE_URL="postgresql://test:test@127.0.0.1:1/test" npx tsx tests/operationalIntelligenceHandoff.smoke.ts
+      - name: Build Navigator frontend
+        working-directory: dashboard
+        run: |
+          npm ci --ignore-scripts
+          npm run build
