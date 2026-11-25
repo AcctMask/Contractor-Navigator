@@ -133,6 +133,11 @@ export async function registerOperationalIntelligenceHandoffRoutes(app: FastifyI
         (user.role === "platform_owner" && actor.role !== "platform_owner")) {
       return reply.code(403).send({ ok: false })
     }
+    // Only the corporate owner may self-authorize; tenant administrators
+    // must receive their OIM grant from another authorized manager.
+    if (Number(actor.id) === Number(user.id) && String(actor.role) !== "platform_owner") {
+      return reply.code(403).send({ ok: false, error: "Self-authorization is not permitted" })
+    }
     if (!user.is_active || !ADMIN_ROLES.has(String(user.role))) {
       return reply.code(403).send({ ok: false, error: "Only active administrators may access OIM" })
     }
