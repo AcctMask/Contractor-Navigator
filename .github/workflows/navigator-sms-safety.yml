@@ -1,0 +1,46 @@
+name: Navigator SMS Safety
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/services/followupEngine.ts'
+      - 'backend/src/services/followupScheduler.ts'
+      - 'backend/src/services/smsDeliveryPolicy.ts'
+      - 'backend/src/services/smsDeliveryStats.ts'
+      - 'backend/src/routes/smsOperationalMetrics.ts'
+      - 'backend/src/routes/opsIntelBridge.ts'
+      - 'backend/tests/smsSafety.smoke.ts'
+      - 'backend/tests/oimSmsMetrics.smoke.ts'
+      - 'backend/scripts/followupScheduler.owner.sha256'
+      - '.github/workflows/navigator-sms-safety.yml'
+  workflow_dispatch:
+
+jobs:
+  sms-safety:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify TypeScript
+        run: npx tsc --noEmit
+      - name: Candidate selection regression
+        run: npm run verify:followup-candidates
+      - name: Owner-protected follow-up integrity and regression
+        run: npm run verify:owner-protected-followup
+      - name: Twilio and scheduler safety smoke
+        run: npx tsx tests/smsSafety.smoke.ts
+      - name: OIM service SMS contract smoke
+        env:
+          DATABASE_URL: postgresql://test:test@127.0.0.1:1/test
+        run: npx tsx tests/oimSmsMetrics.smoke.ts
