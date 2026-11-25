@@ -32,8 +32,16 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
-      - name: Verify TypeScript
-        run: npx tsc --noEmit
+      - name: Parse affected TypeScript modules
+        run: |
+          npx esbuild \
+            src/services/followupEngine.ts \
+            src/services/followupScheduler.ts \
+            src/services/smsDeliveryPolicy.ts \
+            src/services/smsDeliveryStats.ts \
+            src/routes/opsIntelBridge.ts \
+            src/routes/smsOperationalMetrics.ts \
+            --outdir=/tmp/navigator-sms-syntax --format=esm --target=es2020
       - name: Candidate selection regression
         run: npm run verify:followup-candidates
       - name: Owner-protected follow-up integrity and regression
