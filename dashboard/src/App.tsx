@@ -41,6 +41,7 @@ import { useCompanyDna } from "./context/CompanyDnaContext"
 import SignDocument from "./pages/SignDocument"
 import FieldPortalPage from "./pages/FieldPortal"
 import { openFinancialOperations } from "./lib/financialOperations"
+import { getOperationalIntelligenceAccess, openOperationalIntelligence } from "./lib/operationalIntelligence"
 import WorkforceAcceptInvite from "./pages/WorkforceAcceptInvite"
 import CrewPortal from "./pages/CrewPortal"
 
@@ -71,16 +72,22 @@ function HeaderBar() {
 
   const [financialOperationsError, setFinancialOperationsError] =
     useState("")
+  const [operationalIntelligenceAuthorized, setOperationalIntelligenceAuthorized] = useState(false)
+  const [operationalIntelligenceError, setOperationalIntelligenceError] = useState("")
 
   const API_BASE =
     import.meta.env.VITE_API_BASE
 
   useEffect(() => {
     if (!authed) {
+      setOperationalIntelligenceAuthorized(false)
       setCurrentUser(null)
       setPlatformTenants([])
       return
     }
+
+    void getOperationalIntelligenceAccess().then(setOperationalIntelligenceAuthorized)
+      .catch(() => setOperationalIntelligenceAuthorized(false))
 
     const token = getToken()
 
@@ -336,6 +343,28 @@ function HeaderBar() {
                     >
                       {headerPreferredLanguage === "es" ? "Operaciones financieras" : "Financial Operations"}
                     </a>
+                  ) : null}
+                  {item.route === "/" && operationalIntelligenceAuthorized ? (
+                    <a
+                      href="#"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        setOperationalIntelligenceError("")
+                        void openOperationalIntelligence(tenantSlug).catch((error) => {
+                          setOperationalIntelligenceError(
+                            error?.message || "Operational Intelligence could not be opened"
+                          )
+                        })
+                      }}
+                      style={mutedLinkStyle}
+                    >
+                      {headerPreferredLanguage === "es" ? "Inteligencia operativa" : "Operational Intelligence"}
+                    </a>
+                  ) : null}
+                  {item.route === "/" && operationalIntelligenceError ? (
+                    <span style={{ color: "#fecaca", fontSize: "12px", fontWeight: 700 }}>
+                      {operationalIntelligenceError}
+                    </span>
                   ) : null}
                   {item.route === "/" &&
                   financialOperationsError ? (
