@@ -13,12 +13,13 @@ function percent(numerator: number, denominator: number): number {
   return Number(((numerator / denominator) * 100).toFixed(1));
 }
 
-export async function registerBusinessPerformanceV2Routes(
-  app: FastifyInstance
+// Shared source-of-truth reporting handler. Service callers receive an aggregate
+// projection only, never customer/job-level supporting records.
+export async function businessPerformanceV2Handler(
+  req: any,
+  reply: any,
+  serviceTenantSlug?: string
 ) {
-  app.get(
-    "/reporting/business-performance-v2.json",
-    async (req, reply) => {
       try {
         const query = req.query as {
           tenant?: string;
@@ -26,7 +27,7 @@ export async function registerBusinessPerformanceV2Routes(
         };
 
         const tenantSlug =
-          String(query.tenant || "g2g-roofing").trim();
+          serviceTenantSlug ?? String(query.tenant || "g2g-roofing").trim();
 
         const requestedRange =
           String(query.range || "30d").trim();
@@ -1000,6 +1001,40 @@ export async function registerBusinessPerformanceV2Routes(
         const paid =
           countOutcome("paid");
 
+        // The calculations below remain the authoritative Navigator contract.
+        // OIM receives only the already-computed, tenant-scoped funnel counters.
+        if (serviceTenantSlug !== undefined) {
+          return reply.send({
+            ok: true,
+            source: "contractor-navigator-business-performance-v2",
+            tenant: { id: numberValue(tenant.id), slug: tenant.slug, name: tenant.name },
+            range,
+            generated_at: new Date().toISOString(),
+            population: {
+              raw_customer_records: jobs.length,
+              reportable_opportunities: reportableJobs.length,
+              activity_only_records: activityOnlyJobs.length,
+            },
+            funnel: {
+              opportunities,
+              estimates_sent: estimates,
+              estimate_rate: percent(estimates, opportunities),
+              contracts_sent: contracts,
+              contract_rate: percent(contracts, opportunities),
+              signed,
+              signed_rate: percent(signed, opportunities),
+              production, invoiced, paid,
+              tarp_roof_conversions: Number(tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0),
+              tarp_roof_qualifying_tarps: Number(tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0),
+              tarp_roof_conversion_rate: Number(tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0) > 0
+                ? percent(
+                    Number(tarpRoofConversionResult.rows[0]?.tarp_roof_conversions || 0),
+                    Number(tarpRoofConversionResult.rows[0]?.qualifying_tarp_jobs || 0)
+                  ) : null,
+            },
+          });
+        }
+
         return reply.send({
           ok: true,
 
@@ -1223,6 +1258,10 @@ export async function registerBusinessPerformanceV2Routes(
             "business_performance_v2_failed"
         });
       }
-    }
+}
+
+export async function registerBusinessPerformanceV2Routes(app: FastifyInstance) {
+  app.get("/reporting/business-performance-v2.json", (req, reply) =>
+    businessPerformanceV2Handler(req, reply)
   );
 }
