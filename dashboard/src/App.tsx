@@ -164,6 +164,23 @@ function HeaderBar() {
       })
   }, [authed])
 
+  // The header stays mounted while Users grants/revokes OIM access.
+  // Refresh the presentation immediately; the backend remains authoritative.
+  useEffect(() => {
+    if (!authed) return
+    let active = true
+    const refresh = () => {
+      void getOperationalIntelligenceAccess()
+        .then(authorized => { if (active) setOperationalIntelligenceAuthorized(authorized) })
+        .catch(() => { if (active) setOperationalIntelligenceAuthorized(false) })
+    }
+    window.addEventListener("navigator-oim-access-updated", refresh)
+    return () => {
+      active = false
+      window.removeEventListener("navigator-oim-access-updated", refresh)
+    }
+  }, [authed])
+
   function handleTenantChange(
     nextTenantSlug: string,
   ) {
