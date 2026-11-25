@@ -3,6 +3,7 @@ import { timingSafeEqual } from "crypto"
 import { pool } from "../db/db"
 import { businessPerformanceV2Handler } from "./businessPerformanceV2"
 import { crmMetricsHandler } from "./reporting"
+import { smsOperationalMetricsHandler } from "./smsOperationalMetrics"
 
 function safeEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left)
@@ -61,6 +62,20 @@ async function getTenantBySlug(
 export async function registerOpsIntelBridgeRoutes(
   app: FastifyInstance
 ) {
+  app.get(
+    "/integrations/ops-intel/:tenantSlug/sms-metrics.json",
+    async (request: any, reply) => {
+      if (!requireOpsIntelService(request)) {
+        return reply.code(401).send({ ok: false, error: "Authentication required" })
+      }
+      const tenantSlug = String(request.params?.tenantSlug || "").trim()
+      if (!tenantSlug) {
+        return reply.code(400).send({ ok: false, error: "Explicit tenant required" })
+      }
+      return smsOperationalMetricsHandler(request, reply, tenantSlug)
+    }
+  )
+
   app.get(
     "/integrations/ops-intel/:tenantSlug/business-performance-v2.json",
     async (request: any, reply) => {
